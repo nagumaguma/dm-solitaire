@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#111827">
+<title>DM 一人回し</title>
+<style>
+:root {
+  --bg: #111827; --surface: #1f2937; --surface2: #374151;
+  --border: #4b5563; --text: #f9fafb; --text-dim: #9ca3af;
+  --accent: #f97316; --red: #ef4444;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 16px; }
+
+/* ── Screen system ── */
+.screen { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); transform: translateX(100%); transition: transform .25s ease; }
+.screen.active { transform: translateX(0); }
+#screen-list { transform: translateX(0); }
+
+/* ── Header ── */
+.sp-hd {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.sp-hd-title { font-size: 1rem; font-weight: 700; flex: 1; }
+.sp-hd input {
+  flex: 1; background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text); padding: 7px 10px; border-radius: 8px; font-size: 0.95rem; outline: none;
+}
+.sp-hd input:focus { border-color: var(--accent); }
+
+/* ── Buttons ── */
+.btn { padding: 7px 13px; border: none; border-radius: 8px; font-size: 0.82rem; font-weight: 600; cursor: pointer; }
+.btn-accent { background: var(--accent); color: #fff; }
+.btn-gray { background: var(--surface2); color: var(--text); }
+.btn-red { background: none; color: var(--red); border: 1px solid var(--red); }
+.btn-icon { background: none; border: none; color: var(--text-dim); font-size: 1.3rem; padding: 4px 8px; cursor: pointer; line-height: 1; }
+
+/* ── Deck List ── */
+.list-scroll { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+.deck-item { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; cursor: pointer; }
+.deck-item:active { background: var(--surface2); }
+.deck-item-name { flex: 1; font-size: 0.95rem; font-weight: 600; }
+.deck-item-count { font-size: 0.8rem; color: var(--text-dim); }
+.deck-item-arrow { color: var(--text-dim); font-size: 1.1rem; }
+.empty-msg { text-align: center; color: var(--text-dim); padding: 48px 20px; font-size: 0.9rem; line-height: 1.8; }
+
+/* ── Deck Edit ── */
+.tab-bar { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 12px; flex-shrink: 0; }
+.tab { padding: 10px 14px; font-size: 0.88rem; font-weight: 600; color: var(--text-dim); border-bottom: 2px solid transparent; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ── Card Grid ── */
+.card-grid-wrap { flex: 1; overflow-y: auto; padding: 8px; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); gap: 4px; }
+.cg-card { position: relative; border-radius: 6px; overflow: hidden; background: var(--surface2); cursor: pointer; aspect-ratio: 63/88; }
+.cg-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cg-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.5rem; color: var(--text-dim); text-align: center; padding: 4px; line-height: 1.3; }
+.cg-count { position: absolute; bottom: 2px; right: 2px; background: rgba(0,0,0,.78); color: #fff; font-size: 0.62rem; font-weight: 700; padding: 1px 4px; border-radius: 4px; }
+.cg-cost { position: absolute; top: 2px; left: 2px; background: rgba(0,0,0,.72); color: #fff; font-size: 0.6rem; font-weight: 700; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+
+/* ── Search Panel ── */
+.search-panel { flex-shrink: 0; background: var(--surface); border-top: 1px solid var(--border); display: flex; flex-direction: column; max-height: 52vh; }
+.sr-wrap { flex: 1; overflow-y: auto; min-height: 0; }
+.sr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 4px; padding: 8px; }
+.search-bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+.search-bar input { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 20px; font-size: 1rem; outline: none; }
+.search-bar input:focus { border-color: var(--accent); }
+.sr-card { position: relative; border-radius: 6px; overflow: hidden; background: var(--surface2); cursor: pointer; aspect-ratio: 63/88; border: 2px solid transparent; }
+.sr-card:active { border-color: var(--accent); opacity: .85; }
+.sr-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sr-card-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.48rem; color: var(--text-dim); text-align: center; padding: 4px; line-height: 1.3; }
+.sr-badge { position: absolute; bottom: 2px; right: 2px; background: var(--accent); color: #fff; font-size: 0.6rem; font-weight: 700; padding: 1px 4px; border-radius: 4px; }
+.sr-msg { padding: 14px; text-align: center; color: var(--text-dim); font-size: 0.85rem; }
+.sr-more { padding: 10px; text-align: center; color: var(--accent); font-size: 0.82rem; cursor: pointer; }
+
+/* ── Bottom Sheet ── */
+.bs-ov { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 200; display: flex; align-items: flex-end; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.bs-ov.show { opacity: 1; pointer-events: all; }
+.bs { width: 100%; background: var(--surface); border-radius: 16px 16px 0 0; padding: 20px 16px; padding-bottom: max(20px, env(safe-area-inset-bottom)); transform: translateY(100%); transition: transform .25s ease; }
+.bs-ov.show .bs { transform: translateY(0); }
+.bs-info { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }
+.bs-thumb { width: 56px; height: 78px; border-radius: 6px; overflow: hidden; background: var(--surface2); flex-shrink: 0; }
+.bs-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.bs-name { font-size: 0.92rem; font-weight: 700; }
+.bs-sub { font-size: 0.75rem; color: var(--text-dim); margin-top: 3px; }
+.bs-acts { display: flex; gap: 8px; align-items: center; }
+.count-ctrl { display: flex; align-items: center; background: var(--surface2); border-radius: 10px; overflow: hidden; }
+.count-ctrl button { background: none; border: none; color: var(--text); font-size: 1.4rem; padding: 10px 18px; cursor: pointer; line-height: 1; }
+.count-ctrl span { font-size: 1.1rem; font-weight: 700; min-width: 36px; text-align: center; }
+
+/* ── Toast ── */
+.sp-toast { position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.85); color: #fff; padding: 8px 18px; border-radius: 20px; font-size: 0.85rem; z-index: 500; opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
+.sp-toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- ── Screen: Deck List ── -->
+<div class="screen active" id="screen-list">
+  <div class="sp-hd">
+    <span class="sp-hd-title">DM 一人回し</span>
+    <button class="btn btn-accent" onclick="newDeck()">＋ 新規</button>
+  </div>
+  <div class="list-scroll" id="list-scroll"></div>
+</div>
+
+<!-- ── Screen: Deck Edit ── -->
+<div class="screen" id="screen-edit">
+  <div class="sp-hd">
+    <button class="btn-icon" onclick="goBack()">‹</button>
+    <input type="text" id="edit-name" placeholder="デッキ名">
+    <button class="btn btn-red" onclick="deleteDeckSp()">削除</button>
+    <button class="btn btn-accent" onclick="saveDeckSp()">保存</button>
+  </div>
+  <div class="tab-bar">
+    <div class="tab active">メイン <span id="edit-count">0</span></div>
+  </div>
+  <div class="card-grid-wrap">
+    <div class="card-grid" id="card-grid"></div>
+  </div>
+  <div class="search-panel">
+    <div class="sr-wrap" id="sr-wrap" style="display:none">
+      <div class="sr-grid" id="sr-grid"></div>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="sr-input" placeholder="カード名で検索" oninput="srInput(this.value)">
+      <button class="btn-icon" id="sr-clear" style="display:none" onclick="srClear()">✕</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Bottom Sheet ── -->
+<div class="bs-ov" id="bs-ov" onclick="bsOvClick(event)">
+  <div class="bs">
+    <div class="bs-info">
+      <div class="bs-thumb"><img id="bs-img" src="" alt=""></div>
+      <div>
+        <div class="bs-name" id="bs-name"></div>
+        <div class="bs-sub" id="bs-sub"></div>
+      </div>
+    </div>
+    <div class="bs-acts">
+      <div class="count-ctrl">
+        <button onclick="bsDecr()">－</button>
+        <span id="bs-count">0</span>
+        <button onclick="bsIncr()">＋</button>
+      </div>
+      <button class="btn btn-red" style="flex:1" onclick="bsRemove()">デッキから削除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ── -->
+<div class="sp-toast" id="sp-toast"></div>
+
+<script>
+'use strict';
+const PROXY = 'https://dm-solitaire-production.up.railway.app';
+
+// ── State ──────────────────────────────────────────────────────
+let savedDecks = {};
+let deckCards  = [];   // [{card:{...}, count:N}]
+let editDeckName = null;  // null = new deck
+let _bsCard = null;
+
+let _sr = { q:'', timer:null, busy:false, proxyPage:1, all:[], done:false };
+let _detailCache = {};
+
+// ── Storage ────────────────────────────────────────────────────
+function loadStorage() {
+  try { savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}'); } catch { savedDecks = {}; }
+}
+function writeStorage() {
+  localStorage.setItem('dm_decks', JSON.stringify(savedDecks));
+}
+
+// ── Toast ──────────────────────────────────────────────────────
+let _tt;
+function toast(msg) {
+  const el = document.getElementById('sp-toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_tt);
+  _tt = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// ── Screens ────────────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// ── Deck List ──────────────────────────────────────────────────
+function renderDeckList() {
+  loadStorage();
+  const wrap = document.getElementById('list-scroll');
+  const keys = Object.keys(savedDecks);
+  wrap.innerHTML = '';
+  if (!keys.length) {
+    wrap.innerHTML = '<div class="empty-msg">デッキがありません<br>「＋ 新規」で作ってください</div>';
+    return;
+  }
+  keys.forEach(name => {
+    const total = (savedDecks[name] || []).reduce((s, x) => s + (x.count || 0), 0);
+    const el = document.createElement('div');
+    el.className = 'deck-item';
+    el.innerHTML = `<div class="deck-item-name">${esc(name)}</div><div class="deck-item-count">${total}枚</div><div class="deck-item-arrow">›</div>`;
+    el.onclick = () => openDeck(name);
+    wrap.appendChild(el);
+  });
+}
+
+function newDeck() {
+  editDeckName = null;
+  deckCards = [];
+  document.getElementById('edit-name').value = '';
+  renderCardGrid();
+  srReset();
+  showScreen('screen-edit');
+}
+
+function openDeck(name) {
+  editDeckName = name;
+  deckCards = JSON.parse(JSON.stringify(savedDecks[name] || []));
+  document.getElementById('edit-name').value = name;
+  renderCardGrid();
+  srReset();
+  showScreen('screen-edit');
+}
+
+function goBack() {
+  showScreen('screen-list');
+  renderDeckList();
+}
+
+// ── Deck Edit ─────────────────────────────────────────────────
+function deckTotal() { return deckCards.reduce((s, x) => s + x.count, 0); }
+
+function renderCardGrid() {
+  document.getElementById('edit-count').textContent = deckTotal();
+  const grid = document.getElementById('card-grid');
+  const sorted = [...deckCards].sort((a, b) => (a.card.cost || 0) - (b.card.cost || 0));
+  grid.innerHTML = '';
+  sorted.forEach(({ card, count }) => {
+    const el = document.createElement('div');
+    el.className = 'cg-card';
+    if (card.img) {
+      el.innerHTML = `<img src="${esc(card.img)}" alt="${esc(card.name)}" loading="lazy">`;
+    } else {
+      el.innerHTML = `<div class="cg-ph">${esc(card.name)}</div>`;
+    }
+    el.innerHTML += `<div class="cg-cost">${card.cost ?? '?'}</div><div class="cg-count">×${count}</div>`;
+    el.onclick = () => openBs(card);
+    grid.appendChild(el);
+  });
+}
+
+function saveDeckSp() {
+  const n = document.getElementById('edit-name').value.trim();
+  if (!n) { toast('デッキ名を入力してください'); return; }
+  if (editDeckName && editDeckName !== n) delete savedDecks[editDeckName];
+  savedDecks[n] = JSON.parse(JSON.stringify(deckCards));
+  editDeckName = n;
+  writeStorage();
+  toast(`「${n}」を保存しました`);
+}
+
+function deleteDeckSp() {
+  const n = editDeckName;
+  if (!n || !savedDecks[n]) { toast('保存済みのデッキがありません'); return; }
+  if (!confirm(`「${n}」を削除しますか？`)) return;
+  delete savedDecks[n];
+  writeStorage();
+  goBack();
+  toast(`「${n}」を削除しました`);
+}
+
+// ── Bottom Sheet ──────────────────────────────────────────────
+function openBs(card) {
+  _bsCard = card;
+  const entry = deckCards.find(x => x.card.name === card.name);
+  document.getElementById('bs-name').textContent = card.name;
+  document.getElementById('bs-sub').textContent = `コスト ${card.cost ?? '?'}  ${civLabel(card.civ)}`;
+  document.getElementById('bs-count').textContent = entry ? entry.count : 0;
+  const img = document.getElementById('bs-img');
+  if (card.img) { img.src = card.img; img.style.display = ''; }
+  else { img.style.display = 'none'; }
+  document.getElementById('bs-ov').classList.add('show');
+}
+
+function bsOvClick(e) {
+  if (e.target === document.getElementById('bs-ov')) closeBs();
+}
+function closeBs() { document.getElementById('bs-ov').classList.remove('show'); _bsCard = null; }
+
+function bsIncr() {
+  if (!_bsCard) return;
+  const idx = deckCards.findIndex(x => x.card.name === _bsCard.name);
+  if (idx < 0) deckCards.push({ card: _bsCard, count: 1 });
+  else deckCards[idx].count++;
+  document.getElementById('bs-count').textContent = deckCards.find(x => x.card.name === _bsCard.name).count;
+  renderCardGrid();
+}
+
+function bsDecr() {
+  if (!_bsCard) return;
+  const idx = deckCards.findIndex(x => x.card.name === _bsCard.name);
+  if (idx < 0) return;
+  deckCards[idx].count--;
+  if (deckCards[idx].count <= 0) deckCards.splice(idx, 1);
+  const entry = deckCards.find(x => x.card.name === _bsCard.name);
+  document.getElementById('bs-count').textContent = entry ? entry.count : 0;
+  renderCardGrid();
+}
+
+function bsRemove() {
+  if (!_bsCard) return;
+  deckCards = deckCards.filter(x => x.card.name !== _bsCard.name);
+  closeBs();
+  renderCardGrid();
+}
+
+function civLabel(c) {
+  return { fire:'火文明', water:'水文明', light:'光文明', dark:'闇文明', nature:'自然文明', multi:'多色' }[c] || '';
+}
+
+// ── Search ────────────────────────────────────────────────────
+function srInput(val) {
+  document.getElementById('sr-clear').style.display = val ? '' : 'none';
+  clearTimeout(_sr.timer);
+  if (!val.trim()) { srReset(); return; }
+  _sr.timer = setTimeout(() => srStart(val.trim()), 400);
+}
+
+function srClear() {
+  document.getElementById('sr-input').value = '';
+  document.getElementById('sr-clear').style.display = 'none';
+  srReset();
+}
+
+function srReset() {
+  _sr = { q:'', timer:null, busy:false, proxyPage:1, all:[], done:false };
+  document.getElementById('sr-wrap').style.display = 'none';
+  document.getElementById('sr-grid').innerHTML = '';
+}
+
+function srStart(q) {
+  _sr = { q, timer:null, busy:false, proxyPage:1, all:[], done:false };
+  document.getElementById('sr-wrap').style.display = '';
+  document.getElementById('sr-grid').innerHTML = '<div class="sr-msg">検索中...</div>';
+  srFetch();
+}
+
+async function srFetch() {
+  if (_sr.busy || _sr.done) return;
+  _sr.busy = true;
+  const q = _sr.q;
+  try {
+    const r = await fetch(`${PROXY}/search?q=${encodeURIComponent(q)}&page=${_sr.proxyPage}`, { signal: AbortSignal.timeout(15000) });
+    const d = await r.json();
+    if (_sr.q !== q) return;
+    if (d.cards && d.cards.length > 0) { _sr.all.push(...d.cards); _sr.proxyPage++; }
+    else { _sr.done = true; }
+  } catch {
+    if (_sr.q !== q) return;
+    document.getElementById('sr-grid').innerHTML = '<div class="sr-msg" style="color:#f87171">エラー: プロキシを確認してください</div>';
+    _sr.busy = false; return;
+  }
+  _sr.busy = false;
+  srRender();
+}
+
+function srRender() {
+  const grid = document.getElementById('sr-grid');
+  if (!_sr.all.length) { grid.innerHTML = '<div class="sr-msg">見つかりませんでした</div>'; return; }
+  grid.innerHTML = '';
+  _sr.all.forEach(c => {
+    const inDeck = deckCards.find(x => x.card.name === c.name);
+    const el = document.createElement('div');
+    el.className = 'sr-card';
+    el.innerHTML = c.thumb
+      ? `<img src="${esc(c.thumb)}" alt="${esc(c.name)}" loading="lazy">`
+      : `<div class="sr-card-ph">${esc(c.name)}</div>`;
+    if (inDeck) el.innerHTML += `<div class="sr-badge">×${inDeck.count}</div>`;
+    el.onclick = () => srAdd(c);
+    grid.appendChild(el);
+  });
+  if (!_sr.done) {
+    const more = document.createElement('div');
+    more.className = 'sr-more';
+    more.textContent = 'もっと見る';
+    more.onclick = srFetch;
+    grid.appendChild(more);
+  }
+}
+
+function srAdd(c) {
+  // Already in deck → increment directly
+  const existing = deckCards.find(x => x.card.name === c.name);
+  if (existing) {
+    existing.count++;
+    renderCardGrid();
+    srRender();
+    toast(`「${c.name}」×${existing.count}`);
+    return;
+  }
+  // Fetch full detail
+  const cached = _detailCache[c.id];
+  if (cached) { _srAddCard(cached); return; }
+  fetch(`${PROXY}/detail?id=${encodeURIComponent(c.id)}`, { signal: AbortSignal.timeout(20000) })
+    .then(r => r.json())
+    .then(d => { _detailCache[c.id] = d; _srAddCard(d); })
+    .catch(() => toast('カード取得に失敗しました'));
+}
+
+function _srAddCard(detail) {
+  const card = {
+    id: detail.id, name: detail.name, civ: detail.civ, cost: detail.cost,
+    type: detail.type, power: detail.power, img: detail.img,
+    race: detail.race, text: detail.text, nameEn: detail.nameEn
+  };
+  const idx = deckCards.findIndex(x => x.card.name === card.name);
+  if (idx < 0) deckCards.push({ card, count: 1 });
+  else deckCards[idx].count++;
+  renderCardGrid();
+  srRender();
+  toast(`「${card.name}」を追加`);
+}
+
+// ── Util ──────────────────────────────────────────────────────
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Init ──────────────────────────────────────────────────────
+loadStorage();
+renderDeckList();
+</script>
+</body>
+</html>
