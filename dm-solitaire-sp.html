@@ -223,11 +223,11 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
       </div>
     </div>
     <div class="zone" id="zone-hand">
-      <div class="zone-lbl">手札</div>
+      <div class="zone-lbl">手札 <span id="hand-count-lbl"></span></div>
       <div class="zone-scroll" id="hand-scroll"></div>
     </div>
     <div class="zone" id="zone-mana">
-      <div class="zone-lbl">マナゾーン</div>
+      <div class="zone-lbl">マナゾーン <span id="mana-count-lbl"></span></div>
       <div class="zone-scroll" id="mana-scroll"></div>
     </div>
   </div>
@@ -476,7 +476,8 @@ function _srAddCard(detail) {
 
 // ── Game State ────────────────────────────────────────────────
 let G = null;
-let _prevG = null;
+let _undoStack = [];
+const UNDO_MAX = 10;
 let _undoLocked = false;
 
 function startGame(deckName) {
@@ -494,7 +495,7 @@ function startGame(deckName) {
   G = { deck: expanded, hand: [], battleZone: [], manaZone: [], graveyard: [], shields: [], turn: 1, uid };
   for (let i = 0; i < 5 && G.deck.length; i++) G.shields.push(G.deck.pop());
   for (let i = 0; i < 5 && G.deck.length; i++) G.hand.push(G.deck.pop());
-  _prevG = null; _undoLocked = false;
+  _undoStack = []; _undoLocked = false;
   showScreen('screen-game');
   render();
 }
@@ -509,12 +510,14 @@ function shuffle(arr) {
 // ── Undo ──────────────────────────────────────────────────────
 function saveUndo() {
   if (_undoLocked) return;
-  _prevG = JSON.parse(JSON.stringify(G)); _undoLocked = true;
+  _undoStack.push(JSON.parse(JSON.stringify(G)));
+  if (_undoStack.length > UNDO_MAX) _undoStack.shift();
+  _undoLocked = true;
 }
 function undoGame() {
-  if (!_prevG) { toast('元に戻す操作がありません'); return; }
-  G = _prevG; _prevG = null; _undoLocked = false;
-  render(); toast('元に戻しました');
+  if (!_undoStack.length) { toast('元に戻す操作がありません'); return; }
+  G = _undoStack.pop(); _undoLocked = false;
+  render(); toast(`元に戻しました (残り${_undoStack.length}手)`);
 }
 
 // ── Render ────────────────────────────────────────────────────
@@ -547,11 +550,13 @@ function renderShields() {
 }
 function renderHand() {
   const el = document.getElementById('hand-scroll'); el.innerHTML = '';
+  document.getElementById('hand-count-lbl').textContent = G.hand.length ? `(${G.hand.length})` : '';
   if (!G.hand.length) { el.innerHTML = '<div class="zone-ph">空</div>'; return; }
   G.hand.forEach(c => el.appendChild(makeCardEl(c, 'hand')));
 }
 function renderMana() {
   const el = document.getElementById('mana-scroll'); el.innerHTML = '';
+  document.getElementById('mana-count-lbl').textContent = G.manaZone.length ? `(${G.manaZone.length})` : '';
   if (!G.manaZone.length) { el.innerHTML = '<div class="zone-ph">空</div>'; return; }
   G.manaZone.forEach(c => el.appendChild(makeCardEl(c, 'manaZone')));
 }
@@ -711,7 +716,31 @@ function showDeckCtx() {
 
 function showGraveCtx() {
   if (!G.graveyard.length) { toast('墓地は空です'); return; }
-  showCtx(G.graveyard[G.graveyard.length - 1], 'graveyard');
+  const list = [...G.graveyard].reverse();
+  let html = `
+    <div class="ctx-info">
+      <div class="ctx-thumb" style="background:var(--surface2);display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:0.7rem;">墓地</div>
+      <div>
+        <div class="ctx-title">墓地 (${list.length}枚)</div>
+        <div class="ctx-sub">カードを選んで移動</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow-y:auto;">`;
+  list.forEach(card => {
+    const thumb = card.img
+      ? `<img src="${esc(card.img)}" alt="" style="width:36px;height:50px;border-radius:4px;object-fit:cover;flex-shrink:0;">`
+      : `<div style="width:36px;height:50px;border-radius:4px;background:${CIV_COLOR[card.civ]||'#374151'}44;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:0.4rem;text-align:center;padding:2px;color:var(--text-dim);">${esc(card.name)}</div>`;
+    html += `<div style="display:flex;align-items:center;gap:10px;padding:6px 4px;border-radius:8px;background:var(--surface2);cursor:pointer;" onclick="showCtx(${JSON.stringify(card).replace(/"/g,'&quot;')},'graveyard')">
+      ${thumb}
+      <div>
+        <div style="font-size:0.82rem;font-weight:600;">${esc(card.name)}</div>
+        <div style="font-size:0.7rem;color:var(--text-dim);">コスト ${card.cost ?? '?'}　${civLabel(card.civ)}</div>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  document.getElementById('ctx-sheet').innerHTML = html;
+  document.getElementById('ctx-ov').classList.add('show');
 }
 
 function closeCtx() {
@@ -740,7 +769,7 @@ function resetGameSp() {
   G.deck = all; G.hand = []; G.battleZone = []; G.manaZone = []; G.graveyard = []; G.shields = []; G.turn = 1;
   for (let i = 0; i < 5 && G.deck.length; i++) G.shields.push(G.deck.pop());
   for (let i = 0; i < 5 && G.deck.length; i++) G.hand.push(G.deck.pop());
-  _prevG = null; _undoLocked = false;
+  _undoStack = []; _undoLocked = false;
   render(); toast('リセットしました');
 }
 
