@@ -20,10 +20,10 @@
 ブラウザでアクセスするだけ：
 
 **PC版:**  
-https://your-domain.com/dm-solitaire-web.html
+https://example.com/dm-solitaire-web.html
 
 **スマホ版:**  
-https://your-domain.com/dm-solitaire-sp.html
+https://example.com/dm-solitaire-sp.html
 
 推奨: Chrome / Edge / Safari 最新版
 
@@ -409,7 +409,7 @@ CREATE TABLE decks (
 PORT=8765
 
 # ベースURL（デプロイ時）
-BASE_URL=https://your-domain.com
+BASE_URL=https://example.com
 ```
 
 ---
