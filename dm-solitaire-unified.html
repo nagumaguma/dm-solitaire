@@ -595,19 +595,73 @@ header h1 {
 <body>
 
 <!-- ─── Header ─── -->
-<header>
+<header id="app-header" style="display: none;">
   <h1>DM Solitaire</h1>
   <div style="flex: 1;"></div>
   <button id="tab-list" class="tab active" onclick="switchScreen('screen-list')">一人回し</button>
   <button id="tab-vs" class="tab" onclick="switchScreen('screen-vs')">VS</button>
   <button id="tab-online" class="tab" onclick="switchScreen('screen-online')">🌐 対戦</button>
+  <button class="tab" onclick="logout()" style="margin-left: 8px;">ログアウト</button>
 </header>
 
+<!-- ─── Screen: Auth ─── -->
+<div class="screen active" id="screen-auth">
+  <div style="display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 20px;">
+    <div style="background: var(--surface); border-radius: 16px; padding: 40px; max-width: 400px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+      <h1 style="text-align: center; color: var(--accent); margin-bottom: 8px; font-size: 2rem;">DM Solitaire</h1>
+      <p style="text-align: center; color: var(--text-dim); margin-bottom: 32px;">デュエルマスターズ一人回しツール</p>
+      
+      <!-- 初期表示: メニュー -->
+      <div id="auth-menu">
+        <button class="btn btn-green" style="width: 100%; padding: 12px; margin-bottom: 12px; font-size: 1rem;" onclick="showAuthForm('login')">🔐 ログイン</button>
+        <button class="btn btn-orange" style="width: 100%; padding: 12px; margin-bottom: 12px; font-size: 1rem;" onclick="showAuthForm('register')">✏️ 新規登録</button>
+        <button class="btn btn-gray" style="width: 100%; padding: 12px; font-size: 1rem;" onclick="playAsGuest()">👤 ゲストプレイ</button>
+      </div>
+      
+      <!-- ログイン画面 -->
+      <div id="auth-login-form" style="display: none;">
+        <div class="ol-field" style="margin-bottom: 16px;">
+          <label>ユーザー名</label>
+          <input id="login-username" type="text" maxlength="20" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px;">
+        </div>
+        <div class="ol-field" style="margin-bottom: 24px;">
+          <label>暗証番号（4桁）</label>
+          <input id="login-pin" type="text" placeholder="1234" maxlength="4" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px;">
+        </div>
+        <button class="btn btn-green" style="width: 100%; padding: 12px; margin-bottom: 12px;" onclick="loginAccount()">ログイン</button>
+        <button class="btn btn-gray" style="width: 100%; padding: 12px;" onclick="showAuthForm('menu')">← 戻る</button>
+      </div>
+      
+      <!-- 新規登録画面 -->
+      <div id="auth-register-form" style="display: none;">
+        <div class="ol-field" style="margin-bottom: 16px;">
+          <label>ユーザー名</label>
+          <input id="register-username" type="text" maxlength="20" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px;">
+        </div>
+        <div class="ol-field" style="margin-bottom: 24px;">
+          <label>暗証番号（4桁の数字）</label>
+          <input id="register-pin" type="text" placeholder="1234" maxlength="4" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px;">
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 16px;">※ 暗証番号はデッキをクラウド保存するときに使用します</p>
+        <button class="btn btn-orange" style="width: 100%; padding: 12px; margin-bottom: 12px;" onclick="registerAccount()">作成</button>
+        <button class="btn btn-gray" style="width: 100%; padding: 12px;" onclick="showAuthForm('menu')">← 戻る</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ─── Screen: Deck List ─── -->
-<div class="screen active" id="screen-list">
-  <div style="padding: 12px; display: flex; gap: 8px; border-bottom: 1px solid var(--border);">
-    <button class="btn btn-green" onclick="newDeck()">＋ 新規</button>
-    <button class="btn btn-gray btn-sm" onclick="showAccountDialog()">🔐 アカウント</button>
+<div class="screen" id="screen-list">
+  <div style="padding: 12px; display: flex; gap: 8px; border-bottom: 1px solid var(--border); justify-content: space-between; align-items: center;">
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-green" onclick="newDeck()">＋ 新規</button>
+    </div>
+    <div style="font-size: 0.9rem; color: var(--text-dim);">
+      <span id="account-info" style="display: none;">
+        👤 <span id="username-display"></span>
+      </span>
+      <span id="guest-info" style="">ゲストプレイ</span>
+    </div>
   </div>
   <div class="list-scroll" id="list-scroll"></div>
 </div>
@@ -824,6 +878,14 @@ function switchScreen(screenId) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   const tabId = 'tab-' + screenId.replace('screen-', '');
   document.getElementById(tabId)?.classList.add('active');
+  
+  // ヘッダーの表示/非表示
+  const header = document.getElementById('app-header');
+  if (screenId === 'screen-auth') {
+    header.style.display = 'none';
+  } else {
+    header.style.display = 'flex';
+  }
 }
 
 // ──── STORAGE ────
@@ -869,50 +931,74 @@ function clearAccount() {
   }
 }
 
-// ──── ACCOUNT ────
-function showAccountDialog() {
-  loadAccount();
-  document.getElementById('account-modal').classList.add('show');
-}
-
-function closeAccountDialog() {
-  document.getElementById('account-modal').classList.remove('show');
-}
-
-function toggleAccountView() {
-  document.getElementById('account-login-view').style.display = 
-    document.getElementById('account-login-view').style.display === 'none' ? 'block' : 'none';
-  document.getElementById('account-register-view').style.display = 
-    document.getElementById('account-register-view').style.display === 'none' ? 'block' : 'none';
-}
-
-async function registerAccount() {
-  const username = document.getElementById('reg-username').value.trim();
-  const pin = document.getElementById('reg-pin').value.trim();
+// ──── SERVER DECKS ────
+async function loadServerDecks() {
+  if (!_account || _loadingServerDecks) return;
   
-  if (!username) { toast('ユーザー名を入力してください'); return; }
-  if (pin.length !== 4 || !/^\d+$/.test(pin)) { toast('暗証番号は4桁の数字です'); return; }
-  
+  _loadingServerDecks = true;
   try {
-    const r = await fetch(`${PROXY}/profile/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, pin, last_deck: '' }),
+    const r = await fetch(`${PROXY}/deck/list?username=${encodeURIComponent(_account.username)}&pin=${encodeURIComponent(_account.pin)}`, {
       signal: createAbortSignal(5000)
     });
     const d = await r.json();
-    if (!r.ok) { toast(`登録失敗: ${d.error}`); return; }
-    saveAccount(username, pin);
-    toast('アカウントを作成しました');
-    closeAccountDialog();
+    if (r.ok && d.decks && Array.isArray(d.decks)) {
+      _serverDeckNames = d.decks;
+      console.log(`[deck] Loaded ${d.decks.length} server decks`);
+    } else {
+      _serverDeckNames = [];
+      console.warn('[deck] Server deck list failed, using local decks only');
+    }
   } catch (e) {
-    toast(`エラー: ${e.message}`);
+    _serverDeckNames = [];
+    console.warn('[deck] Server connection error:', e.message);
+  } finally {
+    _loadingServerDecks = false;
   }
 }
 
+async function fetchServerDeck(deckName) {
+  if (!_account) return null;
+  
+  try {
+    const r = await fetch(`${PROXY}/deck/get?username=${encodeURIComponent(_account.username)}&pin=${encodeURIComponent(_account.pin)}&deck_name=${encodeURIComponent(deckName)}`, {
+      signal: createAbortSignal(10000)
+    });
+    if (!r.ok) {
+      console.warn(`Failed to fetch deck: HTTP ${r.status}`);
+      return null;
+    }
+    const d = await r.json();
+    if (d && d.deck_data) {
+      return d.deck_data;
+    }
+  } catch (e) {
+    console.error('Failed to fetch server deck:', e.message);
+  }
+  return null;
+}
+
+// ──── AUTHENTICATION SCREEN ────
+function showAuthForm(form) {
+  document.getElementById('auth-menu').style.display = form === 'menu' ? 'block' : 'none';
+  document.getElementById('auth-login-form').style.display = form === 'login' ? 'block' : 'none';
+  document.getElementById('auth-register-form').style.display = form === 'register' ? 'block' : 'none';
+}
+
+function playAsGuest() {
+  _account = null;
+  try {
+    sessionStorage.removeItem('dm_account');
+  } catch (e) {
+    console.warn('Failed to clear account:', e);
+  }
+  switchScreen('screen-list');
+  renderDeckList();
+  toast('ゲストでプレイしています');
+}
+
 async function loginAccount() {
-  const username = document.getElementById('acc-username').value.trim();
-  const pin = document.getElementById('acc-pin').value.trim();
+  const username = document.getElementById('login-username').value.trim();
+  const pin = document.getElementById('login-pin').value.trim();
   
   if (!username) { toast('ユーザー名を入力してください'); return; }
   if (pin.length !== 4 || !/^\d+$/.test(pin)) { toast('暗証番号は4桁の数字です'); return; }
@@ -927,18 +1013,87 @@ async function loginAccount() {
     const d = await r.json();
     if (!r.ok) { toast(`ログイン失敗: ${d.error}`); return; }
     saveAccount(username, pin);
+    document.getElementById('login-username').value = '';
+    document.getElementById('login-pin').value = '';
+    
+    // サーバーからデッキを取得
+    await loadServerDecks();
+    
+    switchScreen('screen-list');
+    renderDeckList();
     toast('ログインしました');
-    closeAccountDialog();
   } catch (e) {
     toast(`エラー: ${e.message}`);
   }
 }
 
+async function registerAccount() {
+  const username = document.getElementById('register-username').value.trim();
+  const pin = document.getElementById('register-pin').value.trim();
+  
+  if (!username) { toast('ユーザー名を入力してください'); return; }
+  if (pin.length !== 4 || !/^\d+$/.test(pin)) { toast('暗証番号は4桁の数字です'); return; }
+  
+  try {
+    const r = await fetch(`${PROXY}/profile/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, pin, last_deck: '' }),
+      signal: createAbortSignal(5000)
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(`登録失敗: ${d.error}`); return; }
+    saveAccount(username, pin);
+    document.getElementById('register-username').value = '';
+    document.getElementById('register-pin').value = '';
+    
+    // サーバーからデッキを取得（新規登録時は0件のはず）
+    await loadServerDecks();
+    
+    switchScreen('screen-list');
+    renderDeckList();
+    toast('アカウントを作成しました');
+  } catch (e) {
+    toast(`エラー: ${e.message}`);
+  }
+}
+
+function logout() {
+  if (!confirm('ログアウトしますか？')) return;
+  clearAccount();
+  switchScreen('screen-auth');
+  showAuthForm('menu');
+  toast('ログアウトしました');
+}
+
 // ──── DECK LIST ────
 function renderDeckList() {
   loadStorage();
+  
+  // アカウント情報の表示を更新
+  if (_account) {
+    document.getElementById('account-info').style.display = 'inline';
+    document.getElementById('username-display').textContent = _account.username;
+    document.getElementById('guest-info').style.display = 'none';
+  } else {
+    document.getElementById('account-info').style.display = 'none';
+    document.getElementById('guest-info').style.display = 'inline';
+  }
+  
   const wrap = document.getElementById('list-scroll');
-  const keys = Object.keys(savedDecks);
+  
+  // サーバーのデッキ + ローカルのデッキを統合
+  let allDeckNames = new Set();
+  
+  // ローカルデッキを追加
+  Object.keys(savedDecks).forEach(name => allDeckNames.add(name));
+  
+  // サーバーデッキを追加（ログイン時）
+  if (_serverDeckNames && Array.isArray(_serverDeckNames)) {
+    _serverDeckNames.forEach(name => allDeckNames.add(name));
+  }
+  
+  const keys = Array.from(allDeckNames).sort();
   wrap.innerHTML = '';
   
   if (!keys.length) {
@@ -947,11 +1102,16 @@ function renderDeckList() {
   }
   
   keys.forEach(name => {
-    const total = (savedDecks[name] || []).reduce((s, x) => s + (x.count || 0), 0);
+    // ローカルまたはサーバーのデッキから枚数を取得
+    const localDeck = savedDecks[name];
+    const total = localDeck ? localDeck.reduce((s, x) => s + (x.count || 0), 0) : 0;
+    
     const el = document.createElement('div');
     el.className = 'deck-item';
+    const isServer = _serverDeckNames && _serverDeckNames.includes(name) && !localDeck;
+    const badge = isServer ? ' ☁️' : '';
     el.innerHTML = `
-      <div class="deck-item-name" onclick="openDeck('${esc(name)}')">${esc(name)}</div>
+      <div class="deck-item-name" onclick="openDeck('${esc(name)}')">${esc(name)}${badge}</div>
       <div class="deck-item-count">${total}枚</div>
       <button class="btn btn-red btn-sm" onclick="startGame('${esc(name)}')">▶</button>
     `;
@@ -970,7 +1130,23 @@ function newDeck() {
 
 function openDeck(name) {
   editDeckName = name;
-  deckCards = JSON.parse(JSON.stringify(savedDecks[name] || []));
+  // ローカルデッキがあればそれを使用、なければサーバーから取得を試みる
+  if (savedDecks[name]) {
+    deckCards = JSON.parse(JSON.stringify(savedDecks[name]));
+  } else if (_serverDeckNames && _serverDeckNames.includes(name)) {
+    // サーバーから取得（非同期処理）
+    fetchServerDeck(name).then(deckData => {
+      if (deckData) {
+        deckCards = deckData;
+        renderCardGrid();
+      } else {
+        toast('デッキを取得できません');
+      }
+    });
+    deckCards = [];
+  } else {
+    deckCards = [];
+  }
   document.getElementById('edit-name').value = name;
   switchScreen('screen-edit');
   renderCardGrid();
@@ -1179,12 +1355,36 @@ function expandFrom(deckCards) {
 
 function startGame(deckName) {
   loadStorage();
-  if (!savedDecks[deckName] || !savedDecks[deckName].length) {
+  
+  let deckData = null;
+  
+  // ローカルデッキから探す
+  if (savedDecks[deckName]) {
+    deckData = savedDecks[deckName];
+  } 
+  // サーバーデッキの場合は非同期で取得
+  else if (_serverDeckNames && _serverDeckNames.includes(deckName)) {
+    fetchServerDeck(deckName).then(data => {
+      if (data && data.length > 0) {
+        startGameWithData(deckName, data);
+      } else {
+        toast('デッキを取得できません');
+        switchScreen('screen-list');
+      }
+    });
+    return;
+  }
+  
+  if (!deckData || !deckData.length) {
     toast('デッキが空です');
     return;
   }
   
-  const expanded = expandFrom(savedDecks[deckName]);
+  startGameWithData(deckName, deckData);
+}
+
+function startGameWithData(deckName, deckData) {
+  const expanded = expandFrom(deckData);
   G = {
     hand: [],
     battleZone: [],
@@ -1378,7 +1578,17 @@ function olJoinRoom() {
 window.addEventListener('DOMContentLoaded', () => {
   loadStorage();
   loadAccount();
-  renderDeckList();
+  
+  // アカウント情報がある場合はサーバーからデッキを取得後、デッキ管理画面へ
+  if (_account) {
+    loadServerDecks().then(() => {
+      switchScreen('screen-list');
+      renderDeckList();
+    });
+  } else {
+    switchScreen('screen-auth');
+    showAuthForm('menu');
+  }
   
   // Populate deck selectors
   const updateDeckSelectors = () => {
