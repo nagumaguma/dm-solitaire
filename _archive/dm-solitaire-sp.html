@@ -1,0 +1,2704 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#111827">
+<title>DM 一人回し</title>
+<style>
+:root {
+  --bg: #111827; --surface: #1f2937; --surface2: #374151;
+  --border: #4b5563; --text: #f9fafb; --text-dim: #9ca3af;
+  --accent: #f97316; --red: #ef4444;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body {
+  min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, sans-serif;
+  font-size: 16px;
+  touch-action: manipulation;
+}
+
+/* ── Screen system ── */
+.screen {
+  display: none;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--bg);
+  position: absolute;
+  inset: 0;
+}
+.screen.active {
+  display: flex;
+}
+#screen-list {
+  display: flex;
+}
+
+/* ── Header ── */
+.sp-hd {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; padding-top: max(10px, env(safe-area-inset-top));
+  background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.sp-hd-title { font-size: 1rem; font-weight: 700; flex: 1; }
+.sp-hd input { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 7px 10px; border-radius: 8px; font-size: 0.95rem; outline: none; }
+.sp-hd input:focus { border-color: var(--accent); }
+
+/* ── Buttons ── */
+.btn { padding: 7px 13px; border: none; border-radius: 8px; font-size: 0.82rem; font-weight: 600; cursor: pointer; }
+.btn-accent { background: var(--accent); color: #fff; }
+.btn-gray { background: var(--surface2); color: var(--text); }
+.btn-red { background: none; color: var(--red); border: 1px solid var(--red); }
+.btn-icon { background: none; border: none; color: var(--text-dim); font-size: 1.3rem; padding: 4px 8px; cursor: pointer; line-height: 1; }
+
+/* ── Deck List ── */
+.list-scroll { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+.deck-item { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.deck-item-name { flex: 1; font-size: 0.95rem; font-weight: 600; cursor: pointer; }
+.deck-item-count { font-size: 0.8rem; color: var(--text-dim); }
+.empty-msg { text-align: center; color: var(--text-dim); padding: 48px 20px; font-size: 0.9rem; line-height: 1.8; }
+
+/* ── Deck Edit ── */
+.tab-bar { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 12px; flex-shrink: 0; }
+.tab { padding: 10px 14px; font-size: 0.88rem; font-weight: 600; color: var(--text-dim); border-bottom: 2px solid transparent; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ── Card Grid ── */
+.card-grid-wrap { flex: 1; overflow-y: auto; padding: 8px; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); gap: 4px; }
+.cg-card { position: relative; border-radius: 6px; overflow: hidden; background: var(--surface2); cursor: pointer; aspect-ratio: 63/88; }
+.cg-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cg-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.5rem; color: var(--text-dim); text-align: center; padding: 4px; line-height: 1.3; }
+.cg-count { position: absolute; bottom: 2px; right: 2px; background: rgba(0,0,0,.78); color: #fff; font-size: 0.62rem; font-weight: 700; padding: 1px 4px; border-radius: 4px; }
+.cg-cost { position: absolute; top: 2px; left: 2px; background: rgba(0,0,0,.72); color: #fff; font-size: 0.6rem; font-weight: 700; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+
+/* ── Search Panel ── */
+.search-panel { flex-shrink: 0; background: var(--surface); border-top: 1px solid var(--border); display: flex; flex-direction: column; max-height: 45dvh; }
+.sr-wrap { flex: 1; overflow-y: auto; min-height: 0; }
+.sr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 4px; padding: 8px; }
+.search-bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+.search-bar input { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 20px; font-size: 1rem; outline: none; }
+.search-bar input:focus { border-color: var(--accent); }
+.sr-card { position: relative; border-radius: 6px; overflow: hidden; background: var(--surface2); cursor: pointer; aspect-ratio: 63/88; border: 2px solid transparent; }
+.sr-card:active { border-color: var(--accent); opacity: .85; }
+.sr-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sr-card-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.48rem; color: var(--text-dim); text-align: center; padding: 4px; line-height: 1.3; }
+.sr-badge { position: absolute; bottom: 2px; right: 2px; background: var(--accent); color: #fff; font-size: 0.6rem; font-weight: 700; padding: 1px 4px; border-radius: 4px; }
+.sr-msg { padding: 14px; text-align: center; color: var(--text-dim); font-size: 0.85rem; }
+.sr-more { padding: 10px; text-align: center; color: var(--accent); font-size: 0.82rem; cursor: pointer; }
+
+/* ── Deck Edit Bottom Sheet ── */
+.bs-ov { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 200; display: flex; align-items: flex-end; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.bs-ov.show { opacity: 1; pointer-events: all; }
+.bs { width: 100%; background: var(--surface); border-radius: 16px 16px 0 0; padding: 20px 16px; padding-bottom: max(20px, env(safe-area-inset-bottom)); transform: translateY(100%); transition: transform .25s ease; }
+.bs-ov.show .bs { transform: translateY(0); }
+.bs-info { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }
+.bs-thumb { width: 56px; height: 78px; border-radius: 6px; overflow: hidden; background: var(--surface2); flex-shrink: 0; }
+.bs-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.bs-name { font-size: 0.92rem; font-weight: 700; }
+.bs-sub { font-size: 0.75rem; color: var(--text-dim); margin-top: 3px; }
+.bs-acts { display: flex; gap: 8px; align-items: center; }
+.count-ctrl { display: flex; align-items: center; background: var(--surface2); border-radius: 10px; overflow: hidden; }
+.count-ctrl button { background: none; border: none; color: var(--text); font-size: 1.4rem; padding: 10px 18px; cursor: pointer; line-height: 1; }
+.count-ctrl span { font-size: 1.1rem; font-weight: 700; min-width: 36px; text-align: center; }
+
+/* ── Game Screen ── */
+.game-hd {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px; padding-top: max(8px, env(safe-area-inset-top));
+  background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.game-turn { font-size: 0.88rem; font-weight: 700; color: var(--accent); flex: 1; text-align: center; }
+
+.game-board {
+  flex: 1;
+  display: grid;
+  grid-template-rows:
+    auto   /* 相手ゾーン */
+    auto   /* シールド */
+    1fr    /* バトルゾーン */
+    auto   /* 手札 */
+    auto;  /* マナ・操作 */
+  gap: 1px;
+  background: var(--border);
+  min-height: 0;
+}
+.zone { display: flex; flex-direction: column; background: var(--bg); flex: 1; min-height: 0; }
+.zone-mid { display: flex; flex: 0 0 92px; gap: 1px; }
+.zone-shields { background: var(--bg); flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.zone-sm-wrap { flex: 0 0 62px; background: var(--bg); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.zone-lbl { font-size: 0.6rem; color: var(--text-dim); padding: 3px 6px 1px; flex-shrink: 0; }
+.zone-scroll {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 6px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+}
+.zone-scroll > * {
+  scroll-snap-align: start;
+}
+.zone-ph { color: var(--text-dim); font-size: 0.72rem; padding: 4px; align-self: center; flex-shrink: 0; }
+
+/* ── SP Game Card ── */
+.sp-card {
+  width: clamp(44px, 12vw, 60px);
+  aspect-ratio: 63/88;
+  height: auto;
+  border-radius: 5px;
+  overflow: hidden;
+  flex-shrink: 0;
+  cursor: pointer;
+  border: 2px solid transparent;
+  background: var(--surface2);
+  position: relative;
+}
+.sp-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sp-card.tapped { border-color: var(--accent); opacity: .85; }
+.sp-card-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.44rem; text-align: center; padding: 3px; line-height: 1.3; color: var(--text-dim); }
+.sp-tap-badge { position: absolute; top: 1px; right: 1px; background: var(--accent); color: #fff; font-size: 0.48rem; font-weight: 700; padding: 1px 3px; border-radius: 3px; line-height: 1.2; }
+
+/* Shield stack */
+.shield-stack {
+  display: flex;
+  padding: 4px 6px;
+  align-items: center;
+  flex: 1;
+  overflow: hidden;
+}
+.shield-stack .sp-card {
+  margin-left: 0;
+}
+.shield-stack .sp-card + .sp-card {
+  margin-left: -45%;
+}
+
+/* Deck / Grave small */
+.sm-card { width: 50px; height: 70px; border-radius: 5px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 1px solid var(--border); }
+.sm-card-back { background: linear-gradient(135deg, #1e3a5f 0%, #0f1e35 100%); border-color: #2d5a8e; }
+.sm-card-count { font-size: 0.75rem; font-weight: 700; }
+.sm-card-lbl { font-size: 0.5rem; color: var(--text-dim); }
+
+/* ── Game Footer ── */
+.game-footer {
+  display: flex; gap: 8px; padding: 8px 12px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0;
+}
+.game-footer .btn { flex: 1; padding: 13px 8px; font-size: 0.85rem; }
+
+/* ── Context Menu (Game) ── */
+.ctx-ov { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 300; display: flex; align-items: flex-end; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.ctx-ov.show { opacity: 1; pointer-events: all; }
+.ctx-sheet { width: 100%; background: var(--surface); border-radius: 16px 16px 0 0; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); transform: translateY(100%); transition: transform .25s ease; max-height: 80vh; overflow-y: auto; }
+.ctx-ov.show .ctx-sheet { transform: translateY(0); }
+.ctx-info { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }
+.ctx-thumb { width: 46px; height: 64px; border-radius: 5px; overflow: hidden; background: var(--surface2); flex-shrink: 0; }
+.ctx-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.ctx-title { font-size: 0.88rem; font-weight: 700; }
+.ctx-sub { font-size: 0.72rem; color: var(--text-dim); margin-top: 2px; }
+.ctx-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.ctx-btn { padding: 13px 8px; border: none; border-radius: 10px; background: var(--surface2); color: var(--text); font-size: 0.83rem; font-weight: 600; cursor: pointer; text-align: center; line-height: 1.2; }
+.ctx-btn:active { opacity: .7; }
+.ctx-btn.accent { background: var(--accent); color: #fff; }
+.ctx-btn.wide { grid-column: span 2; }
+.ctx-sep { border: none; border-top: 1px solid var(--border); margin: 12px 0 8px; }
+.ctx-more-btn { width: 100%; padding: 9px; background: none; border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim); font-size: 0.8rem; cursor: pointer; margin-top: 10px; }
+.ctx-secondary { display: none; }
+.ctx-secondary.open { display: block; }
+
+/* ── Toast ── */
+.sp-toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.85); color: #fff; padding: 8px 18px; border-radius: 20px; font-size: 0.85rem; z-index: 500; opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
+.sp-toast.show { opacity: 1; }
+
+/* ── VS Mode ── */
+#screen-vs { flex-direction: column; overflow: hidden; }
+#screen-list { }
+.vs-board { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--border); gap: 1px; }
+.vs-half { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 1px; background: var(--border); }
+.vs-p2 { transform: rotate(180deg); }
+.vs-divider { flex: 0 0 3px; background: var(--accent); }
+.vs-zone { display: flex; flex-direction: column; background: var(--bg); flex: 1; min-height: 0; }
+.vs-mid { display: flex; flex: 0 0 80px; gap: 1px; }
+.vs-shields { background: var(--bg); flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.vs-sm-wrap { flex: 0 0 56px; background: var(--bg); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.vs-zone-lbl { font-size: 0.52rem; color: var(--text-dim); padding: 2px 5px 1px; flex-shrink: 0; }
+.vs-zone-scroll { display: flex; gap: 4px; overflow-x: auto; padding: 2px 5px 4px; align-items: center; flex: 1; min-width: 0; }
+.vs-zone-scroll::-webkit-scrollbar { display: none; }
+.vs-zone-ph { color: var(--text-dim); font-size: 0.65rem; padding: 3px; align-self: center; flex-shrink: 0; }
+.vs-card { width: 40px; height: 56px; border-radius: 4px; overflow: hidden; flex-shrink: 0; cursor: pointer; border: 2px solid transparent; background: var(--surface2); position: relative; }
+.vs-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vs-card.tapped { border-color: var(--accent); opacity: .85; }
+.vs-card-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.38rem; text-align: center; padding: 2px; line-height: 1.2; color: var(--text-dim); }
+.vs-tap-badge { position: absolute; top: 1px; right: 1px; background: var(--accent); color: #fff; font-size: 0.4rem; font-weight: 700; padding: 1px 2px; border-radius: 2px; line-height: 1.2; }
+.vs-shield-stack { display: flex; padding: 3px 5px; align-items: center; flex: 1; overflow: hidden; }
+.vs-shield-stack .vs-card + .vs-card { margin-left: -20px; }
+.vs-sm-card { width: 40px; height: 56px; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; border: 1px solid var(--border); }
+.vs-sm-card-back { background: linear-gradient(135deg, #1e3a5f 0%, #0f1e35 100%); border-color: #2d5a8e; }
+.vs-sm-count { font-size: 0.65rem; font-weight: 700; }
+.vs-sm-lbl { font-size: 0.42rem; color: var(--text-dim); }
+.vs-footer { display: flex; gap: 6px; padding: 5px 8px; padding-bottom: max(5px, env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; align-items: center; }
+.vs-footer .btn { flex: 1; padding: 9px 5px; font-size: 0.75rem; }
+.vs-footer.active-turn { border-top: 2px solid var(--accent); background: #1f2937ee; }
+.vs-turn-lbl { font-size: 0.75rem; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.ctx-ov-top { align-items: flex-start; }
+.ctx-ov-top .ctx-sheet { border-radius: 0 0 16px 16px; transform: translateY(-100%); }
+.ctx-ov-top.show .ctx-sheet { transform: translateY(0); }
+
+/* ── Card Detail Modal ── */
+.cd-ov { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:600; display:flex; align-items:flex-end; opacity:0; pointer-events:none; transition:opacity .2s; }
+.cd-ov.show { opacity:1; pointer-events:all; }
+.cd-sheet { width:100%; background:var(--surface); border-radius:16px 16px 0 0; padding:16px; padding-bottom:max(16px,env(safe-area-inset-bottom)); transform:translateY(100%); transition:transform .25s ease; max-height:88vh; overflow-y:auto; }
+.cd-ov.show .cd-sheet { transform:translateY(0); }
+.cd-img { width:90px; height:126px; border-radius:8px; overflow:hidden; background:var(--surface2); flex-shrink:0; }
+.cd-img img { width:100%; height:100%; object-fit:cover; display:block; }
+.cd-table { font-size:0.82rem; border-collapse:collapse; flex:1; }
+.cd-table td { padding:3px 8px 3px 0; }
+.cd-table td:first-child { color:var(--text-dim); white-space:nowrap; }
+.cd-text { font-size:0.78rem; line-height:1.6; color:var(--text-dim); margin-top:12px; padding-top:12px; border-top:1px solid var(--border); white-space:pre-wrap; }
+
+/* VS Perspective toggle */
+#vs-board.p2-view { flex-direction: column-reverse; }
+#vs-board.p2-view #vs-half-p2 { transform: none; }
+#vs-board.p2-view #vs-half-p1 { transform: rotate(180deg); }
+
+/* VS Under mode */
+.vs-under-bar { display: none; background: linear-gradient(90deg,#f97316,#ea580c); color:#fff; padding:4px 8px; font-size:0.65rem; font-weight:600; align-items:center; justify-content:space-between; gap:6px; flex-shrink:0; }
+.vs-under-bar.active { display:flex; }
+.vs-card.under-target { outline: 3px solid var(--accent); outline-offset:2px; cursor:crosshair !important; }
+.vs-card-stack { position:relative; flex-shrink:0; display:flex; align-items:center; }
+.vs-card-stack > .vs-card { position:relative; z-index:5; }
+.vs-card-under-peek { position:absolute; top:2px; width:40px; height:56px; border-radius:4px; overflow:hidden; border:1px solid rgba(255,255,255,.3); background:#1e3a5f; }
+.vs-card-under-peek img { width:100%; height:100%; object-fit:cover; display:block; }
+
+/* VS Reveal overlay */
+.vs-reveal-ov { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:400; display:flex; align-items:flex-end; opacity:0; pointer-events:none; transition:opacity .2s; }
+.vs-reveal-ov.show { opacity:1; pointer-events:all; }
+.vs-reveal-sheet { width:100%; background:var(--surface); border-radius:16px 16px 0 0; padding:14px; padding-bottom:max(14px,env(safe-area-inset-bottom)); max-height:75vh; overflow-y:auto; transform:translateY(100%); transition:transform .25s ease; }
+.vs-reveal-ov.show .vs-reveal-sheet { transform:translateY(0); }
+
+/* VS Touch Drag */
+.vs-drag-ghost { position:fixed; width:40px; height:56px; border-radius:4px; overflow:hidden; pointer-events:none; z-index:999; opacity:0.85; transform:scale(1.12); box-shadow:0 8px 24px rgba(0,0,0,.6); }
+.vs-card.vs-dragging { opacity:0.35; }
+.vs-drop-zone.drag-over { outline:2px dashed var(--accent) !important; background:rgba(249,115,22,0.08) !important; border-radius:6px; }
+
+/* ── Online Mode ── */
+#screen-online { flex-direction:column; }
+.ol-body { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:14px; }
+.ol-field { display:flex; flex-direction:column; gap:6px; }
+.ol-field label { font-size:0.8rem; color:var(--text-dim); }
+.ol-field input, .ol-field select { width:100%; padding:10px 12px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:0.95rem; outline:none; }
+.ol-field input:focus, .ol-field select:focus { border-color:var(--accent); }
+.ol-btn-row { display:flex; gap:10px; }
+.ol-btn { flex:1; padding:13px; border-radius:10px; border:none; font-size:0.95rem; font-weight:700; cursor:pointer; }
+.ol-btn-primary { background:var(--accent); color:#fff; }
+.ol-btn-secondary { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
+.ol-join-form { display:flex; flex-direction:column; gap:8px; padding:14px; background:var(--surface); border-radius:10px; border:1px solid var(--border); }
+.ol-join-form input { width:100%; padding:10px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:1.1rem; letter-spacing:4px; text-align:center; text-transform:uppercase; outline:none; }
+.ol-waiting { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; padding:24px; }
+.ol-room-code { font-size:2.4rem; font-weight:700; letter-spacing:8px; color:#f0c040; font-family:monospace; background:var(--surface); padding:16px 28px; border-radius:12px; border:2px solid #f0c04044; }
+.ol-wait-hint { color:var(--text-dim); font-size:0.88rem; text-align:center; }
+.ol-badge { font-size:0.7rem; padding:2px 7px; border-radius:4px; background:#1e6e1e; color:#aef; margin-left:6px; vertical-align:middle; }
+
+/* ── Turn Notification ── */
+@keyframes pulse-border { 0%, 100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.7); } 50% { box-shadow: 0 0 0 15px rgba(249, 115, 22, 0); } }
+#screen-vs.turn-pulse { animation: pulse-border 0.8s; }
+
+/* ── Operation Log Panel ── */
+.ol-log-ov { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 100; display: flex; align-items: flex-end; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.ol-log-ov.show { opacity: 1; pointer-events: all; }
+.ol-log-sheet { width: 100%; background: var(--surface); border-radius: 16px 16px 0 0; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); transform: translateY(100%); transition: transform .25s ease; max-height: 80vh; overflow-y: auto; }
+.ol-log-ov.show .ol-log-sheet { transform: translateY(0); }
+.ol-log-title { font-size: 1rem; font-weight: 700; margin-bottom: 12px; }
+.ol-log-entry { font-size: 0.8rem; color: var(--text-dim); padding: 8px; border-bottom: 1px solid var(--border); }
+.ol-log-entry.p1 { border-left: 3px solid #3b82f6; }
+.ol-log-entry.p2 { border-left: 3px solid #ef4444; }
+.ol-log-player { font-weight: 700; color: var(--text); }
+.ol-log-empty { text-align: center; color: var(--text-dim); padding: 20px; font-size: 0.85rem; }
+
+/* ── Chat Panel ── */
+.ol-chat-ov { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 100; display: flex; align-items: flex-end; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.ol-chat-ov.show { opacity: 1; pointer-events: all; }
+.ol-chat-sheet { width: 100%; background: var(--surface); border-radius: 16px 16px 0 0; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); transform: translateY(100%); transition: transform .25s ease; max-height: 80vh; overflow-y: auto; display: flex; flex-direction: column; }
+.ol-chat-ov.show .ol-chat-sheet { transform: translateY(0); }
+.ol-chat-title { font-size: 1rem; font-weight: 700; margin-bottom: 12px; }
+.ol-chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; min-height: 0; }
+.ol-chat-msg { font-size: 0.85rem; padding: 8px 12px; border-radius: 8px; }
+.ol-chat-msg.p1 { background: #dbeafe; color: #111827; }
+.ol-chat-msg.p2 { background: #fee2e2; color: #111827; }
+.ol-chat-from { font-weight: 700; font-size: 0.8rem; margin-bottom: 2px; }
+.ol-chat-input-row { display: flex; gap: 8px; }
+.ol-chat-input-row input { flex: 1; padding: 10px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.95rem; outline: none; }
+.ol-chat-input-row input:focus { border-color: var(--accent); }
+.ol-chat-input-row button { padding: 10px 16px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
+
+/* ── Performance Optimization ── */
+* { -webkit-tap-highlight-color: transparent; }
+
+button,
+.cg-card,
+.sr-card,
+.sp-card {
+  touch-action: manipulation;
+}
+
+img {
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+</style>
+</head>
+<body>
+
+<!-- ── Screen: Deck List ── -->
+<div class="screen active" id="screen-list">
+  <div class="sp-hd">
+    <span class="sp-hd-title">DM 一人回し</span>
+    <button class="btn btn-gray" onclick="showVsPicker()">⚔ VS</button>
+    <button class="btn btn-gray" onclick="showOnlineLobby()">🌐 対戦</button>
+    <button class="btn btn-accent" onclick="newDeck()">＋ 新規</button>
+  </div>
+  <div class="list-scroll" id="list-scroll"></div>
+</div>
+
+<!-- ── Screen: Deck Edit ── -->
+<div class="screen" id="screen-edit">
+  <div class="sp-hd">
+    <button class="btn-icon" onclick="goBack()">‹</button>
+    <input type="text" id="edit-name" placeholder="デッキ名">
+    <button class="btn btn-red" onclick="deleteDeckSp()">削除</button>
+    <button class="btn btn-gray" onclick="saveDeckToServer()" title="アカウントに保存">☁</button>
+    <button class="btn btn-accent" onclick="saveDeckSp()">保存</button>
+  </div>
+  <div class="tab-bar">
+    <div class="tab active">メイン <span id="edit-count">0</span></div>
+  </div>
+  <div class="card-grid-wrap">
+    <div class="card-grid" id="card-grid"></div>
+  </div>
+  <div class="search-panel">
+    <div class="sr-wrap" id="sr-wrap" style="display:none">
+      <div class="sr-grid" id="sr-grid"></div>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="sr-input" placeholder="カード名で検索" oninput="srInput(this.value)">
+      <button class="btn-icon" id="sr-clear" style="display:none" onclick="srClear()">✕</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Screen: Game ── -->
+<div class="screen" id="screen-game">
+  <div class="game-hd">
+    <button class="btn-icon" onclick="confirmLeaveGame()">‹</button>
+    <span class="game-turn" id="game-turn">ターン 1</span>
+    <button class="btn-icon" onclick="undoGame()">↩</button>
+    <button class="btn-icon" onclick="showGameMenu()">⋯</button>
+  </div>
+  <div class="game-board">
+    <div class="zone" id="zone-bz">
+      <div class="zone-lbl">バトルゾーン</div>
+      <div class="zone-scroll" id="bz-scroll"></div>
+    </div>
+    <div class="zone-mid">
+      <div class="zone-shields">
+        <div class="zone-lbl">シールド</div>
+        <div class="shield-stack" id="shield-stack"></div>
+      </div>
+      <div class="zone-sm-wrap" onclick="showDeckCtx()">
+        <div class="sm-card sm-card-back">
+          <div class="sm-card-count" id="deck-count">0</div>
+          <div class="sm-card-lbl">山札</div>
+        </div>
+      </div>
+      <div class="zone-sm-wrap" onclick="showGraveCtx()">
+        <div class="sm-card" id="grave-sm">
+          <div class="sm-card-count" id="grave-count">0</div>
+          <div class="sm-card-lbl">墓地</div>
+        </div>
+      </div>
+    </div>
+    <div class="zone" id="zone-hand">
+      <div class="zone-lbl">手札 <span id="hand-count-lbl"></span></div>
+      <div class="zone-scroll" id="hand-scroll"></div>
+    </div>
+    <div class="zone" id="zone-mana">
+      <div class="zone-lbl">マナゾーン <span id="mana-count-lbl"></span></div>
+      <div class="zone-scroll" id="mana-scroll"></div>
+    </div>
+  </div>
+  <div class="game-footer">
+    <button class="btn btn-gray" onclick="drawCard()">ドロー</button>
+    <button class="btn btn-accent" onclick="nextTurn()">ターン終了</button>
+  </div>
+</div>
+
+<!-- ── VS Deck Picker ── -->
+<div class="bs-ov" id="vs-picker-ov" onclick="vsPickerOvClick(event)">
+  <div class="bs">
+    <div class="bs-name" style="margin-bottom:14px;font-size:1rem;">⚔ 対戦モード開始</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
+      <div>
+        <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:4px;">P1 デッキ</div>
+        <select id="vs-sel-p1" style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-size:0.9rem;"></select>
+      </div>
+      <div>
+        <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:4px;">P2 デッキ</div>
+        <select id="vs-sel-p2" style="width:100%;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-size:0.9rem;"></select>
+      </div>
+    </div>
+    <div class="bs-acts">
+      <button class="btn btn-gray" style="flex:1" onclick="vsPickerClose()">キャンセル</button>
+      <button class="btn btn-accent" style="flex:1" onclick="confirmStartVs()">開始</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Screen: Online Lobby ── -->
+<div class="screen" id="screen-online">
+  <div class="sp-hd">
+    <button class="btn-icon" onclick="olBackFromLobby()">←</button>
+    <span class="sp-hd-title">🌐 オンライン対戦</span>
+  </div>
+  <!-- Lobby form -->
+  <div class="ol-body" id="ol-lobby">
+    <div class="ol-field">
+      <label>プレイヤー名</label>
+      <input id="ol-name" type="text" placeholder="名前を入力（最大12文字）" maxlength="12">
+    </div>
+    <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+      <button class="ol-btn ol-btn-secondary" style="flex: 1; font-size: 0.8rem;" onclick="showAccountDialog()">アカウント</button>
+    </div>
+    <div class="ol-field">
+      <label>使用デッキ</label>
+      <select id="ol-deck"></select>
+    </div>
+    <div class="ol-btn-row">
+      <button class="ol-btn ol-btn-primary" onclick="olCreateRoom()">ルームを作成</button>
+      <button class="ol-btn ol-btn-secondary" onclick="olShowJoin()">コードで参加</button>
+    </div>
+    <div class="ol-join-form" id="ol-join-form" style="display:none">
+      <div style="font-size:0.82rem;color:var(--text-dim);">ルームコードを入力</div>
+      <input id="ol-code-input" type="text" placeholder="XXXXXX" maxlength="6"
+             oninput="this.value=this.value.toUpperCase()">
+      <button class="ol-btn ol-btn-primary" onclick="olJoinRoom()">参加する</button>
+    </div>
+  </div>
+  <!-- Waiting for opponent -->
+  <div class="ol-waiting" id="ol-waiting" style="display:none">
+    <div style="font-size:0.85rem;color:var(--text-dim);">ルームコード</div>
+    <div class="ol-room-code" id="ol-room-display">------</div>
+    <div class="ol-wait-hint">相手にこのコードを伝えてください<br>相手の参加を待っています...</div>
+    <button class="ol-btn ol-btn-secondary" style="max-width:200px" onclick="olCancelWait()">キャンセル</button>
+  </div>
+
+  <!-- Account Dialog -->
+  <div class="ol-log-ov" id="ol-account-dialog" onclick="if(event.target.id==='ol-account-dialog') document.getElementById('ol-account-dialog').classList.remove('show')">
+    <div class="ol-log-sheet" style="display: flex; flex-direction: column; gap: 12px;">
+      <div class="ol-log-title">アカウント</div>
+      
+      <!-- Registration Tab -->
+      <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
+        <button id="ol-acc-tab-reg" class="btn btn-gray" style="flex:1" onclick="document.getElementById('ol-acc-reg').style.display='';document.getElementById('ol-acc-login').style.display='none';this.style.background='var(--accent)';this.style.color='#fff';document.getElementById('ol-acc-tab-login').style.background='var(--surface2)';document.getElementById('ol-acc-tab-login').style.color='var(--text)';">新規登録</button>
+        <button id="ol-acc-tab-login" class="btn btn-gray" style="flex:1" onclick="document.getElementById('ol-acc-login').style.display='';document.getElementById('ol-acc-reg').style.display='none';this.style.background='var(--accent)';this.style.color='#fff';document.getElementById('ol-acc-tab-reg').style.background='var(--surface2)';document.getElementById('ol-acc-tab-reg').style.color='var(--text)';">ログイン</button>
+      </div>
+
+      <!-- Registration Form -->
+      <div id="ol-acc-reg">
+        <div class="ol-field">
+          <label>ユーザー名</label>
+          <input id="ol-reg-username" type="text" placeholder="3〜20文字" maxlength="20">
+        </div>
+        <div class="ol-field">
+          <label>暗証番号</label>
+          <input id="ol-reg-pin" type="text" placeholder="4桁の数字" maxlength="4">
+        </div>
+        <button class="ol-btn ol-btn-primary" style="width:100%" onclick="registerAccount()">登録</button>
+      </div>
+
+      <!-- Login Form -->
+      <div id="ol-acc-login" style="display:none">
+        <div class="ol-field">
+          <label>ユーザー名</label>
+          <input id="ol-login-username" type="text" maxlength="20">
+        </div>
+        <div class="ol-field">
+          <label>暗証番号</label>
+          <input id="ol-login-pin" type="text" placeholder="4桁の数字" maxlength="4">
+        </div>
+        <button class="ol-btn ol-btn-primary" style="width:100%" onclick="loginAccount()">ログイン</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Screen: VS ── -->
+<div class="screen" id="screen-vs">
+  <div class="vs-board" id="vs-board">
+  <!-- P2 half (rotated 180deg) -->
+  <div class="vs-half vs-p2" id="vs-half-p2">
+    <div class="vs-footer" id="vs-footer-p2">
+      <button class="btn btn-gray" onclick="drawVs('p2')">ドロー</button>
+      <span class="vs-turn-lbl" id="vs-turn-lbl-p2">ターン 1</span>
+      <button class="btn btn-accent" onclick="nextTurnVs('p2')">ターン終了</button>
+      <button class="btn-icon" onclick="switchVsView()">⇅</button>
+      <button class="btn-icon" onclick="showVsMenu('p2')">⋯</button>
+    </div>
+    <div class="vs-zone" id="vs-mana-p2">
+      <div class="vs-zone-lbl">マナゾーン <span id="vs-mana-count-p2"></span></div>
+      <div class="vs-zone-scroll" id="vs-mana-scroll-p2"></div>
+    </div>
+    <div class="vs-zone" id="vs-hand-p2">
+      <div class="vs-zone-lbl">手札 <span id="vs-hand-count-p2"></span></div>
+      <div class="vs-zone-scroll" id="vs-hand-scroll-p2"></div>
+    </div>
+    <div class="vs-mid">
+      <div class="vs-shields">
+        <div class="vs-zone-lbl">シールド</div>
+        <div class="vs-shield-stack" id="vs-shield-stack-p2"></div>
+      </div>
+      <div class="vs-sm-wrap" onclick="showDeckCtxVs('p2')">
+        <div class="vs-sm-card vs-sm-card-back">
+          <div class="vs-sm-count" id="vs-deck-count-p2">0</div>
+          <div class="vs-sm-lbl">山札</div>
+        </div>
+      </div>
+      <div class="vs-sm-wrap" onclick="showGraveCtxVs('p2')">
+        <div class="vs-sm-card" id="vs-grave-sm-p2">
+          <div class="vs-sm-count" id="vs-grave-count-p2">0</div>
+          <div class="vs-sm-lbl">墓地</div>
+        </div>
+      </div>
+    </div>
+    <div class="vs-zone" id="vs-bz-p2">
+      <div class="vs-under-bar" id="vs-under-bar-p2">
+        <span id="vs-under-text-p2">タップして重ねる</span>
+        <button style="background:rgba(0,0,0,.35);border:none;color:#fff;border-radius:4px;padding:2px 7px;font-size:0.6rem;cursor:pointer;" onclick="cancelUnderModeVs('p2')">✕</button>
+      </div>
+      <div class="vs-zone-lbl">バトルゾーン</div>
+      <div class="vs-zone-scroll" id="vs-bz-scroll-p2"></div>
+    </div>
+  </div>
+
+  <div class="vs-divider"></div>
+
+  <!-- P1 half -->
+  <div class="vs-half" id="vs-half-p1">
+    <div class="vs-zone" id="vs-bz-p1">
+      <div class="vs-under-bar" id="vs-under-bar-p1">
+        <span id="vs-under-text-p1">タップして重ねる</span>
+        <button style="background:rgba(0,0,0,.35);border:none;color:#fff;border-radius:4px;padding:2px 7px;font-size:0.6rem;cursor:pointer;" onclick="cancelUnderModeVs('p1')">✕</button>
+      </div>
+      <div class="vs-zone-lbl">バトルゾーン</div>
+      <div class="vs-zone-scroll" id="vs-bz-scroll-p1"></div>
+    </div>
+    <div class="vs-mid">
+      <div class="vs-shields">
+        <div class="vs-zone-lbl">シールド</div>
+        <div class="vs-shield-stack" id="vs-shield-stack-p1"></div>
+      </div>
+      <div class="vs-sm-wrap" onclick="showDeckCtxVs('p1')">
+        <div class="vs-sm-card vs-sm-card-back">
+          <div class="vs-sm-count" id="vs-deck-count-p1">0</div>
+          <div class="vs-sm-lbl">山札</div>
+        </div>
+      </div>
+      <div class="vs-sm-wrap" onclick="showGraveCtxVs('p1')">
+        <div class="vs-sm-card" id="vs-grave-sm-p1">
+          <div class="vs-sm-count" id="vs-grave-count-p1">0</div>
+          <div class="vs-sm-lbl">墓地</div>
+        </div>
+      </div>
+    </div>
+    <div class="vs-zone" id="vs-hand-p1">
+      <div class="vs-zone-lbl">手札 <span id="vs-hand-count-p1"></span></div>
+      <div class="vs-zone-scroll" id="vs-hand-scroll-p1"></div>
+    </div>
+    <div class="vs-zone" id="vs-mana-p1">
+      <div class="vs-zone-lbl">マナゾーン <span id="vs-mana-count-p1"></span></div>
+      <div class="vs-zone-scroll" id="vs-mana-scroll-p1"></div>
+    </div>
+    <div class="vs-footer" id="vs-footer-p1">
+      <button class="btn btn-gray" onclick="drawVs('p1')">ドロー</button>
+      <span class="vs-turn-lbl" id="vs-turn-lbl-p1">ターン 1</span>
+      <button class="btn btn-accent" onclick="nextTurnVs('p1')">ターン終了</button>
+      <button class="btn-icon" onclick="showChat()">💬</button>
+      <button class="btn-icon" onclick="showOpLog()">📝</button>
+      <button class="btn-icon" onclick="switchVsView()">⇅</button>
+      <button class="btn-icon" onclick="showVsMenu('p1')">⋯</button>
+    </div>
+  </div>
+  </div><!-- /vs-board -->
+</div>
+
+<!-- ── Context Menu P2 (top) ── -->
+<div class="ctx-ov ctx-ov-top" id="ctx-ov-p2" onclick="ctxOvClickP2(event)">
+  <div class="ctx-sheet" id="ctx-sheet-p2"></div>
+</div>
+
+<!-- ── VS Reveal Overlay ── -->
+<div class="vs-reveal-ov" id="vs-reveal-ov" onclick="vsRevealOvClick(event)">
+  <div class="vs-reveal-sheet" id="vs-reveal-sheet"></div>
+</div>
+
+<!-- ── Operation Log Panel ── -->
+<div class="ol-log-ov" id="ol-log-ov" onclick="if(event.target.id==='ol-log-ov') document.getElementById('ol-log-ov').classList.remove('show')">
+  <div class="ol-log-sheet">
+    <div class="ol-log-title">操作ログ</div>
+    <div id="ol-log-list"></div>
+  </div>
+</div>
+
+<!-- ── Chat Panel ── -->
+<div class="ol-chat-ov" id="ol-chat-ov" onclick="if(event.target.id==='ol-chat-ov') document.getElementById('ol-chat-ov').classList.remove('show')">
+  <div class="ol-chat-sheet">
+    <div class="ol-chat-title">チャット</div>
+    <div class="ol-chat-messages" id="ol-chat-messages"></div>
+    <div class="ol-chat-input-row">
+      <input type="text" id="ol-chat-input" placeholder="メッセージを入力..." onkeypress="if(event.key==='Enter') sendChat()">
+      <button onclick="sendChat()">送信</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Operation Log Panel ── -->
+<div class="ol-log-ov" id="ol-log-ov" onclick="if(event.target.id==='ol-log-ov') document.getElementById('ol-log-ov').classList.remove('show')">
+  <div class="ol-log-sheet">
+    <div class="ol-log-title">操作ログ</div>
+    <div id="ol-log-list"></div>
+  </div>
+</div>
+
+
+<!-- ── Deck Edit Bottom Sheet ── -->
+<div class="bs-ov" id="bs-ov" onclick="bsOvClick(event)">
+  <div class="bs">
+    <div class="bs-info">
+      <div class="bs-thumb"><img id="bs-img" src="" alt="" loading="lazy"></div>
+      <div>
+        <div class="bs-name" id="bs-name"></div>
+        <div class="bs-sub" id="bs-sub"></div>
+      </div>
+    </div>
+    <div class="bs-acts">
+      <div class="count-ctrl">
+        <button onclick="bsDecr()">－</button>
+        <span id="bs-count">0</span>
+        <button onclick="bsIncr()">＋</button>
+      </div>
+      <button class="btn btn-red" style="flex:1" onclick="bsRemove()">デッキから削除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Context Menu (Game) ── -->
+<div class="ctx-ov" id="ctx-ov" onclick="ctxOvClick(event)">
+  <div class="ctx-sheet" id="ctx-sheet"></div>
+</div>
+
+<!-- ── Card Detail Modal ── -->
+<div class="cd-ov" id="cd-ov" onclick="cdOvClick(event)">
+  <div class="cd-sheet" id="cd-sheet"></div>
+</div>
+
+<!-- ── Toast ── -->
+<div class="sp-toast" id="sp-toast"></div>
+
+<script>
+'use strict';
+const PROXY = 'https://dm-solitaire-production.up.railway.app';
+
+const CIV_COLOR = {
+  fire:'#c2382b', water:'#1d4ed8', light:'#a16207',
+  dark:'#6d28d9', nature:'#15803d', multi:'#c2410c'
+};
+
+// ── Storage ────────────────────────────────────────────────────
+let savedDecks = {};
+function loadStorage() {
+  try { savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}'); } catch { savedDecks = {}; }
+}
+function writeStorage() { localStorage.setItem('dm_decks', JSON.stringify(savedDecks)); }
+
+// ── Toast ──────────────────────────────────────────────────────
+let _tt;
+function toast(msg) {
+  const el = document.getElementById('sp-toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(_tt); _tt = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// ── Screens ────────────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// ── Deck List ──────────────────────────────────────────────────
+let deckCards = [];
+let editDeckName = null;
+let _bsCard = null;
+
+function renderDeckList() {
+  loadStorage();
+  const wrap = document.getElementById('list-scroll');
+  const keys = Object.keys(savedDecks);
+  wrap.innerHTML = '';
+  if (!keys.length) {
+    wrap.innerHTML = '<div class="empty-msg">デッキがありません<br>「＋ 新規」で作ってください</div>';
+    return;
+  }
+  keys.forEach(name => {
+    const total = (savedDecks[name] || []).reduce((s, x) => s + (x.count || 0), 0);
+    const el = document.createElement('div');
+    el.className = 'deck-item';
+    el.innerHTML =
+      `<div class="deck-item-name" onclick="openDeck('${esc(name)}')">${esc(name)}</div>` +
+      `<div class="deck-item-count">${total}枚</div>` +
+      `<button class="btn btn-accent" style="padding:7px 14px;font-size:0.9rem;" onclick="startGame('${esc(name)}')">▶</button>`;
+    wrap.appendChild(el);
+  });
+}
+
+function newDeck() {
+  editDeckName = null; deckCards = [];
+  document.getElementById('edit-name').value = '';
+  renderCardGrid(); srReset(); showScreen('screen-edit');
+}
+
+function openDeck(name) {
+  editDeckName = name;
+  deckCards = JSON.parse(JSON.stringify(savedDecks[name] || []));
+  document.getElementById('edit-name').value = name;
+  renderCardGrid(); srReset(); showScreen('screen-edit');
+}
+
+function goBack() { showScreen('screen-list'); renderDeckList(); }
+
+// ── Deck Edit ─────────────────────────────────────────────────
+function deckTotal() { return deckCards.reduce((s, x) => s + x.count, 0); }
+
+function renderCardGrid() {
+  document.getElementById('edit-count').textContent = deckTotal();
+  const grid = document.getElementById('card-grid');
+  const sorted = [...deckCards].sort((a, b) => (a.card.cost || 0) - (b.card.cost || 0));
+  grid.innerHTML = '';
+  sorted.forEach(({ card, count }) => {
+    const el = document.createElement('div');
+    el.className = 'cg-card';
+    el.innerHTML = card.img
+      ? `<img src="${esc(card.img)}" alt="${esc(card.name)}" loading="lazy">`
+      : `<div class="cg-ph">${esc(card.name)}</div>`;
+    el.innerHTML += `<div class="cg-cost">${card.cost ?? '?'}</div><div class="cg-count">×${count}</div>`;
+    el.onclick = () => openBs(card);
+    grid.appendChild(el);
+  });
+}
+
+function saveDeckSp() {
+  const n = document.getElementById('edit-name').value.trim();
+  if (!n) { toast('デッキ名を入力してください'); return; }
+  if (editDeckName && editDeckName !== n) delete savedDecks[editDeckName];
+  savedDecks[n] = JSON.parse(JSON.stringify(deckCards));
+  editDeckName = n; writeStorage(); toast(`「${n}」を保存しました`);
+}
+
+function deleteDeckSp() {
+  const n = editDeckName;
+  if (!n || !savedDecks[n]) { toast('保存済みのデッキがありません'); return; }
+  if (!confirm(`「${n}」を削除しますか？`)) return;
+  delete savedDecks[n]; writeStorage(); goBack(); toast(`「${n}」を削除しました`);
+}
+
+// ── Deck Edit Bottom Sheet ────────────────────────────────────
+function openBs(card) {
+  _bsCard = card;
+  const entry = deckCards.find(x => x.card.name === card.name);
+  document.getElementById('bs-name').textContent = card.name;
+  document.getElementById('bs-sub').textContent = `コスト ${card.cost ?? '?'}  ${civLabel(card.civ)}`;
+  document.getElementById('bs-count').textContent = entry ? entry.count : 0;
+  const img = document.getElementById('bs-img');
+  if (card.img) { img.src = card.img; img.style.display = ''; } else { img.style.display = 'none'; }
+  document.getElementById('bs-ov').classList.add('show');
+}
+function bsOvClick(e) { if (e.target === document.getElementById('bs-ov')) closeBs(); }
+function closeBs() { document.getElementById('bs-ov').classList.remove('show'); _bsCard = null; }
+
+function bsIncr() {
+  if (!_bsCard) return;
+  const idx = deckCards.findIndex(x => x.card.name === _bsCard.name);
+  if (idx < 0) deckCards.push({ card: _bsCard, count: 1 }); else deckCards[idx].count++;
+  document.getElementById('bs-count').textContent = deckCards.find(x => x.card.name === _bsCard.name).count;
+  renderCardGrid();
+}
+function bsDecr() {
+  if (!_bsCard) return;
+  const idx = deckCards.findIndex(x => x.card.name === _bsCard.name);
+  if (idx < 0) return;
+  deckCards[idx].count--;
+  if (deckCards[idx].count <= 0) deckCards.splice(idx, 1);
+  document.getElementById('bs-count').textContent = (deckCards.find(x => x.card.name === _bsCard.name) || {}).count || 0;
+  renderCardGrid();
+}
+function bsRemove() {
+  if (!_bsCard) return;
+  deckCards = deckCards.filter(x => x.card.name !== _bsCard.name);
+  closeBs(); renderCardGrid();
+}
+
+// ── Search ────────────────────────────────────────────────────
+let _sr = { q:'', timer:null, busy:false, proxyPage:1, all:[], done:false };
+let _detailCache = {};
+
+function srInput(val) {
+  document.getElementById('sr-clear').style.display = val ? '' : 'none';
+  clearTimeout(_sr.timer);
+  if (!val.trim()) { srReset(); return; }
+  _sr.timer = setTimeout(() => srStart(val.trim()), 400);
+}
+function srClear() { document.getElementById('sr-input').value = ''; document.getElementById('sr-clear').style.display = 'none'; srReset(); }
+function srReset() {
+  _sr = { q:'', timer:null, busy:false, proxyPage:1, all:[], done:false };
+  document.getElementById('sr-wrap').style.display = 'none';
+  document.getElementById('sr-grid').innerHTML = '';
+}
+function srStart(q) {
+  _sr = { q, timer:null, busy:false, proxyPage:1, all:[], done:false };
+  document.getElementById('sr-wrap').style.display = '';
+  document.getElementById('sr-grid').innerHTML = '<div class="sr-msg">検索中...</div>';
+  srFetch();
+}
+async function srFetch() {
+  if (_sr.busy || _sr.done) return;
+  _sr.busy = true; const q = _sr.q;
+  try {
+    const r = await fetch(`${PROXY}/search?q=${encodeURIComponent(q)}&page=${_sr.proxyPage}`, { signal: createAbortSignal(15000) });
+    const d = await r.json();
+    if (_sr.q !== q) return;
+    if (d.cards && d.cards.length > 0) { _sr.all.push(...d.cards); _sr.proxyPage++; } else { _sr.done = true; }
+  } catch {
+    if (_sr.q !== q) return;
+    document.getElementById('sr-grid').innerHTML = '<div class="sr-msg" style="color:#f87171">エラー: プロキシを確認してください</div>';
+    _sr.busy = false; return;
+  }
+  _sr.busy = false; srRender();
+}
+function srRender() {
+  const grid = document.getElementById('sr-grid');
+  if (!_sr.all.length) { grid.innerHTML = '<div class="sr-msg">見つかりませんでした</div>'; return; }
+  grid.innerHTML = '';
+  _sr.all.forEach(c => {
+    const inDeck = deckCards.find(x => x.card.name === c.name);
+    const el = document.createElement('div'); el.className = 'sr-card';
+    el.innerHTML = c.thumb ? `<img src="${esc(c.thumb)}" alt="${esc(c.name)}" loading="lazy">` : `<div class="sr-card-ph">${esc(c.name)}</div>`;
+    if (inDeck) el.innerHTML += `<div class="sr-badge">×${inDeck.count}</div>`;
+    el.onclick = () => srAdd(c); grid.appendChild(el);
+  });
+  if (!_sr.done) { const m = document.createElement('div'); m.className = 'sr-more'; m.textContent = 'もっと見る'; m.onclick = srFetch; grid.appendChild(m); }
+}
+function srAdd(c) {
+  const existing = deckCards.find(x => x.card.name === c.name);
+  if (existing) { existing.count++; renderCardGrid(); srRender(); toast(`「${c.name}」×${existing.count}`); return; }
+  const cached = _detailCache[c.id];
+  if (cached) { _srAddCard(cached); return; }
+  fetch(`${PROXY}/detail?id=${encodeURIComponent(c.id)}`, { signal: createAbortSignal(20000) })
+    .then(r => r.json()).then(d => { _detailCache[c.id] = d; _srAddCard(d); })
+    .catch(() => toast('カード取得に失敗しました'));
+}
+function _srAddCard(detail) {
+  const card = { id:detail.id, name:detail.name, civ:detail.civ, cost:detail.cost, type:detail.type, power:detail.power, img:detail.img, race:detail.race, text:detail.text, nameEn:detail.nameEn };
+  const idx = deckCards.findIndex(x => x.card.name === card.name);
+  if (idx < 0) deckCards.push({ card, count:1 }); else deckCards[idx].count++;
+  renderCardGrid(); srRender(); toast(`「${card.name}」を追加`);
+}
+
+// ── Game State ────────────────────────────────────────────────
+let G = null;
+let _undoStack = [];
+const UNDO_MAX = 10;
+let _undoLocked = false;
+
+function startGame(deckName) {
+  loadStorage();
+  const raw = savedDecks[deckName];
+  if (!raw || !raw.length) { toast('デッキが空です'); return; }
+  let uid = 0;
+  let expanded = [];
+  raw.forEach(({ card, count }) => {
+    for (let i = 0; i < count; i++) {
+      expanded.push({ ...JSON.parse(JSON.stringify(card)), iid: String(uid++), tapped: false });
+    }
+  });
+  shuffle(expanded);
+  G = { deck: expanded, hand: [], battleZone: [], manaZone: [], graveyard: [], shields: [], turn: 1, uid };
+  for (let i = 0; i < 5 && G.deck.length; i++) G.shields.push(G.deck.pop());
+  for (let i = 0; i < 5 && G.deck.length; i++) G.hand.push(G.deck.pop());
+  _undoStack = []; _undoLocked = false;
+  showScreen('screen-game');
+  render();
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+// ── Undo ──────────────────────────────────────────────────────
+function saveUndo() {
+  if (_undoLocked) return;
+  _undoStack.push(JSON.parse(JSON.stringify(G)));
+  if (_undoStack.length > UNDO_MAX) _undoStack.shift();
+  _undoLocked = true;
+}
+function undoGame() {
+  if (!_undoStack.length) { toast('元に戻す操作がありません'); return; }
+  G = _undoStack.pop(); _undoLocked = false;
+  render(); toast(`元に戻しました (残り${_undoStack.length}手)`);
+}
+
+// ── Render ────────────────────────────────────────────────────
+function render() {
+  _undoLocked = false;
+  document.getElementById('game-turn').textContent = `ターン ${G.turn}`;
+  renderBZ(); renderShields(); renderHand(); renderMana(); renderDeckGrave();
+}
+
+function renderBZ() {
+  const el = document.getElementById('bz-scroll'); el.innerHTML = '';
+  if (!G.battleZone.length) { el.innerHTML = '<div class="zone-ph">空</div>'; return; }
+  G.battleZone.forEach(c => el.appendChild(makeCardEl(c, 'battleZone')));
+}
+function renderShields() {
+  const el = document.getElementById('shield-stack'); el.innerHTML = '';
+  G.shields.forEach((c, i) => {
+    const d = document.createElement('div');
+    d.className = 'sp-card';
+    d.style.cssText = `background:linear-gradient(135deg,#1e3a5f,#0f1e35);border-color:#2d5a8e;z-index:${i+1};`;
+    d.innerHTML = '<div class="sp-card-ph" style="color:#4a7ab5;font-size:0.65rem;font-weight:700;">DM</div>';
+    d.onclick = () => showCtx(c, 'shields');
+    el.appendChild(d);
+  });
+  for (let i = G.shields.length; i < 5; i++) {
+    const d = document.createElement('div');
+    d.style.cssText = `width:50px;height:70px;border-radius:5px;border:1px dashed var(--border);flex-shrink:0;${i > 0 ? 'margin-left:-26px;' : ''}`;
+    el.appendChild(d);
+  }
+}
+function renderHand() {
+  const el = document.getElementById('hand-scroll'); el.innerHTML = '';
+  document.getElementById('hand-count-lbl').textContent = G.hand.length ? `(${G.hand.length})` : '';
+  if (!G.hand.length) { el.innerHTML = '<div class="zone-ph">空</div>'; return; }
+  groupHandCards(G.hand).forEach(({ card, count }) => {
+    const cardEl = makeCardEl(card, 'hand');
+    if (count > 1) {
+      const badge = document.createElement('div');
+      badge.className = 'sp-tap-badge';
+      badge.style.cssText = 'top:auto;bottom:1px;right:1px;background:#1d4ed8;font-size:0.52rem;';
+      badge.textContent = `×${count}`;
+      cardEl.appendChild(badge);
+    }
+    el.appendChild(cardEl);
+  });
+}
+function renderMana() {
+  const el = document.getElementById('mana-scroll'); el.innerHTML = '';
+  document.getElementById('mana-count-lbl').textContent = G.manaZone.length ? `(${G.manaZone.length})` : '';
+  if (!G.manaZone.length) { el.innerHTML = '<div class="zone-ph">空</div>'; return; }
+  G.manaZone.forEach(c => el.appendChild(makeCardEl(c, 'manaZone')));
+}
+function renderDeckGrave() {
+  document.getElementById('deck-count').textContent = G.deck.length;
+  document.getElementById('grave-count').textContent = G.graveyard.length;
+  const graveSm = document.getElementById('grave-sm');
+  const top = G.graveyard[G.graveyard.length - 1];
+  if (top?.img) {
+    graveSm.style.cssText = `background-image:url(${top.img});background-size:cover;background-position:center;`;
+  } else {
+    graveSm.style.cssText = '';
+  }
+}
+
+function makeCardEl(card, fromZone) {
+  const el = document.createElement('div');
+  el.className = 'sp-card' + (card.tapped ? ' tapped' : '');
+  if (card.img) {
+    el.innerHTML = `<img src="${esc(card.img)}" alt="${esc(card.name)}" loading="lazy">`;
+  } else {
+    const color = CIV_COLOR[card.civ] || '#374151';
+    el.style.borderColor = color;
+    el.style.background = color + '22';
+    el.innerHTML = `<div class="sp-card-ph">${esc(card.name)}</div>`;
+  }
+  if (card.tapped) el.innerHTML += '<div class="sp-tap-badge">T</div>';
+  el.onclick = () => showCtx(card, fromZone);
+  return el;
+}
+
+// ── Game Actions ──────────────────────────────────────────────
+function move(fromZone, toZone, iid) {
+  saveUndo();
+  const arr = G[fromZone];
+  const idx = arr.findIndex(c => c.iid === iid);
+  if (idx < 0) return;
+  const [card] = arr.splice(idx, 1);
+  card.tapped = false;
+  if (toZone === 'manaZone' && card.civ === 'multi') card.tapped = true;
+  if (toZone === 'deck_top') G.deck.push(card);
+  else if (toZone === 'deck_bottom') G.deck.unshift(card);
+  else G[toZone].push(card);
+  closeCtx(); render();
+}
+
+function drawCard() {
+  if (!G.deck.length) { toast('デッキが空です'); return; }
+  saveUndo(); G.hand.push(G.deck.pop()); render(); toast('1枚ドロー');
+}
+
+function nextTurn() {
+  saveUndo(); G.turn++;
+  [...G.battleZone, ...G.manaZone].forEach(c => c.tapped = false);
+  if (G.deck.length) G.hand.push(G.deck.pop());
+  render(); toast(`ターン ${G.turn}`);
+}
+
+function tapToggle(iid) {
+  const card = [...G.battleZone, ...G.manaZone].find(c => c.iid === iid);
+  if (!card) return;
+  saveUndo(); card.tapped = !card.tapped; closeCtx(); render();
+}
+
+function deckTopTo(zone) {
+  if (!G.deck.length) return;
+  saveUndo();
+  const card = G.deck.pop();
+  card.tapped = false;
+  if (zone === 'manaZone' && card.civ === 'multi') card.tapped = true;
+  G[zone].push(card);
+  closeCtx(); render();
+}
+
+function shuffleDeckSp() {
+  saveUndo(); shuffle(G.deck); closeCtx(); render(); toast('シャッフルしました');
+}
+
+// ── Context Menu ──────────────────────────────────────────────
+const CTX_CFG = {
+  hand:       { primary:['battleZone','manaZone','graveyard','shields'], secondary:['deck_top','deck_bottom'] },
+  battleZone: { primary:['hand','manaZone','graveyard'], secondary:['shields','deck_top','deck_bottom'], tap:true },
+  manaZone:   { primary:['hand','battleZone','graveyard'], secondary:['shields','deck_top','deck_bottom'], tap:true },
+  graveyard:  { primary:['hand','battleZone','manaZone'], secondary:['shields','deck_top','deck_bottom'] },
+  shields:    { primary:['hand','graveyard'], secondary:['battleZone','manaZone','deck_top','deck_bottom'] },
+};
+const ZONE_LBL = {
+  hand:'手札', battleZone:'バトルゾーン', manaZone:'マナゾーン',
+  graveyard:'墓地', shields:'シールド', deck_top:'山札トップ', deck_bottom:'山札ボトム'
+};
+
+function showCtx(card, fromZone) {
+  const cfg = CTX_CFG[fromZone] || { primary:[], secondary:[] };
+  const mb = (zone) => `<button class="ctx-btn" onclick="move('${fromZone}','${zone}','${esc(card.iid)}')">${ZONE_LBL[zone] || zone}へ</button>`;
+
+  const thumb = card.img
+    ? `<img src="${esc(card.img)}" alt="">`
+    : `<div style="width:100%;height:100%;background:${CIV_COLOR[card.civ]||'#374151'}33;display:flex;align-items:center;justify-content:center;font-size:0.44rem;text-align:center;padding:3px;color:var(--text-dim);">${esc(card.name)}</div>`;
+
+  let html = `
+    <div class="ctx-info">
+      <div class="ctx-thumb">${thumb}</div>
+      <div>
+        <div class="ctx-title">${esc(card.name)}</div>
+        <div class="ctx-sub">コスト ${card.cost ?? '?'}　${civLabel(card.civ)}</div>
+      </div>
+    </div>
+    <div class="ctx-grid">`;
+
+  if (cfg.tap) html += `<button class="ctx-btn accent wide" onclick="tapToggle('${esc(card.iid)}')">${card.tapped ? 'アンタップ' : 'タップ'}</button>`;
+  cfg.primary.forEach(z => { html += mb(z); });
+  html += '</div>';
+
+  if (cfg.secondary.length) {
+    html += `<button class="ctx-more-btn" id="ctx-more-btn" onclick="toggleCtxMore()">その他 ▼</button>
+    <div class="ctx-secondary" id="ctx-secondary">
+      <hr class="ctx-sep">
+      <div class="ctx-grid">`;
+    cfg.secondary.forEach(z => { html += mb(z); });
+    html += '</div></div>';
+  }
+
+  html += `<button class="ctx-more-btn" style="margin-top:8px;" onclick="showCardDetailSp(${JSON.stringify(card).replace(/"/g,'&quot;')})">カード詳細を見る</button>`;
+
+  document.getElementById('ctx-sheet').innerHTML = html;
+  document.getElementById('ctx-ov').classList.add('show');
+}
+
+function toggleCtxMore() {
+  const sec = document.getElementById('ctx-secondary');
+  const btn = document.getElementById('ctx-more-btn');
+  if (!sec) return;
+  sec.classList.toggle('open');
+  btn.textContent = sec.classList.contains('open') ? 'その他 ▲' : 'その他 ▼';
+}
+
+function showDeckCtx() {
+  let html = `
+    <div class="ctx-info">
+      <div class="ctx-thumb" style="background:linear-gradient(135deg,#1e3a5f,#0f1e35);display:flex;align-items:center;justify-content:center;color:#4a7ab5;font-weight:700;font-size:0.75rem;">DM</div>
+      <div>
+        <div class="ctx-title">山札 (${G.deck.length}枚)</div>
+        <div class="ctx-sub">山札トップのカードを移動</div>
+      </div>
+    </div>
+    <div class="ctx-grid">
+      <button class="ctx-btn" onclick="deckTopTo('hand')">手札へ</button>
+      <button class="ctx-btn" onclick="deckTopTo('manaZone')">マナへ</button>
+      <button class="ctx-btn" onclick="deckTopTo('battleZone')">バトルゾーンへ</button>
+      <button class="ctx-btn" onclick="deckTopTo('graveyard')">墓地へ</button>
+    </div>
+    <hr class="ctx-sep">
+    <div class="ctx-grid">
+      <button class="ctx-btn wide" onclick="shuffleDeckSp()">シャッフル</button>
+    </div>`;
+  document.getElementById('ctx-sheet').innerHTML = html;
+  document.getElementById('ctx-ov').classList.add('show');
+}
+
+function showGraveCtx() {
+  if (!G.graveyard.length) { toast('墓地は空です'); return; }
+  const list = [...G.graveyard].reverse();
+  let html = `
+    <div class="ctx-info">
+      <div class="ctx-thumb" style="background:var(--surface2);display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:0.7rem;">墓地</div>
+      <div>
+        <div class="ctx-title">墓地 (${list.length}枚)</div>
+        <div class="ctx-sub">カードを選んで移動</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow-y:auto;">`;
+  list.forEach(card => {
+    const thumb = card.img
+      ? `<img src="${esc(card.img)}" alt="" style="width:36px;height:50px;border-radius:4px;object-fit:cover;flex-shrink:0;">`
+      : `<div style="width:36px;height:50px;border-radius:4px;background:${CIV_COLOR[card.civ]||'#374151'}44;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:0.4rem;text-align:center;padding:2px;color:var(--text-dim);">${esc(card.name)}</div>`;
+    html += `<div style="display:flex;align-items:center;gap:10px;padding:6px 4px;border-radius:8px;background:var(--surface2);cursor:pointer;" onclick="showCtx(${JSON.stringify(card).replace(/"/g,'&quot;')},'graveyard')">
+      ${thumb}
+      <div>
+        <div style="font-size:0.82rem;font-weight:600;">${esc(card.name)}</div>
+        <div style="font-size:0.7rem;color:var(--text-dim);">コスト ${card.cost ?? '?'}　${civLabel(card.civ)}</div>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  document.getElementById('ctx-sheet').innerHTML = html;
+  document.getElementById('ctx-ov').classList.add('show');
+}
+
+function closeCtx() {
+  document.getElementById('ctx-ov').classList.remove('show');
+}
+function ctxOvClick(e) {
+  if (e.target === document.getElementById('ctx-ov')) closeCtx();
+}
+
+function showGameMenu() {
+  document.getElementById('ctx-sheet').innerHTML = `
+    <div class="ctx-title" style="margin-bottom:14px;">メニュー</div>
+    <div class="ctx-grid">
+      <button class="ctx-btn wide" onclick="resetGameSp()">ゲームリセット</button>
+      <button class="ctx-btn wide" onclick="confirmLeaveGame()">デッキ選択に戻る</button>
+    </div>`;
+  document.getElementById('ctx-ov').classList.add('show');
+}
+
+function resetGameSp() {
+  if (!confirm('ゲームをリセットしますか？')) return;
+  closeCtx();
+  const all = [...G.deck,...G.hand,...G.battleZone,...G.manaZone,...G.graveyard,...G.shields]
+    .map(c => ({ ...c, tapped:false }));
+  shuffle(all);
+  G.deck = all; G.hand = []; G.battleZone = []; G.manaZone = []; G.graveyard = []; G.shields = []; G.turn = 1;
+  for (let i = 0; i < 5 && G.deck.length; i++) G.shields.push(G.deck.pop());
+  for (let i = 0; i < 5 && G.deck.length; i++) G.hand.push(G.deck.pop());
+  _undoStack = []; _undoLocked = false;
+  render(); toast('リセットしました');
+}
+
+function confirmLeaveGame() {
+  closeCtx();
+  if (confirm('デッキ選択に戻りますか？\n（ゲームの状態は失われます）')) {
+    showScreen('screen-list'); renderDeckList();
+  }
+}
+
+// ── VS Mode ───────────────────────────────────────────────────
+let VS = null;
+let _vsUndoStack = [];
+const VS_UNDO_MAX = 10;
+let _vsUndoLocked = false;
+
+// ── VS Picker ─────────────────────────────────────────────────
+function showVsPicker() {
+  loadStorage();
+  const keys = Object.keys(savedDecks);
+  if (keys.length < 1) { toast('デッキが1つ以上必要です'); return; }
+  const fillSel = (id) => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = keys.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
+  };
+  fillSel('vs-sel-p1'); fillSel('vs-sel-p2');
+  if (keys.length >= 2) document.getElementById('vs-sel-p2').selectedIndex = 1;
+  document.getElementById('vs-picker-ov').classList.add('show');
+}
+function vsPickerOvClick(e) { if (e.target === document.getElementById('vs-picker-ov')) vsPickerClose(); }
+function vsPickerClose() { document.getElementById('vs-picker-ov').classList.remove('show'); }
+function confirmStartVs() {
+  const p1 = document.getElementById('vs-sel-p1').value;
+  const p2 = document.getElementById('vs-sel-p2').value;
+  vsPickerClose();
+  startVs(p1, p2);
+}
+
+// ── VS State Init ─────────────────────────────────────────────
+function _buildPlayerState(deckName) {
+  const raw = savedDecks[deckName] || [];
+  let uid = Math.floor(Math.random() * 100000);
+  let expanded = [];
+  raw.forEach(({ card, count }) => {
+    for (let i = 0; i < count; i++) {
+      expanded.push({ ...JSON.parse(JSON.stringify(card)), iid: String(uid++), tapped: false });
+    }
+  });
+  shuffle(expanded);
+  const state = { deck: expanded, hand: [], battleZone: [], manaZone: [], graveyard: [], shields: [], deckName };
+  for (let i = 0; i < 5 && state.deck.length; i++) state.shields.push({ ...state.deck.pop(), faceUp: false });
+  for (let i = 0; i < 5 && state.deck.length; i++) state.hand.push(state.deck.pop());
+  return state;
+}
+
+function startVs(p1name, p2name) {
+  loadStorage();
+  if (!savedDecks[p1name] || !savedDecks[p1name].length) { toast('P1デッキが空です'); return; }
+  if (!savedDecks[p2name] || !savedDecks[p2name].length) { toast('P2デッキが空です'); return; }
+  VS = {
+    p1: _buildPlayerState(p1name),
+    p2: _buildPlayerState(p2name),
+    turn: 1,
+    active: 'p1',
+    view: 'p1',
+    underMode: null,
+    revealedCards: [],
+    revealedFrom: null,
+  };
+  _vsUndoStack = []; _vsUndoLocked = false;
+  showScreen('screen-vs');
+  renderVs();
+}
+
+// ── VS Undo ───────────────────────────────────────────────────
+function saveVsUndo() {
+  if (_vsUndoLocked) return;
+  _vsUndoStack.push(JSON.parse(JSON.stringify(VS)));
+  if (_vsUndoStack.length > VS_UNDO_MAX) _vsUndoStack.shift();
+  _vsUndoLocked = true;
+}
+function undoVs() {
+  if (!_vsUndoStack.length) { toast('元に戻す操作がありません'); return; }
+  VS = _vsUndoStack.pop(); _vsUndoLocked = false;
+  closeCtxVs(); renderVs(); toast(`元に戻しました (残り${_vsUndoStack.length}手)`);
+}
+
+// ── VS Render ─────────────────────────────────────────────────
+function renderVs() {
+  _vsUndoLocked = false;
+  renderVsHalf('p1'); renderVsHalf('p2'); renderVsFooter();
+}
+
+function renderVsHalf(p) {
+  const ps = VS[p];
+  const inUnder = VS.underMode && VS.underMode.p === p;
+  // Under bar
+  const bar = document.getElementById(`vs-under-bar-${p}`);
+  bar.classList.toggle('active', !!inUnder);
+  if (inUnder) document.getElementById(`vs-under-text-${p}`).textContent = `「${VS.underMode.card.name}」を下に重ねる`;
+  // BZ
+  const bzEl = document.getElementById(`vs-bz-scroll-${p}`);
+  bzEl.className = 'vs-zone-scroll vs-drop-zone';
+  bzEl.dataset.vsZone = 'battleZone'; bzEl.dataset.vsP = p;
+  bzEl.innerHTML = '';
+  if (!ps.battleZone.length) bzEl.innerHTML = '<div class="vs-zone-ph">空</div>';
+  else ps.battleZone.forEach(c => bzEl.appendChild(makeVsCardStack(c, 'battleZone', p)));
+  // Hand
+  const handEl = document.getElementById(`vs-hand-scroll-${p}`);
+  handEl.className = 'vs-zone-scroll vs-drop-zone';
+  handEl.dataset.vsZone = 'hand'; handEl.dataset.vsP = p;
+  handEl.innerHTML = '';
+  document.getElementById(`vs-hand-count-${p}`).textContent = ps.hand.length ? `(${ps.hand.length})` : '';
+  if (!ps.hand.length) handEl.innerHTML = '<div class="vs-zone-ph">空</div>';
+  else groupHandCards(ps.hand).forEach(({ card, count }) => {
+    const cardEl = makeVsCard(card, 'hand', p);
+    if (count > 1) {
+      const badge = document.createElement('div');
+      badge.className = 'vs-tap-badge';
+      badge.style.cssText = 'top:auto;bottom:1px;right:1px;background:#1d4ed8;';
+      badge.textContent = `×${count}`;
+      cardEl.appendChild(badge);
+    }
+    handEl.appendChild(cardEl);
+  });
+  // Mana
+  const manaEl = document.getElementById(`vs-mana-scroll-${p}`);
+  manaEl.className = 'vs-zone-scroll vs-drop-zone';
+  manaEl.dataset.vsZone = 'manaZone'; manaEl.dataset.vsP = p;
+  manaEl.innerHTML = '';
+  document.getElementById(`vs-mana-count-${p}`).textContent = ps.manaZone.length ? `(${ps.manaZone.length})` : '';
+  if (!ps.manaZone.length) manaEl.innerHTML = '<div class="vs-zone-ph">空</div>';
+  else ps.manaZone.forEach(c => manaEl.appendChild(makeVsCard(c, 'manaZone', p)));
+  // Shields
+  const shEl = document.getElementById(`vs-shield-stack-${p}`);
+  shEl.innerHTML = '';
+  ps.shields.forEach((c, i) => {
+    const d = document.createElement('div');
+    d.className = 'vs-card';
+    if (c.faceUp && c.img) {
+      d.innerHTML = `<img src="${esc(c.img)}" alt="${esc(c.name)}" loading="lazy">`;
+      d.style.cssText = `z-index:${i+1};`;
+    } else {
+      d.style.cssText = `background:linear-gradient(135deg,#1e3a5f,#0f1e35);border-color:#2d5a8e;z-index:${i+1};`;
+      d.innerHTML = '<div class="vs-card-ph" style="color:#4a7ab5;font-size:0.58rem;font-weight:700;">DM</div>';
+    }
+    if (i > 0) d.style.marginLeft = '-20px';
+    d.onclick = () => showCtxVs(c, 'shields', p);
+    shEl.appendChild(d);
+  });
+  for (let i = ps.shields.length; i < 5; i++) {
+    const d = document.createElement('div');
+    d.style.cssText = `width:40px;height:56px;border-radius:4px;border:1px dashed var(--border);flex-shrink:0;${i > 0 ? 'margin-left:-20px;' : ''}`;
+    shEl.appendChild(d);
+  }
+  // Deck & Grave
+  document.getElementById(`vs-deck-count-${p}`).textContent = ps.deck.length;
+  document.getElementById(`vs-grave-count-${p}`).textContent = ps.graveyard.length;
+  const graveSm = document.getElementById(`vs-grave-sm-${p}`);
+  const top = ps.graveyard[ps.graveyard.length - 1];
+  if (top?.img) {
+    graveSm.style.cssText = `background-image:url(${top.img});background-size:cover;background-position:center;`;
+  } else {
+    graveSm.style.cssText = '';
+  }
+}
+
+function renderVsFooter() {
+  const turnTxt = `ターン ${VS.turn}`;
+  document.getElementById('vs-turn-lbl-p1').textContent = turnTxt;
+  document.getElementById('vs-turn-lbl-p2').textContent = turnTxt;
+  document.getElementById('vs-footer-p1').classList.toggle('active-turn', VS.active === 'p1');
+  document.getElementById('vs-footer-p2').classList.toggle('active-turn', VS.active === 'p2');
+}
+
+function makeVsCard(card, fromZone, p) {
+  const el = document.createElement('div');
+  const inUnder = VS.underMode && VS.underMode.p === p;
+  const isTarget = inUnder && fromZone === 'battleZone';
+  el.className = 'vs-card' + (card.tapped ? ' tapped' : '') + (isTarget ? ' under-target' : '');
+  if (card.img) {
+    el.innerHTML = `<img src="${esc(card.img)}" alt="${esc(card.name)}" loading="lazy">`;
+  } else {
+    const color = CIV_COLOR[card.civ] || '#374151';
+    el.style.borderColor = color;
+    el.style.background = color + '22';
+    el.innerHTML = `<div class="vs-card-ph">${esc(card.name)}</div>`;
+  }
+  if (card.tapped) el.innerHTML += '<div class="vs-tap-badge">T</div>';
+  el.onclick = () => {
+    if (_vsDrag.wasDragging) { _vsDrag.wasDragging = false; return; }
+    if (isTarget) { placeUnderVs(p, card); return; }
+    showCtxVs(card, fromZone, p);
+  };
+  initVsTouchDrag(el, card, fromZone, p);
+  return el;
+}
+
+// ── VS Actions ────────────────────────────────────────────────
+function moveVs(p, fromZone, toZone, iid) {
+  if (!olCanControl(p)) return;
+  saveVsUndo();
+  const ps = VS[p];
+  const arr = ps[fromZone];
+  const idx = arr.findIndex(c => c.iid === iid);
+  if (idx < 0) return;
+  const [card] = arr.splice(idx, 1);
+  // BZ以外へ移動するときunder cardsを墓地へ
+  if (toZone !== 'battleZone' && card.under && card.under.length) {
+    card.under.forEach(uc => { uc.tapped = false; ps.graveyard.push(uc); });
+    delete card.under;
+  }
+  card.tapped = false;
+  if (toZone === 'manaZone' && card.civ === 'multi') card.tapped = true;
+  if (toZone === 'deck_top') ps.deck.push(card);
+  else if (toZone === 'deck_bottom') ps.deck.unshift(card);
+  else ps[toZone].push(card);
+  closeCtxVs(); renderVs();
+  olSync();
+}
+
+function drawVs(p) {
+  if (!olCanControl(p)) return;
+  const ps = VS[p];
+  if (!ps.deck.length) { toast('デッキが空です'); return; }
+  saveVsUndo(); ps.hand.push(ps.deck.pop()); 
+  if (OL) addOpLog(p, '1枚ドロー');
+  renderVs(); toast('1枚ドロー');
+  olSync();
+}
+
+function nextTurnVs(p) {
+  if (!olCanControl(p)) return;
+  saveVsUndo();
+  const ps = VS[p];
+  [...ps.battleZone, ...ps.manaZone].forEach(c => c.tapped = false);
+  if (ps.deck.length) ps.hand.push(ps.deck.pop());
+  VS.turn++;
+  VS.active = p === 'p1' ? 'p2' : 'p1';
+  if (OL) addOpLog(p, 'ターンを終了しました');
+  renderVs(); toast(`ターン ${VS.turn}`);
+  olSyncTurnEnd();
+}
+
+function tapToggleVs(p, iid) {
+  if (!olCanControl(p)) return;
+  const ps = VS[p];
+  const card = [...ps.battleZone, ...ps.manaZone].find(c => c.iid === iid);
+  if (!card) return;
+  saveVsUndo(); card.tapped = !card.tapped; closeCtxVs(); renderVs();
+  olSync();
+}
+
+function shieldFlipVs(p, iid) {
+  if (!olCanControl(p)) return;
+  const ps = VS[p];
+  const card = ps.shields.find(c => c.iid === iid);
+  if (!card) return;
+  saveVsUndo(); card.faceUp = !card.faceUp; closeCtxVs(); renderVs();
+  olSync();
+}
+
+function deckTopToVs(p, zone) {
+  if (!olCanControl(p)) return;
+  const ps = VS[p];
+  if (!ps.deck.length) return;
+  saveVsUndo();
+  const card = ps.deck.pop();
+  card.tapped = false;
+  if (zone === 'manaZone' && card.civ === 'multi') card.tapped = true;
+  ps[zone].push(card);
+  closeCtxVs(); renderVs();
+  olSync();
+}
+
+function shuffleDeckVs(p) {
+  if (!olCanControl(p)) return;
+  saveVsUndo(); shuffle(VS[p].deck); closeCtxVs(); renderVs(); toast('シャッフルしました');
+  olSync();
+}
+
+// ── VS Context Menus ──────────────────────────────────────────
+function _vsCtxOvId(p) {
+  const p2Bottom = VS && VS.view === 'p2';
+  if (p === 'p2') return p2Bottom ? 'ctx-ov' : 'ctx-ov-p2';
+  return p2Bottom ? 'ctx-ov-p2' : 'ctx-ov';
+}
+function _vsCtxSheetId(p) {
+  const p2Bottom = VS && VS.view === 'p2';
+  if (p === 'p2') return p2Bottom ? 'ctx-sheet' : 'ctx-sheet-p2';
+  return p2Bottom ? 'ctx-sheet-p2' : 'ctx-sheet';
+}
+
+const VS_CTX_CFG = {
+  hand:       { primary:['battleZone','manaZone','graveyard','shields'], secondary:['deck_top','deck_bottom'] },
+  battleZone: { primary:['hand','manaZone','graveyard'], secondary:['shields','deck_top','deck_bottom'], tap:true },
+  manaZone:   { primary:['hand','battleZone','graveyard'], secondary:['shields','deck_top','deck_bottom'], tap:true },
+  graveyard:  { primary:['hand','battleZone','manaZone'], secondary:['shields','deck_top','deck_bottom'] },
+  shields:    { primary:['hand','graveyard'], secondary:['battleZone','manaZone','deck_top','deck_bottom'], flip:true },
+};
+
+function showCtxVs(card, fromZone, p) {
+  if (!olCanControl(p)) return;
+  const cfg = VS_CTX_CFG[fromZone] || { primary:[], secondary:[] };
+  const mb = (zone) => `<button class="ctx-btn" onclick="moveVs('${p}','${fromZone}','${zone}','${esc(card.iid)}')">${ZONE_LBL[zone] || zone}へ</button>`;
+
+  const thumb = card.img
+    ? `<img src="${esc(card.img)}" alt="">`
+    : `<div style="width:100%;height:100%;background:${CIV_COLOR[card.civ]||'#374151'}33;display:flex;align-items:center;justify-content:center;font-size:0.44rem;text-align:center;padding:3px;color:var(--text-dim);">${esc(card.name)}</div>`;
+
+  let html = `
+    <div class="ctx-info">
+      <div class="ctx-thumb">${thumb}</div>
+      <div>
+        <div class="ctx-title">${esc(card.name)}</div>
+        <div class="ctx-sub">コスト ${card.cost ?? '?'}　${civLabel(card.civ)}</div>
+      </div>
+    </div>
+    <div class="ctx-grid">`;
+
+  if (cfg.tap) html += `<button class="ctx-btn accent wide" onclick="tapToggleVs('${p}','${esc(card.iid)}')">${card.tapped ? 'アンタップ' : 'タップ'}</button>`;
+  if (cfg.tap) html += `<button class="ctx-btn wide" onclick="enterUnderModeVs('${p}','${esc(card.iid)}','${fromZone}')">下に入れる</button>`;
+  if (cfg.flip) {
+    const flipLbl = card.faceUp ? '裏向きにする' : '表向きにする';
+    html += `<button class="ctx-btn wide" onclick="shieldFlipVs('${p}','${esc(card.iid)}')">${flipLbl}</button>`;
+  }
+  cfg.primary.forEach(z => { html += mb(z); });
+  html += '</div>';
+
+  if (cfg.secondary.length) {
+    html += `<button class="ctx-more-btn" id="ctx-more-btn-${p}" onclick="toggleCtxMoreVs('${p}')">その他 ▼</button>
+    <div class="ctx-secondary" id="ctx-secondary-${p}">
+      <hr class="ctx-sep">
+      <div class="ctx-grid">`;
+    cfg.secondary.forEach(z => { html += mb(z); });
+    html += '</div></div>';
+  }
+
+  html += `<button class="ctx-more-btn" style="margin-top:8px;" onclick="showCardDetailSp(${JSON.stringify(card).replace(/"/g,'&quot;')})">カード詳細を見る</button>`;
+
+  document.getElementById(_vsCtxSheetId(p)).innerHTML = html;
+  document.getElementById(_vsCtxOvId(p)).classList.add('show');
+}
+
+function toggleCtxMoreVs(p) {
+  const sec = document.getElementById(`ctx-secondary-${p}`);
+  const btn = document.getElementById(`ctx-more-btn-${p}`);
+  if (!sec) return;
+  sec.classList.toggle('open');
+  btn.textContent = sec.classList.contains('open') ? 'その他 ▲' : 'その他 ▼';
+}
+
+function showDeckCtxVs(p) {
+  if (!olCanControl(p)) return;
+  const ps = VS[p];
+  let html = `
+    <div class="ctx-info">
+      <div class="ctx-thumb" style="background:linear-gradient(135deg,#1e3a5f,#0f1e35);display:flex;align-items:center;justify-content:center;color:#4a7ab5;font-weight:700;font-size:0.75rem;">DM</div>
+      <div>
+        <div class="ctx-title">山札 (${ps.deck.length}枚)</div>
+        <div class="ctx-sub">山札トップのカードを移動</div>
+      </div>
+    </div>
+    <div class="ctx-grid">
+      <button class="ctx-btn" onclick="deckTopToVs('${p}','hand')">手札へ</button>
+      <button class="ctx-btn" onclick="deckTopToVs('${p}','manaZone')">マナへ</button>
+      <button class="ctx-btn" onclick="deckTopToVs('${p}','battleZone')">バトルゾーンへ</button>
+      <button class="ctx-btn" onclick="deckTopToVs('${p}','graveyard')">墓地へ</button>
+    </div>
+    <hr class="ctx-sep">
+    <div class="ctx-grid">
+      <button class="ctx-btn" onclick="startRevealVs('${p}',1)">1枚めくり</button>
+      <button class="ctx-btn" onclick="startRevealVs('${p}',5)">5枚めくり</button>
+      <button class="ctx-btn" onclick="startRevealVsPrompt('${p}')">N枚めくり</button>
+      <button class="ctx-btn" onclick="shuffleDeckVs('${p}')">シャッフル</button>
+    </div>`;
+  document.getElementById(_vsCtxSheetId(p)).innerHTML = html;
+  document.getElementById(_vsCtxOvId(p)).classList.add('show');
+}
+
+function showGraveCtxVs(p) {
+  if (!olCanControl(p)) return;
+  const ps = VS[p];
+  if (!ps.graveyard.length) { toast('墓地は空です'); return; }
+  const list = [...ps.graveyard].reverse();
+  let html = `
+    <div class="ctx-info">
+      <div class="ctx-thumb" style="background:var(--surface2);display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:0.7rem;">墓地</div>
+      <div>
+        <div class="ctx-title">墓地 (${list.length}枚)</div>
+        <div class="ctx-sub">カードを選んで移動</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow-y:auto;">`;
+  list.forEach(card => {
+    const thumb = card.img
+      ? `<img src="${esc(card.img)}" alt="" style="width:36px;height:50px;border-radius:4px;object-fit:cover;flex-shrink:0;">`
+      : `<div style="width:36px;height:50px;border-radius:4px;background:${CIV_COLOR[card.civ]||'#374151'}44;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:0.4rem;text-align:center;padding:2px;color:var(--text-dim);">${esc(card.name)}</div>`;
+    html += `<div style="display:flex;align-items:center;gap:10px;padding:6px 4px;border-radius:8px;background:var(--surface2);cursor:pointer;" onclick="showCtxVs(${JSON.stringify(card).replace(/"/g,'&quot;')},'graveyard','${p}')">
+      ${thumb}
+      <div>
+        <div style="font-size:0.82rem;font-weight:600;">${esc(card.name)}</div>
+        <div style="font-size:0.7rem;color:var(--text-dim);">コスト ${card.cost ?? '?'}　${civLabel(card.civ)}</div>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  document.getElementById(_vsCtxSheetId(p)).innerHTML = html;
+  document.getElementById(_vsCtxOvId(p)).classList.add('show');
+}
+
+function closeCtxVs() {
+  document.getElementById('ctx-ov').classList.remove('show');
+  document.getElementById('ctx-ov-p2').classList.remove('show');
+}
+
+function ctxOvClickP2(e) {
+  if (e.target === document.getElementById('ctx-ov-p2')) closeCtxVs();
+}
+
+function showVsMenu(p) {
+  const sheetId = _vsCtxSheetId(p);
+  const ovId = _vsCtxOvId(p);
+  document.getElementById(sheetId).innerHTML = `
+    <div class="ctx-title" style="margin-bottom:14px;">メニュー (${p.toUpperCase()})</div>
+    <div class="ctx-grid">
+      <button class="ctx-btn wide" onclick="undoVs()">↩ アンドゥ</button>
+      <button class="ctx-btn wide" onclick="resetVs()">ゲームリセット</button>
+      <button class="ctx-btn wide" onclick="confirmLeaveVs()">デッキ選択に戻る</button>
+    </div>`;
+  document.getElementById(ovId).classList.add('show');
+}
+
+function resetVs() {
+  if (!confirm('ゲームをリセットしますか？')) return;
+  closeCtxVs();
+  ['p1','p2'].forEach(p => {
+    const ps = VS[p];
+    const all = [...ps.deck,...ps.hand,...ps.battleZone,...ps.manaZone,...ps.graveyard,...ps.shields]
+      .map(c => ({ ...c, tapped:false, faceUp:false }));
+    shuffle(all);
+    ps.deck = all; ps.hand = []; ps.battleZone = []; ps.manaZone = []; ps.graveyard = []; ps.shields = [];
+    for (let i = 0; i < 5 && ps.deck.length; i++) ps.shields.push({ ...ps.deck.pop(), faceUp: false });
+    for (let i = 0; i < 5 && ps.deck.length; i++) ps.hand.push(ps.deck.pop());
+  });
+  VS.turn = 1; VS.active = 'p1'; VS.view = 'p1';
+  VS.underMode = null; VS.revealedCards = []; VS.revealedFrom = null;
+  document.getElementById('vs-board').classList.remove('p2-view');
+  document.getElementById('vs-reveal-ov').classList.remove('show');
+  _vsUndoStack = []; _vsUndoLocked = false;
+  renderVs(); toast('リセットしました');
+}
+
+function confirmLeaveVs() {
+  closeCtxVs();
+  if (confirm('デッキ選択に戻りますか？\n（ゲームの状態は失われます）')) {
+    VS = null;
+    document.getElementById('vs-board').classList.remove('p2-view');
+    document.getElementById('vs-reveal-ov').classList.remove('show');
+    showScreen('screen-list'); renderDeckList();
+  }
+}
+
+// ── Card Detail ───────────────────────────────────────────────
+function showCardDetailSp(c) {
+  const TYPE_LBL = { creature:'クリーチャー', spell:'呪文', evolution:'進化クリーチャー' };
+  const colorBar = CIV_COLOR[c.civ] || '#374151';
+  let html = `
+    <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:14px;">
+      <div class="cd-img" style="border:2px solid ${colorBar}44;">
+        ${c.img ? `<img src="${esc(c.img)}" alt="${esc(c.name)}">` : `<div style="width:100%;height:100%;background:${colorBar}33;display:flex;align-items:center;justify-content:center;font-size:0.5rem;text-align:center;padding:4px;color:var(--text-dim);">${esc(c.name)}</div>`}
+      </div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:0.95rem;font-weight:700;margin-bottom:8px;line-height:1.3;">${esc(c.name)}</div>
+        <table class="cd-table">
+          <tr><td>文明</td><td><span style="background:${colorBar};color:#fff;padding:1px 10px;border-radius:10px;font-size:0.75rem;font-weight:700;">${civLabel(c.civ) || '不明'}</span></td></tr>
+          <tr><td>コスト</td><td>${c.cost ?? '?'}</td></tr>
+          ${c.type ? `<tr><td>種類</td><td>${TYPE_LBL[c.type] || esc(c.type)}</td></tr>` : ''}
+          ${c.power ? `<tr><td>パワー</td><td>${Number(c.power).toLocaleString()}</td></tr>` : ''}
+          ${c.race ? `<tr><td>種族</td><td>${esc(c.race)}</td></tr>` : ''}
+        </table>
+      </div>
+    </div>
+    ${c.text ? `<div class="cd-text">${esc(c.text)}</div>` : ''}`;
+  document.getElementById('cd-sheet').innerHTML = html;
+  document.getElementById('cd-ov').classList.add('show');
+}
+
+function closeCardDetail() { document.getElementById('cd-ov').classList.remove('show'); }
+function cdOvClick(e) { if (e.target === document.getElementById('cd-ov')) closeCardDetail(); }
+
+// ── VS Perspective ────────────────────────────────────────────
+function switchVsView() {
+  if (OL) return; // view locked in online mode (always from own perspective)
+  VS.view = VS.view === 'p1' ? 'p2' : 'p1';
+  document.getElementById('vs-board').classList.toggle('p2-view', VS.view === 'p2');
+}
+
+// ── VS Under Mode ─────────────────────────────────────────────
+function makeVsCardStack(card, fromZone, p) {
+  if (!card.under || !card.under.length) return makeVsCard(card, fromZone, p);
+  const PEEK = 13;
+  const shown = card.under.slice(-3);
+  const wrap = document.createElement('div');
+  wrap.className = 'vs-card-stack';
+  wrap.style.marginLeft = shown.length * PEEK + 'px';
+  shown.forEach((uc, i) => {
+    const peek = document.createElement('div');
+    peek.className = 'vs-card-under-peek';
+    peek.style.cssText = `left:-${(shown.length - i) * PEEK}px;z-index:${i + 1};`;
+    peek.title = uc.name;
+    if (uc.img) peek.innerHTML = `<img src="${esc(uc.img)}" alt="">`;
+    wrap.appendChild(peek);
+  });
+  const main = makeVsCard(card, fromZone, p);
+  wrap.appendChild(main);
+  return wrap;
+}
+
+function enterUnderModeVs(p, iid, fromZone) {
+  const ps = VS[p];
+  const card = ps[fromZone] ? ps[fromZone].find(c => c.iid === iid) : null;
+  if (!card) return;
+  VS.underMode = { p, card, fromZone };
+  closeCtxVs();
+  renderVs();
+}
+
+function cancelUnderModeVs(p) {
+  VS.underMode = null;
+  renderVs();
+}
+
+function placeUnderVs(p, targetCard) {
+  if (!VS.underMode) return;
+  const { p: srcP, card, fromZone } = VS.underMode;
+  if (card.iid === targetCard.iid) { VS.underMode = null; renderVs(); return; }
+  saveVsUndo();
+  const srcArr = VS[srcP][fromZone];
+  const idx = srcArr.findIndex(c => c.iid === card.iid);
+  if (idx >= 0) srcArr.splice(idx, 1);
+  if (!targetCard.under) targetCard.under = [];
+  targetCard.under.unshift({ ...card, tapped: false });
+  VS.underMode = null;
+  renderVs();
+}
+
+// ── VS Reveal ─────────────────────────────────────────────────
+function startRevealVsPrompt(p) {
+  const ps = VS[p];
+  const input = prompt(`何枚めくりますか？（山札: ${ps.deck.length}枚）`);
+  if (input === null) return;
+  const n = parseInt(input, 10);
+  if (!n || n < 1) { toast('正しい枚数を入力してください'); return; }
+  startRevealVs(p, n);
+}
+
+function startRevealVs(p, n) {
+  const ps = VS[p];
+  if (!ps.deck.length) { toast('デッキが空です'); return; }
+  saveVsUndo();
+  const actual = Math.min(n, ps.deck.length);
+  VS.revealedCards = ps.deck.splice(ps.deck.length - actual, actual).reverse();
+  VS.revealedFrom = p;
+  closeCtxVs();
+  renderRevealedVs();
+  renderVs();
+}
+
+function renderRevealedVs() {
+  const ov = document.getElementById('vs-reveal-ov');
+  if (!VS || !VS.revealedCards || !VS.revealedCards.length) { ov.classList.remove('show'); return; }
+  const p = VS.revealedFrom;
+  const ZONES = [
+    { zone:'hand', lbl:'手札' }, { zone:'battleZone', lbl:'BZ' },
+    { zone:'manaZone', lbl:'マナ' }, { zone:'graveyard', lbl:'墓地' }, { zone:'shields', lbl:'シールド' },
+  ];
+  const zBtns = (iid) => ZONES.map(({zone, lbl}) =>
+    `<button class="btn btn-gray" style="font-size:0.68rem;padding:4px 7px;" onclick="moveOneRevealedVs('${iid}','${zone}')">${lbl}</button>`
+  ).join('');
+
+  let html = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+    <span style="font-size:0.85rem;font-weight:700;">公開中 ${VS.revealedCards.length}枚（${p.toUpperCase()}）</span>
+    <button class="btn btn-gray" style="font-size:0.72rem;padding:4px 10px;" onclick="returnRevealedVs()">全部戻す</button>
+  </div>`;
+
+  html += `<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border);">
+    <span style="font-size:0.7rem;color:var(--text-dim);width:100%;margin-bottom:2px;">全枚数を一括移動</span>`;
+  ZONES.forEach(({zone, lbl}) => {
+    html += `<button class="btn btn-gray" style="font-size:0.72rem;padding:4px 10px;" onclick="moveAllRevealedVs('${zone}')">全→${lbl}</button>`;
+  });
+  html += `</div>`;
+
+  html += `<div style="display:flex;flex-direction:column;gap:8px;">`;
+  VS.revealedCards.forEach((c) => {
+    const bg = c.img
+      ? `background-image:url(${esc(c.img)});background-size:cover;background-position:center;`
+      : `background:${CIV_COLOR[c.civ] || '#374151'};`;
+    const cardJson = JSON.stringify(c).replace(/"/g, '&quot;');
+    html += `<div style="display:flex;gap:10px;align-items:center;background:var(--surface2);border-radius:10px;padding:8px;">
+      <div style="width:40px;height:56px;border-radius:5px;flex-shrink:0;${bg}border:1px solid var(--border);cursor:pointer;"
+           onclick="showCardDetailSp(${cardJson})"></div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:0.8rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(c.name)}</div>
+        <div style="font-size:0.68rem;color:var(--text-dim);margin-bottom:5px;">コスト ${c.cost ?? '?'}　${civLabel(c.civ)}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;">${zBtns(c.iid)}
+          <button class="btn btn-gray" style="font-size:0.68rem;padding:4px 7px;" onclick="returnOneRevealedVs('${c.iid}')">戻す</button>
+        </div>
+      </div>
+    </div>`;
+  });
+  html += `</div>`;
+
+  document.getElementById('vs-reveal-sheet').innerHTML = html;
+  ov.classList.add('show');
+}
+
+function moveOneRevealedVs(iid, zone) {
+  if (!VS.revealedCards) return;
+  const p = VS.revealedFrom;
+  const idx = VS.revealedCards.findIndex(c => c.iid === iid);
+  if (idx < 0) return;
+  const [card] = VS.revealedCards.splice(idx, 1);
+  card.tapped = false;
+  if (zone === 'manaZone' && card.civ === 'multi') card.tapped = true;
+  if (zone === 'shields') VS[p].shields.push({ ...card, faceUp: false });
+  else VS[p][zone].push(card);
+  if (!VS.revealedCards.length) {
+    VS.revealedFrom = null;
+    document.getElementById('vs-reveal-ov').classList.remove('show');
+    renderVs();
+  } else {
+    renderRevealedVs();
+    renderVs();
+  }
+}
+
+function returnOneRevealedVs(iid) {
+  if (!VS.revealedCards) return;
+  const p = VS.revealedFrom;
+  const idx = VS.revealedCards.findIndex(c => c.iid === iid);
+  if (idx < 0) return;
+  const [card] = VS.revealedCards.splice(idx, 1);
+  VS[p].deck.push(card);
+  if (!VS.revealedCards.length) {
+    VS.revealedFrom = null;
+    document.getElementById('vs-reveal-ov').classList.remove('show');
+    renderVs();
+  } else {
+    renderRevealedVs();
+    renderVs();
+  }
+}
+
+function moveAllRevealedVs(zone) {
+  if (!VS.revealedCards || !VS.revealedCards.length) return;
+  const p = VS.revealedFrom;
+  VS.revealedCards.forEach(c => {
+    c.tapped = false;
+    if (zone === 'manaZone' && c.civ === 'multi') c.tapped = true;
+    if (zone === 'shields') VS[p].shields.push({ ...c, faceUp: false });
+    else VS[p][zone].push(c);
+  });
+  VS.revealedCards = []; VS.revealedFrom = null;
+  document.getElementById('vs-reveal-ov').classList.remove('show');
+  renderVs();
+}
+
+function returnRevealedVs() {
+  if (!VS.revealedCards || !VS.revealedCards.length) return;
+  const p = VS.revealedFrom;
+  [...VS.revealedCards].reverse().forEach(c => VS[p].deck.push(c));
+  VS.revealedCards = []; VS.revealedFrom = null;
+  document.getElementById('vs-reveal-ov').classList.remove('show');
+  renderVs();
+}
+
+function vsRevealOvClick(e) {
+  if (e.target === document.getElementById('vs-reveal-ov')) returnRevealedVs();
+}
+
+// ── VS Touch D&D ──────────────────────────────────────────────
+let _vsDrag = { active:false, wasDragging:false, iid:null, fromZone:null, p:null, ghost:null, timer:null, startX:0, startY:0 };
+
+function initVsTouchDrag(el, card, fromZone, p) {
+  if (!olCanControl(p)) return; // opponent cards are not draggable
+  el.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    _vsDrag.startX = t.clientX; _vsDrag.startY = t.clientY;
+    _vsDrag.timer = setTimeout(() => {
+      _vsDrag.active = true; _vsDrag.iid = card.iid; _vsDrag.fromZone = fromZone; _vsDrag.p = p;
+      el.classList.add('vs-dragging');
+      const ghost = document.createElement('div');
+      ghost.className = 'vs-drag-ghost';
+      if (card.img) ghost.innerHTML = `<img src="${esc(card.img)}" alt="" style="width:100%;height:100%;object-fit:cover;">`;
+      else ghost.style.background = CIV_COLOR[card.civ] || '#374151';
+      ghost.style.left = (t.clientX - 20) + 'px';
+      ghost.style.top  = (t.clientY - 28) + 'px';
+      document.body.appendChild(ghost);
+      _vsDrag.ghost = ghost;
+    }, 420);
+  }, { passive: true });
+
+  el.addEventListener('touchmove', e => {
+    const t = e.touches[0];
+    if (!_vsDrag.active) {
+      if (Math.abs(t.clientX - _vsDrag.startX) > 8 || Math.abs(t.clientY - _vsDrag.startY) > 8) {
+        clearTimeout(_vsDrag.timer); _vsDrag.timer = null;
+      }
+      return;
+    }
+    e.preventDefault();
+    if (_vsDrag.ghost) {
+      _vsDrag.ghost.style.left = (t.clientX - 20) + 'px';
+      _vsDrag.ghost.style.top  = (t.clientY - 28) + 'px';
+    }
+    _vsHighlightDrop(t.clientX, t.clientY);
+  }, { passive: false });
+
+  el.addEventListener('touchend', e => {
+    clearTimeout(_vsDrag.timer); _vsDrag.timer = null;
+    if (!_vsDrag.active) return;
+    const t = e.changedTouches[0];
+    _vsEndDrag(t.clientX, t.clientY);
+  });
+
+  el.addEventListener('touchcancel', () => {
+    clearTimeout(_vsDrag.timer); _vsResetDrag();
+  });
+}
+
+function _vsHighlightDrop(x, y) {
+  document.querySelectorAll('.vs-drop-zone').forEach(z => z.classList.remove('drag-over'));
+  if (_vsDrag.ghost) _vsDrag.ghost.style.visibility = 'hidden';
+  const el = document.elementFromPoint(x, y);
+  if (_vsDrag.ghost) _vsDrag.ghost.style.visibility = '';
+  if (!el) return;
+  const zone = el.closest('[data-vs-zone]');
+  if (zone) zone.classList.add('drag-over');
+}
+
+function _vsEndDrag(x, y) {
+  if (_vsDrag.ghost) _vsDrag.ghost.style.visibility = 'hidden';
+  const el = document.elementFromPoint(x, y);
+  _vsResetDrag();
+  if (!el) return;
+  const zoneEl = el.closest('[data-vs-zone]');
+  if (!zoneEl) return;
+  const toZone = zoneEl.dataset.vsZone;
+  const toP    = zoneEl.dataset.vsP;
+  if (!toZone || !toP || !_vsDrag.iid) return;
+  // 同一ゾーンへのドロップは無視
+  if (_vsDrag.fromZone === toZone && _vsDrag.p === toP) return;
+  saveVsUndo();
+  const ps = VS[_vsDrag.p];
+  const arr = ps[_vsDrag.fromZone];
+  const idx = arr ? arr.findIndex(c => c.iid === _vsDrag.iid) : -1;
+  if (idx < 0) return;
+  const [card] = arr.splice(idx, 1);
+  if (toZone !== 'battleZone' && card.under && card.under.length) {
+    card.under.forEach(uc => { uc.tapped = false; ps.graveyard.push(uc); });
+    delete card.under;
+  }
+  card.tapped = false;
+  if (toZone === 'manaZone' && card.civ === 'multi') card.tapped = true;
+  if (toZone === 'shields') VS[toP].shields.push({ ...card, faceUp: false });
+  else VS[toP][toZone].push(card);
+  renderVs();
+}
+
+function _vsResetDrag() {
+  const { iid, fromZone, p } = _vsDrag;
+  const wasDragging = _vsDrag.active;
+  if (_vsDrag.ghost) { _vsDrag.ghost.remove(); }
+  document.querySelectorAll('.vs-dragging').forEach(e => e.classList.remove('vs-dragging'));
+  document.querySelectorAll('.drag-over').forEach(e => e.classList.remove('drag-over'));
+  _vsDrag = { active:false, wasDragging, iid, fromZone, p, ghost:null, timer:null, startX:0, startY:0 };
+  // 次のクリックイベントで wasDragging をクリア
+  if (wasDragging) setTimeout(() => { _vsDrag.wasDragging = false; }, 50);
+}
+
+// ── Util ──────────────────────────────────────────────────────
+function groupHandCards(cards) {
+  const seen = new Map(); // name → { card, count }
+  cards.forEach(c => {
+    if (seen.has(c.name)) seen.get(c.name).count++;
+    else seen.set(c.name, { card: c, count: 1 });
+  });
+  return [...seen.values()];
+}
+function civLabel(c) {
+  return { fire:'火文明', water:'水文明', light:'光文明', dark:'闇文明', nature:'自然文明', multi:'多色' }[c] || '';
+}
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Online Mode (オンライン対戦) ────────────────────────────────
+let OL = null;  // {room, p, p1Name, p2Name, eventSource, reconnectAttempt}
+let _olSSETimer = null;
+let _prevGameState = null;  // 差分検出用
+let _olReconnectTimer = null;
+let _opLog = [];  // 操作ログ（最大50件）
+let _chatMessages = [];  // チャットメッセージ（最大100件）
+let _account = null;  // {username, pin}
+let _serverDeckNames = [];  // サーバーに保存されているデッキ名一覧
+
+function createAbortSignal(timeoutMs) {
+  // AbortSignal.timeout() polyfill for older browsers
+  if (AbortSignal.timeout) {
+    return AbortSignal.timeout(timeoutMs);
+  }
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), timeoutMs);
+  return controller.signal;
+}
+
+function loadAccount() {
+  _account = null;  // Reset to clear state
+  const saved = sessionStorage.getItem('dm_account');
+  if (saved) {
+    try {
+      _account = JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to parse account from sessionStorage:', e);
+      _account = null;
+    }
+  }
+}
+
+function saveAccount(username, pin) {
+  _account = { username, pin };
+  try {
+    sessionStorage.setItem('dm_account', JSON.stringify(_account));
+  } catch (e) {
+    console.warn('Failed to save account to sessionStorage (private mode?):', e);
+    // Continue anyway - in-memory _account is still set
+  }
+}
+
+function clearAccount() {
+  _account = null;
+  try {
+    sessionStorage.removeItem('dm_account');
+  } catch (e) {
+    console.warn('Failed to clear account from sessionStorage:', e);
+  }
+}
+
+function showAccountDialog() {
+  loadAccount();
+  document.getElementById('ol-account-dialog').classList.add('show');
+}
+
+async function registerAccount() {
+  const username = document.getElementById('ol-reg-username').value.trim();
+  const pin = document.getElementById('ol-reg-pin').value.trim();
+  const deck = document.getElementById('ol-deck').value;
+  
+  if (!username) { toast('ユーザー名を入力してください'); return; }
+  if (pin.length !== 4 || !/^\d+$/.test(pin)) { toast('暗証番号は4桁の数字です'); return; }
+  
+  try {
+    const r = await fetch(`${PROXY}/profile/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, pin, last_deck: deck }),
+      signal: createAbortSignal(5000)
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      toast(`登録失敗: ${d.error}`);
+      return;
+    }
+    saveAccount(username, pin);
+    toast('アカウントを作成しました');
+    document.getElementById('ol-account-dialog').classList.remove('show');
+  } catch (e) {
+    toast(`エラー: ${e.message}`);
+  }
+}
+
+async function loginAccount() {
+  const username = document.getElementById('ol-login-username').value.trim();
+  const pin = document.getElementById('ol-login-pin').value.trim();
+  
+  if (!username) { toast('ユーザー名を入力してください'); return; }
+  if (pin.length !== 4 || !/^\d+$/.test(pin)) { toast('暗証番号は4桁の数字です'); return; }
+  
+  try {
+    const r = await fetch(`${PROXY}/profile/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, pin }),
+      signal: createAbortSignal(5000)
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      toast(`ログイン失敗: ${d.error}`);
+      return;
+    }
+    saveAccount(username, pin);
+    toast('ログインしました');
+    document.getElementById('ol-account-dialog').classList.remove('show');
+  } catch (e) {
+    toast(`エラー: ${e.message}`);
+  }
+}
+
+async function saveDeckToServer() {
+  if (!_account) {
+    toast('ログインしてからアカウントに保存してください');
+    return;
+  }
+  
+  const deckName = document.getElementById('edit-name').value.trim();
+  if (!deckName) {
+    toast('デッキ名を入力してください');
+    return;
+  }
+  
+  try {
+    const r = await fetch(`${PROXY}/deck/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: _account.username,
+        pin: _account.pin,
+        deck_name: deckName,
+        deck_data: deckCards
+      }),
+      signal: createAbortSignal(5000)
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      toast(`保存失敗: ${d.error}`);
+      return;
+    }
+    toast(`「${deckName}」をアカウントに保存しました`);
+  } catch (e) {
+    toast(`保存エラー: ${e.message}`);
+  }
+}
+
+async function showOnlineLobby() {
+  loadStorage();
+  loadAccount();
+  
+  // UI 表示
+  document.getElementById('ol-lobby').style.display = '';
+  document.getElementById('ol-waiting').style.display = 'none';
+  document.getElementById('ol-join-form').style.display = 'none';
+  showScreen('screen-online');
+  
+  // Pre-fill name if logged in
+  if (_account) {
+    document.getElementById('ol-name').value = _account.username;
+  } else {
+    document.getElementById('ol-name').value = '';
+  }
+  
+  // Load server decks asynchronously
+  if (_account) {
+    await loadServerDecks();
+  } else {
+    // Show local decks only as fallback
+    const keys = Object.keys(savedDecks);
+    updateDeckSelector(keys);
+  }
+}
+
+async function loadServerDecks() {
+  if (!_account || _loadingServerDecks) return;
+  
+  _loadingServerDecks = true;
+  try {
+    const r = await fetch(`${PROXY}/deck/list?username=${encodeURIComponent(_account.username)}&pin=${encodeURIComponent(_account.pin)}`, {
+      signal: createAbortSignal(5000)
+    });
+    const d = await r.json();
+    if (r.ok && d.decks && Array.isArray(d.decks)) {
+      _serverDeckNames = d.decks;
+      updateDeckSelector(d.decks);
+      console.log(`[deck] Loaded ${d.decks.length} server decks`);
+    } else {
+      // Fallback to local decks
+      _serverDeckNames = [];
+      const keys = Object.keys(savedDecks);
+      updateDeckSelector(keys);
+      console.warn('[deck] Server deck list failed, using local decks only');
+    }
+  } catch (e) {
+    // Fallback to local decks with user notification
+    _serverDeckNames = [];
+    const keys = Object.keys(savedDecks);
+    updateDeckSelector(keys);
+    console.warn('[deck] Server connection error, using local decks only:', e.message);
+    if (typeof toast === 'function') toast('サーバーに接続できません。ローカルデッキのみ使用します。');
+  } finally {
+    _loadingServerDecks = false;
+  }
+}
+
+function updateDeckSelector(decks) {
+  const sel = document.getElementById('ol-deck');
+  if (!sel) {
+    console.warn('[UI] Deck selector not found in DOM');
+    return;
+  }
+  if (decks.length < 1) {
+    toast('デッキが1つ以上必要です');
+    return;
+  }
+  sel.innerHTML = decks.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
+}
+
+async function fetchServerDeck(deckName) {
+  if (!_account) return null;
+  
+  try {
+    const r = await fetch(`${PROXY}/deck/get?username=${encodeURIComponent(_account.username)}&pin=${encodeURIComponent(_account.pin)}&deck_name=${encodeURIComponent(deckName)}`, {
+      signal: createAbortSignal(10000)
+    });
+    if (!r.ok) {
+      console.warn(`Failed to fetch deck: HTTP ${r.status}`);
+      return null;
+    }
+    const d = await r.json();
+    if (d && d.deck_data) {
+      return d.deck_data;
+    }
+  } catch (e) {
+    console.error('Failed to fetch server deck:', e.message);
+  }
+  return null;
+}
+
+function olBackFromLobby() {
+  showScreen('screen-list');
+  renderDeckList();
+}
+
+function olShowJoin() {
+  document.getElementById('ol-join-form').style.display = '';
+}
+
+async function olCreateRoom() {
+  const name = document.getElementById('ol-name').value.trim() || 'Player 1';
+  const deck = document.getElementById('ol-deck').value;
+  if (!deck) { toast('デッキを選択してください'); return; }
+  
+  // Load deck data (server or local)
+  let deckData = null;
+  if (Array.isArray(_serverDeckNames) && _serverDeckNames.includes(deck)) {
+    deckData = await fetchServerDeck(deck);
+  } else if (savedDecks[deck]) {
+    deckData = savedDecks[deck];
+  }
+  
+  // Explicit null check to prevent JSON.parse crash
+  if (!deckData || typeof deckData !== 'object') {
+    toast('デッキを取得できません'); return;
+  }
+  
+  try {
+    const r = await fetch(`${PROXY}/room/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+      signal: createAbortSignal(10000)
+    });
+    const d = await r.json();
+    if (d.error) { toast(`エラー: ${d.error}`); return; }
+    
+    // Apply deck to game
+    try {
+      deckCards = JSON.parse(JSON.stringify(deckData));
+    } catch (e) {
+      toast('デッキデータエラー'); return;
+    }
+    editDeckName = '';
+    
+    OL = { room: d.room, p: 'p1', p1Name: name, p2Name: null, deckName: deck, eventSource: null };
+    document.getElementById('ol-room-display').textContent = OL.room;
+    document.getElementById('ol-lobby').style.display = 'none';
+    document.getElementById('ol-waiting').style.display = '';
+    olWaitForOpponent();
+  } catch (e) {
+    toast(`接続エラー: ${e.message}`);
+  }
+}
+
+async function olJoinRoom() {
+  const name = document.getElementById('ol-name').value.trim() || 'Player 2';
+  const deck = document.getElementById('ol-deck').value;
+  const code = document.getElementById('ol-code-input').value.trim().toUpperCase();
+  
+  if (!deck) { toast('デッキを選択してください'); return; }
+  if (!code || code.length !== 6) { toast('ルームコードを正しく入力してください（6文字）'); return; }
+  
+  // Load deck data (server or local)
+  let deckData = null;
+  if (Array.isArray(_serverDeckNames) && _serverDeckNames.includes(deck)) {
+    deckData = await fetchServerDeck(deck);
+  } else if (savedDecks[deck]) {
+    deckData = savedDecks[deck];
+  }
+  
+  // Explicit null check to prevent JSON.parse crash
+  if (!deckData || typeof deckData !== 'object') {
+    toast('デッキを取得できません'); return;
+  }
+  
+  try {
+    const r = await fetch(`${PROXY}/room/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: code, name }),
+      signal: createAbortSignal(10000)
+    });
+    const d = await r.json();
+    if (d.error) { toast(`エラー: ${d.error}`); return; }
+    
+    // Apply deck to game
+    try {
+      deckCards = JSON.parse(JSON.stringify(deckData));
+    } catch (e) {
+      toast('デッキデータエラー'); return;
+    }
+    editDeckName = '';
+    
+    OL = { room: code, p: 'p2', p1Name: d.p1_name, p2Name: name, deckName: deck, eventSource: null };
+    startOnlineVs();
+  } catch (e) {
+    toast(`接続エラー: ${e.message}`);
+  }
+}
+
+function olCancelWait() {
+  if (OL && OL.eventSource) OL.eventSource.close();
+  OL = null;
+  if (_olSSETimer) clearTimeout(_olSSETimer);
+  document.getElementById('ol-code-input').value = '';
+  showOnlineLobby();
+}
+
+function olWaitForOpponent() {
+  if (!OL) return;
+  
+  const es = new EventSource(`${PROXY}/events?room=${OL.room}&p=${OL.p}`);
+  OL.eventSource = es;
+  
+  es.addEventListener('joined', (e) => {
+    const data = JSON.parse(e.data);
+    OL.p2Name = data.p2_name;
+    toast(`${OL.p2Name}が参加しました！`);
+    setTimeout(() => startOnlineVs(), 500);
+  });
+  
+  es.onerror = () => {
+    es.close();
+    if (!OL.reconnectAttempt) OL.reconnectAttempt = 0;
+    if (OL.reconnectAttempt < 3) {
+      OL.reconnectAttempt++;
+      const delay = Math.pow(2, OL.reconnectAttempt) * 1000;
+      toast(`${delay / 1000}秒後に再接続します...`);
+      _olReconnectTimer = setTimeout(() => {
+        olWaitForOpponent();
+      }, delay);
+    } else {
+      toast('接続失敗。ロビーに戻ります。');
+      setTimeout(() => olCancelWait(), 2000);
+    }
+  };
+}
+
+function olCanControl(p) {
+  return OL && OL.p === p;
+}
+
+function olSync() {
+  if (OL && VS) olSendAction('state');
+}
+
+function olSyncTurnEnd() {
+  if (OL && VS) olSendAction('turn_end');
+}
+
+function showTurnNotification(isMyTurn) {
+  const screen = document.getElementById('screen-vs');
+  if (screen) {
+    screen.classList.add('turn-pulse');
+    setTimeout(() => screen.classList.remove('turn-pulse'), 800);
+  }
+  if (isMyTurn) {
+    toast('あなたのターンです！', 2000);
+  }
+}
+
+async function startOnlineVs() {
+  if (!OL) return;
+  
+  if (OL.eventSource) OL.eventSource.close();
+  
+  loadStorage();
+  const deckName = OL.deckName;
+  const oppState = null;  // 相手の状態は SSE で受け取る
+  
+  const myState = _buildPlayerState(deckName);
+  
+  VS = {
+    p1: OL.p === 'p1' ? myState : { deck: [], hand: [], battleZone: [], manaZone: [], graveyard: [], shields: [] },
+    p2: OL.p === 'p2' ? myState : { deck: [], hand: [], battleZone: [], manaZone: [], graveyard: [], shields: [] },
+    turn: 1,
+    active: 'p1',
+    view: OL.p,
+    underMode: null,
+    revealedCards: [],
+    revealedFrom: null,
+  };
+  _vsUndoStack = [];
+  _vsUndoLocked = false;
+  _opLog = [];  // 操作ログをリセット
+  _chatMessages = [];  // チャットメッセージをリセット
+  
+  showScreen('screen-vs');
+  renderVs();
+  
+  // SSE リスナー開始
+  olStartEventListener();
+  
+  // 初期状態をサーバーに送信（相手に表示させるため）
+  setTimeout(() => {
+    olSendAction('state');
+  }, 200);
+}
+
+function olStartEventListener() {
+  if (!OL || !VS) return;
+  
+  const es = new EventSource(`${PROXY}/events?room=${OL.room}&p=${OL.p}`);
+  OL.eventSource = es;
+  
+  es.addEventListener('opponent_state', (e) => {
+    const data = JSON.parse(e.data);
+    const oppP = OL.p === 'p1' ? 'p2' : 'p1';
+    // 相手のゲーム状態を同期
+    if (data.p1) VS.p1 = data.p1;
+    if (data.p2) VS.p2 = data.p2;
+    if (data.turn) VS.turn = data.turn;
+    if (data.active) VS.active = data.active;
+    
+    // アニメーション表示：移動したカードを検出
+    if (_prevGameState) {
+      olAnimateCardMovement(oppP);
+    }
+    _prevGameState = JSON.parse(JSON.stringify(VS));
+    
+    renderVs();
+  });
+  
+  es.addEventListener('turn_end', (e) => {
+    const data = JSON.parse(e.data);
+    const prevActive = VS.active;
+    VS.turn = data.turn;
+    VS.active = data.active;
+    
+    // ターン切り替わりを検出したら通知
+    if (prevActive !== VS.active) {
+      const isMyTurn = (OL.p === 'p1' && VS.active === 'p1') || (OL.p === 'p2' && VS.active === 'p2');
+      showTurnNotification(isMyTurn);
+    }
+    renderVs();
+  });
+  
+  es.addEventListener('ping', () => {
+    // キープアライブ
+  });
+  
+  es.addEventListener('chat_message', (e) => {
+    const data = JSON.parse(e.data);
+    addChatMessage(data.p, data.name, data.msg);
+  });
+  
+  es.onerror = () => {
+    es.close();
+    if (!OL.reconnectAttempt) OL.reconnectAttempt = 0;
+    if (OL.reconnectAttempt < 3) {
+      OL.reconnectAttempt++;
+      const delay = Math.pow(2, OL.reconnectAttempt) * 1000;
+      toast(`${delay / 1000}秒後に再接続します...`);
+      _olReconnectTimer = setTimeout(() => {
+        olStartEventListener();
+      }, delay);
+    } else {
+      toast('接続失敗。ロビーに戻ります。');
+      setTimeout(() => olCancelWait(), 2000);
+    }
+  };
+}
+
+function olAnimateCardMovement(oppP) {
+  if (!_prevGameState || !VS) return;
+  const prevOpp = _prevGameState[oppP];
+  const currOpp = VS[oppP];
+  
+  // 各ゾーンで差分を検出
+  const zones = ['hand', 'battleZone', 'manaZone', 'graveyard', 'shields', 'deck'];
+  zones.forEach(zone => {
+    const prevCards = prevOpp[zone] || [];
+    const currCards = currOpp[zone] || [];
+    
+    if (prevCards.length !== currCards.length) {
+      // カード枚数が変わった = 移動があった
+      if (currCards.length > prevCards.length) {
+        // このゾーンにカードが増えた = 移動先
+        const newCard = currCards[currCards.length - 1];
+        olShowCardArrival(newCard, zone, oppP);
+      }
+    }
+  });
+}
+
+function olShowCardArrival(card, toZone, p) {
+  // 移動先ゾーンの要素を取得してフラッシュ表示
+  const zoneMap = {
+    'hand': `vs-hand-scroll-${p}`,
+    'battleZone': `vs-bz-scroll-${p}`,
+    'manaZone': `vs-mana-scroll-${p}`,
+    'graveyard': `vs-grave-sm-${p}`,
+    'shields': `vs-shield-stack-${p}`,
+    'deck': `vs-deck-count-${p}`
+  };
+  
+  const el = document.getElementById(zoneMap[toZone]);
+  if (el) {
+    el.style.transition = 'background-color 0.3s';
+    el.style.backgroundColor = 'rgba(34, 197, 94, 0.3)';
+    setTimeout(() => {
+      el.style.backgroundColor = '';
+      el.style.transition = '';
+    }, 500);
+  }
+}
+
+function olSendAction(actionType = 'state') {
+  if (!OL || !VS) return;
+  
+  const payload = {
+    room: OL.room,
+    p: OL.p,
+    type: actionType,
+    turn: VS.turn,
+    active: VS.active,
+    p1: VS.p1,
+    p2: VS.p2,
+  };
+  
+  fetch(`${PROXY}/action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+}
+
+function addOpLog(player, action) {
+  if (!OL) return;
+  _opLog.push({
+    p: player,
+    action: action,
+    time: new Date().toLocaleTimeString('ja-JP', {hour: '2-digit', minute: '2-digit', second: '2-digit'})
+  });
+  // 最大50件を保持
+  if (_opLog.length > 50) _opLog.shift();
+}
+
+function showOpLog() {
+  const logDiv = document.getElementById('ol-log-list');
+  if (!logDiv) return;
+  
+  if (_opLog.length === 0) {
+    logDiv.innerHTML = '<div class="ol-log-empty">操作ログはまだありません</div>';
+  } else {
+    logDiv.innerHTML = _opLog.map(log => {
+      const playerName = log.p === 'p1' ? OL.p1Name : OL.p2Name;
+      const isMe = (OL.p === 'p1' && log.p === 'p1') || (OL.p === 'p2' && log.p === 'p2');
+      return `<div class="ol-log-entry ${log.p}"><span class="ol-log-player">${playerName}</span> ${log.action} <span style="color:var(--text-dim);font-size:0.7rem;">${log.time}</span></div>`;
+    }).join('');
+  }
+  
+  // スクロール最下部へ
+  logDiv.parentElement.scrollTop = logDiv.parentElement.scrollHeight;
+  
+  // パネルを表示
+  document.getElementById('ol-log-ov').classList.add('show');
+}
+
+function addChatMessage(p, name, msg) {
+  if (!OL) return;
+  _chatMessages.push({ p, name, msg, time: new Date().toLocaleTimeString('ja-JP', {hour: '2-digit', minute: '2-digit'}) });
+  if (_chatMessages.length > 100) _chatMessages.shift();
+  updateChatDisplay();
+}
+
+function updateChatDisplay() {
+  const messagesDiv = document.getElementById('ol-chat-messages');
+  if (!messagesDiv) return;
+  
+  messagesDiv.innerHTML = _chatMessages.map(m => `
+    <div class="ol-chat-msg ${m.p}">
+      <div class="ol-chat-from">${m.name}</div>
+      <div>${m.msg}</div>
+      <div style="font-size:0.7rem;color:rgba(0,0,0,.5);margin-top:2px;">${m.time}</div>
+    </div>
+  `).join('');
+  
+  // スクロール最下部へ
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function showChat() {
+  document.getElementById('ol-chat-ov').classList.add('show');
+  setTimeout(() => document.getElementById('ol-chat-input')?.focus(), 100);
+}
+
+async function sendChat() {
+  if (!OL) return;
+  const input = document.getElementById('ol-chat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  
+  input.value = '';
+  
+  try {
+    await fetch(`${PROXY}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: OL.room, p: OL.p, message: msg }),
+      signal: createAbortSignal(5000)
+    });
+  } catch (e) {
+    toast('送信失敗');
+  }
+}
+
+
+
+// オンライン vs ゲーム用の オーバーライド
+const _olOrigNextTurn = typeof nextTurnVs === 'function' ? nextTurnVs : null;
+const _olOrigDrawVs = typeof drawVs === 'function' ? drawVs : null;
+
+function nextTurnVsOl(p) {
+  if (!OL || !olCanControl(p)) return;
+  nextTurnVs(p);
+  if (OL) olSendAction('turn_end');
+}
+
+function drawVsOl(p) {
+  if (!OL || !olCanControl(p)) return;
+  drawVs(p);
+  if (OL) olSendAction('state');
+}
+
+// ── Init ──────────────────────────────────────────────────────
+loadStorage();
+renderDeckList();
+</script>
+</body>
+</html>

@@ -80,6 +80,7 @@ function updateDesktopDeckList() {
       <div style="font-weight: 600; font-size: 0.9rem;">${escapeHtml(name)}</div>
       <div style="font-size: 0.8rem; color: #6b7280; margin: 4px 0;">📋 ${count}枚</div>
       <div style="display: flex; gap: 6px;">
+        <button onclick="openDesktopDeck('${escapeHtml(name)}')" style="flex: 1; padding: 6px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">✏️ 編集</button>
         <button onclick="startDesktopGame('${escapeHtml(name)}')" style="flex: 1; padding: 6px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">▶ START</button>
         <button onclick="deleteDesktopDeck('${escapeHtml(name)}')" style="flex: 1; padding: 6px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🗑️</button>
       </div>
@@ -186,11 +187,41 @@ function renderDesktopGame() {
       
       <div style="margin-bottom: 10px;">
         <strong style="display: block; margin-bottom: 4px;">手札 (${state.hand.length})</strong>
-        <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+        <div id="desktop-hand-zone" style="display: flex; flex-wrap: wrap; gap: 4px; min-height: 70px; padding: 8px; background: #f9fafb; border-radius: 4px; position: relative;">
           ${state.hand.map((c, i) => `
-            <div style="width: 40px; height: 50px; background: #e5e7eb; border: 1px solid #d1d5db; 
-              border-radius: 3px; font-size: 0.6rem; padding: 2px; text-align: center; cursor: pointer;"
-              title="${escapeHtml(c.name)}" onclick="playDesktopCard(${i}, 'battle')">
+            <div class="card-in-hand" draggable="true" 
+              onclick="playDesktopCard(${i}, 'battle')" 
+              onmouseenter="showDesktopCardPreview(event, ${i})"
+              onmouseleave="hideDesktopCardPreview()"
+              ondragstart="dragDesktopCard(event, ${i})"
+              ondragend="dragDesktopCardEnd()"
+              style="
+                width: 45px; height: 65px; 
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border: 1px solid #4f46e5; border-radius: 3px; position: relative;
+                cursor: grab; display: flex; align-items: center; justify-content: center;
+                font-size: 0.6rem; padding: 2px; text-align: center; color: white;
+                flex-shrink: 0; transition: transform 0.1s;
+              "
+              title="${escapeHtml(c.name)}">
+              ${escapeHtml(c.name).substring(0, 4)}
+            </div>
+          `).join('')}
+        </div>
+        <div id="desktop-card-preview" style="position: fixed; display: none; z-index: 1000; background: white; border: 2px solid #333; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); padding: 8px; max-width: 200px;">
+          <div id="desktop-preview-content"></div>
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 10px;">
+        <strong style="display: block; margin-bottom: 4px;">バトル (${state.battleZone.length})</strong>
+        <div id="desktop-battle-zone" ondrop="dropDesktopCard(event, 'battle')" ondragover="dragDesktopOver(event)"
+          style="display: flex; flex-wrap: wrap; gap: 4px; min-height: 70px; padding: 8px; background: #fee2e2; border: 2px dashed #fca5a5; border-radius: 4px;">
+          ${state.battleZone.map(c => `
+            <div style="width: 45px; height: 65px; background: #fecaca; border: 2px solid #ef4444; 
+              border-radius: 4px; font-size: 0.6rem; padding: 2px; text-align: center; cursor: pointer;"
+              title="${escapeHtml(c.name)}" onmouseenter="showDesktopCardPreview(event, -1, c)"
+              onmouseleave="hideDesktopCardPreview()">
               ${escapeHtml(c.name).substring(0, 3)}
             </div>
           `).join('')}
@@ -198,12 +229,14 @@ function renderDesktopGame() {
       </div>
       
       <div style="margin-bottom: 10px;">
-        <strong style="display: block; margin-bottom: 4px;">バトル (${state.battleZone.length})</strong>
-        <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-          ${state.battleZone.map(c => `
-            <div style="width: 40px; height: 50px; background: #fecaca; border: 1px solid #fca5a5; 
-              border-radius: 3px; font-size: 0.6rem; padding: 2px; text-align: center;"
-              title="${escapeHtml(c.name)}">
+        <strong style="display: block; margin-bottom: 4px;">マナ (${state.manaZone.length})</strong>
+        <div id="desktop-mana-zone" ondrop="dropDesktopCard(event, 'mana')" ondragover="dragDesktopOver(event)"
+          style="display: flex; flex-wrap: wrap; gap: 4px; min-height: 70px; padding: 8px; background: #dbeafe; border: 2px dashed #60a5fa; border-radius: 4px;">
+          ${state.manaZone.map(c => `
+            <div style="width: 45px; height: 65px; background: #bfdbfe; border: 2px solid #3b82f6; 
+              border-radius: 4px; font-size: 0.6rem; padding: 2px; text-align: center; cursor: pointer;"
+              title="${escapeHtml(c.name)}" onmouseenter="showDesktopCardPreview(event, -1, c)"
+              onmouseleave="hideDesktopCardPreview()">
               ${escapeHtml(c.name).substring(0, 3)}
             </div>
           `).join('')}
@@ -234,6 +267,73 @@ function renderDesktopGame() {
 function playDesktopCard(idx, zone) {
   engine.playCard(engine.state.hand[idx], zone);
   renderDesktopGame();
+}
+
+/**
+ * カードプレビュー表示（hover拡大）
+ */
+let _currentDragIdx = null;
+
+function showDesktopCardPreview(event, idx, card) {
+  if (idx >= 0) {
+    card = engine.state.hand[idx];
+  } else if (!card) {
+    return;
+  }
+  
+  const preview = document.getElementById('desktop-card-preview');
+  const content = document.getElementById('desktop-preview-content');
+  
+  if (!preview || !content) return;
+  
+  content.innerHTML = `
+    <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 4px;">${escapeHtml(card.name)}</div>
+    <div style="font-size: 0.75rem; color: #666; line-height: 1.3;">
+      ${escapeHtml(card.text || '説明文なし')}
+    </div>
+  `;
+  
+  preview.style.display = 'block';
+  preview.style.left = (event.pageX + 10) + 'px';
+  preview.style.top = (event.pageY + 10) + 'px';
+}
+
+function hideDesktopCardPreview() {
+  const preview = document.getElementById('desktop-card-preview');
+  if (preview) {
+    preview.style.display = 'none';
+  }
+}
+
+/**
+ * ドラッグ & ドロップ
+ */
+function dragDesktopCard(event, idx) {
+  _currentDragIdx = idx;
+  event.dataTransfer.effectAllowed = 'move';
+}
+
+function dragDesktopCardEnd() {
+  _currentDragIdx = null;
+}
+
+function dragDesktopOver(event) {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+}
+
+function dropDesktopCard(event, zone) {
+  event.preventDefault();
+  
+  if (_currentDragIdx === null) return;
+  
+  const card = engine.state.hand[_currentDragIdx];
+  if (card) {
+    engine.playCard(card, zone);
+    renderDesktopGame();
+  }
+  
+  _currentDragIdx = null;
 }
 
 function drawDesktopCard() {
@@ -270,15 +370,190 @@ function deleteDesktopDeck(name) {
   updateDesktopDeckList();
 }
 
-function addToDesktopDeck(cardJson) {
-  const card = JSON.parse(cardJson);
-  alert('デッキに追加機能は実装中');
+/**
+ * PC版 デッキ編集画面
+ */
+function renderDesktopDeckEdit() {
+  const container = document.getElementById('app-desktop');
+  const deckName = window._deckEditing;
+  const cards = window._deckCards;
+  
+  // カード統計
+  const cardCount = cards.reduce((sum, c) => sum + (c.count || 1), 0);
+  const uniqueCount = cards.length;
+  
+  // 文明別集計
+  const civCounts = {};
+  cards.forEach(c => {
+    const civ = c.civilization || 'multi';
+    civCounts[civ] = (civCounts[civ] || 0) + (c.count || 1);
+  });
+  
+  container.innerHTML = `
+    <div style="display: grid; grid-template-columns: 250px 1fr 300px; gap: 10px; height: 100vh; padding: 10px; background: #f0f2f5;">
+      
+      <!-- 左: カード検索パネル -->
+      <div style="background: white; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <h3 style="margin-bottom: 10px; font-size: 0.95rem;">カード検索</h3>
+        <input type="text" id="desktop-search-input" placeholder="カード名..." 
+          style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 10px;"
+          onkeyup="desktopSearchCards(this.value)">
+        <div id="desktop-search-results" style="display: flex; flex-direction: column; gap: 6px;"></div>
+      </div>
+      
+      <!-- 中央: デッキ構成 -->
+      <div style="background: white; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <div style="margin-bottom: 12px; padding: 10px; background: #f3f4f6; border-radius: 6px;">
+          <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 6px;">${escapeHtml(deckName)}</div>
+          <div style="font-size: 0.8rem; color: #6b7280;">
+            <div>📋 カード枚数: <strong>${cardCount}</strong> / 40</div>
+            <div>🎴 ユニーク: <strong>${uniqueCount}</strong></div>
+          </div>
+        </div>
+        
+        <div id="desktop-deck-cards" style="display: flex; flex-direction: column; gap: 6px;">
+          ${cards.map((c, i) => `
+            <div style="padding: 8px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+              <div style="flex: 1;">
+                <div style="font-weight: 600; font-size: 0.85rem;">${escapeHtml(c.name)}</div>
+                <div style="font-size: 0.7rem; color: #6b7280;">${escapeHtml(c.text || '')}</div>
+              </div>
+              <div style="display: flex; gap: 4px; align-items: center;">
+                <button onclick="decrementDesktopCardCount(${i})" style="width: 24px; height: 24px; background: #ef4444; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem; font-weight: 600;">−</button>
+                <span style="width: 24px; text-align: center; font-weight: 600; font-size: 0.9rem;">${c.count || 1}</span>
+                <button onclick="incrementDesktopCardCount(${i})" style="width: 24px; height: 24px; background: #10b981; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem; font-weight: 600;">+</button>
+                <button onclick="removeDesktopCard(${i})" style="width: 24px; height: 24px; background: #dc2626; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem;">🗑️</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      
+      <!-- 右: デッキ情報 -->
+      <div style="background: white; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <h3 style="margin-bottom: 10px; font-size: 0.95rem;">文明構成</h3>
+        <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px;">
+          ${Object.entries(civCounts).map(([civ, count]) => `
+            <div style="padding: 8px; background: #f3f4f6; border-radius: 4px; display: flex; justify-content: space-between;">
+              <span style="font-size: 0.85rem;">${escapeHtml(getCivLabel(civ))}</span>
+              <strong style="font-size: 0.85rem;">${count}枚</strong>
+            </div>
+          `).join('')}
+        </div>
+        
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <button onclick="playDesktopDeckGame()" style="width: 100%; padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">▶ ゲーム開始</button>
+          <button onclick="saveDesktopDeck()" style="width: 100%; padding: 12px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">💾 保存</button>
+          <button onclick="renderDesktopDeckList()" style="width: 100%; padding: 12px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">← 戻る</button>
+        </div>
+      </div>
+      
+    </div>
+  `;
 }
 
 /**
- * HTML エスケープ
+ * デッキ編集を開く
  */
-function escapeHtml(str) {
+function openDesktopDeck(name) {
+  const savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  window._deckEditing = name;
+  window._deckCards = savedDecks[name] ? JSON.parse(JSON.stringify(savedDecks[name])) : [];
+  renderDesktopDeckEdit();
+}
+
+/**
+ * カード枚数増加
+ */
+function incrementDesktopCardCount(idx) {
+  const card = window._deckCards[idx];
+  if (!card) return;
+  card.count = (card.count || 1) + 1;
+  if (card.count > 4) card.count = 4;
+  renderDesktopDeckEdit();
+}
+
+/**
+ * カード枚数減少
+ */
+function decrementDesktopCardCount(idx) {
+  const card = window._deckCards[idx];
+  if (!card) return;
+  card.count = (card.count || 1) - 1;
+  if (card.count < 1) {
+    window._deckCards.splice(idx, 1);
+  }
+  renderDesktopDeckEdit();
+}
+
+/**
+ * カード削除
+ */
+function removeDesktopCard(idx) {
+  window._deckCards.splice(idx, 1);
+  renderDesktopDeckEdit();
+}
+
+/**
+ * デッキに カード追加
+ */
+function addToDesktopDeck(cardJson) {
+  try {
+    const card = JSON.parse(cardJson);
+    
+    // 既に存在するカードなら枚数+1
+    const existing = window._deckCards.find(c => c.id === card.id);
+    if (existing) {
+      existing.count = (existing.count || 1) + 1;
+      if (existing.count > 4) existing.count = 4;
+    } else {
+      window._deckCards.push({ ...card, count: 1 });
+    }
+    
+    renderDesktopDeckEdit();
+  } catch (e) {
+    console.error('カード追加エラー:', e);
+  }
+}
+
+/**
+ * デッキ保存
+ */
+function saveDesktopDeck() {
+  const decks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  decks[window._deckEditing] = window._deckCards;
+  localStorage.setItem('dm_decks', JSON.stringify(decks));
+  alert('デッキを保存しました');
+}
+
+/**
+ * デッキからゲーム開始
+ */
+function playDesktopDeckGame() {
+  if (!window._deckCards.length) {
+    alert('デッキが空です');
+    return;
+  }
+  
+  engine.initGame(window._deckCards);
+  renderDesktopGame();
+}
+
+/**
+ * 文明ラベル取得
+ */
+function getCivLabel(civ) {
+  return {
+    'fire': '火',
+    'water': '水',
+    'light': '光',
+    'dark': '闇',
+    'nature': '自然',
+    'multi': '多'
+  }[civ] || civ;
+}
+
+
   return String(str ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

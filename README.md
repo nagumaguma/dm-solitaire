@@ -17,14 +17,9 @@
 
 ### オンライン版（推奨 - インストール不要）
 
-ブラウザでアクセスするだけ（統合版・SP/WEB 自動判定）：
+ブラウザでアクセスするだけ（自動デバイス判定: PC/SP）：
 
-**統合版（推奨）:**  
-https://nagumaguma.github.io/dm-solitaire/dm-solitaire-unified.html
-
-**従来版:**
-- PC版: https://nagumaguma.github.io/dm-solitaire/dm-solitaire-web.html  
-- スマホ版: https://nagumaguma.github.io/dm-solitaire/dm-solitaire-sp.html
+🔗 **https://nagumaguma.github.io/dm-solitaire/index.html**
 
 推奨: Chrome / Edge / Safari 最新版
 
@@ -32,7 +27,7 @@ https://nagumaguma.github.io/dm-solitaire/dm-solitaire-unified.html
 
 ### ローカル版（開発・テスト用）
 
-#### 1. セットアップ
+#### 1. Python バックエンド起動
 
 ```bash
 git clone https://github.com/[USER]/dm-solitaire.git
@@ -47,7 +42,42 @@ python dm-proxy-server.py
 [DM Proxy] Starting on http://localhost:8765
 ```
 
-#### 2. ブラウザで開く
+#### 2. ローカルサーバー起動（フロントエンド）
+
+**方法A: Python簡易サーバー**
+```bash
+python -m http.server 8000
+```
+
+**方法B: Node.js（任意）**
+```bash
+npx http-server
+```
+
+#### 3. ブラウザで開く
+
+**http://localhost:8000/index.html**
+
+または直接ファイル開く:
+```
+file:///C:/Users/user/OneDrive/デスクトップ/VM/index.html
+```
+
+> ⚠️ **注意**: ローカル API は `http://localhost:8765` の Python サーバーを前提とです。
+
+---
+
+## ファイル構成
+
+```
+index.html              📄 エントリーポイント（デバイス判定）
+game-engine.js          🎮 Game Engine（ゲームロジック・UI無依存）
+auth-service.js         🔐 認証・セッション管理
+network-service.js      🌐 サーバー通信（API呼び出し）
+ui-desktop.js           💻 PC版UI（3カラムレイアウト）
+ui-mobile.js            📱 SP版UI（1カラムレイアウト）
+dm-proxy-server.py      🐍 バックエンド（Python Flask）
+_archive/               📦 古いバージョン
 
 ```
 file:///path/to/dm-solitaire-web.html

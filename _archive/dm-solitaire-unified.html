@@ -1,0 +1,1607 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DM Solitaire Unified</title>
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f0f2f5;
+  --surface: #ffffff;
+  --surface2: #edf0f5;
+  --surface3: #a0aab8;
+  --accent: #dc2626;
+  --accent2: #ea580c;
+  --text: #111827;
+  --text-dim: #6b7280;
+  --border: #d8dce8;
+  --civ-light: #eab308;
+  --civ-water: #3b82f6;
+  --civ-dark: #a855f7;
+  --civ-fire: #ef4444;
+  --civ-nature: #22c55e;
+  --civ-multi: #f97316;
+  --card-w: 76px;
+  --card-h: 108px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+  min-height: 100vh;
+}
+
+/* ─── Header ─── */
+header {
+  background: var(--surface);
+  border-bottom: 2px solid var(--accent);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 200;
+}
+
+header h1 {
+  font-size: 1.25rem;
+  color: var(--accent);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tab {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 5px 14px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all .15s;
+}
+
+.tab.active,
+.tab:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ─── Screens ─── */
+.screen {
+  display: none;
+}
+
+.screen.active {
+  display: block;
+}
+
+/* ─── Deck List Screen ─── */
+#screen-list {
+  padding: 12px;
+}
+
+.list-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+}
+
+.deck-item {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all .15s;
+}
+
+.deck-item:hover {
+  border-color: var(--accent);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.deck-item-name {
+  flex: 1;
+  font-weight: 600;
+}
+
+.deck-item-count {
+  color: var(--text-dim);
+  margin: 0 12px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 14px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: filter .15s;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  filter: brightness(1.12);
+}
+
+.btn-red { background: var(--accent); color: #fff; }
+.btn-orange { background: var(--accent2); color: #fff; }
+.btn-gray { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+.btn-green { background: #16a34a; color: #fff; }
+.btn-sm { padding: 4px 10px; font-size: 0.78rem; }
+
+.empty-msg {
+  text-align: center;
+  color: var(--text-dim);
+  padding: 40px;
+}
+
+/* ─── Deck Edit Screen ─── */
+#screen-edit {
+  padding: 12px;
+}
+
+.edit-header {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+.edit-header input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.card-grid-wrap {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+  max-height: calc(100vh - 250px);
+  overflow-y: auto;
+}
+
+.cg-card {
+  position: relative;
+  aspect-ratio: 5/7;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+}
+
+.cg-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cg-ph {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  text-align: center;
+  padding: 4px;
+  word-break: break-word;
+  background: linear-gradient(135deg, #1e3a5f, #0f1e35);
+  color: #4a7ab5;
+}
+
+.cg-cost {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  background: #000;
+  color: #fff;
+  font-size: 0.7rem;
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-weight: 700;
+}
+
+.cg-count {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.65rem;
+  padding: 2px 4px;
+  border-radius: 2px;
+}
+
+/* ─── Search ─── */
+.search-panel {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.search-bar {
+  display: flex;
+  gap: 8px;
+}
+
+.search-bar input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 1.2rem;
+  padding: 4px 8px;
+}
+
+.sr-wrap {
+  margin-bottom: 12px;
+}
+
+.sr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+}
+
+.sr-msg {
+  text-align: center;
+  color: var(--text-dim);
+  padding: 20px;
+}
+
+/* ─── Bottom Sheet (Card Detail) ─── */
+.bs-ov {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 1000;
+  justify-content: center;
+  align-items: flex-end;
+}
+
+.bs-ov.show {
+  display: flex;
+}
+
+.bs-sheet {
+  background: var(--surface);
+  border-radius: 12px 12px 0 0;
+  padding: 20px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  animation: slideUp .3s ease-out;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.bs-img {
+  width: 100%;
+  max-width: 200px;
+  aspect-ratio: 5/7;
+  border-radius: 8px;
+  object-fit: cover;
+  margin-bottom: 12px;
+}
+
+.bs-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.bs-row button {
+  flex: 1;
+}
+
+/* ─── Game Screen ─── */
+#screen-game {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 60px);
+  padding: 0;
+}
+
+.game-hd {
+  background: var(--surface);
+  padding: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.game-turn {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.game-board {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  gap: 8px;
+  padding: 8px;
+}
+
+.zone {
+  flex: 1;
+  background: var(--surface2);
+  border-radius: 8px;
+  padding: 8px;
+  overflow-y: auto;
+  border: 2px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-content: flex-start;
+}
+
+.zone-lbl {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: var(--surface);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.card {
+  width: var(--card-w);
+  height: var(--card-h);
+  background: #1e293b;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  user-select: none;
+  touch-action: none;
+  position: relative;
+  cursor: grab;
+  border: 1px solid var(--border);
+}
+
+.card:active {
+  cursor: grabbing;
+}
+
+.card.dragging {
+  opacity: 0.6;
+  position: fixed;
+  z-index: 999;
+  pointer-events: none;
+}
+
+.card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.card-name {
+  font-size: 0.65rem;
+  text-align: center;
+  color: #fff;
+  padding: 4px;
+}
+
+.hand {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  flex: 0 0 auto;
+  min-height: 140px;
+}
+
+/* ─── Online/VS Screen ─── */
+#screen-online,
+#screen-vs {
+  padding: 12px;
+}
+
+.ol-form {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.ol-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ol-field label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ol-field input,
+.ol-field select {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.ol-btn {
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: filter .15s;
+}
+
+.ol-btn:hover {
+  filter: brightness(1.08);
+}
+
+.ol-btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ol-btn-secondary {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+/* ─── Toast ─── */
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  right: 20px;
+  background: #000;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 6px;
+  z-index: 2000;
+  opacity: 0;
+  transform: translateY(100px);
+  transition: all .3s ease;
+  pointer-events: none;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* ─── Modal ─── */
+.modal-ov {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 1500;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-ov.show {
+  display: flex;
+}
+
+.modal-sheet {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+/* ─── Media Query for Mobile ─── */
+@media (max-width: 768px) {
+  :root {
+    --card-w: 64px;
+    --card-h: 96px;
+  }
+
+  header {
+    padding: 8px 12px;
+  }
+
+  header h1 {
+    font-size: 1rem;
+  }
+
+  .zone {
+    min-height: 60px;
+  }
+
+  .game-board {
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  }
+
+  .sr-grid {
+    grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  }
+
+  .btn {
+    padding: 6px 12px;
+    font-size: 0.8rem;
+  }
+}
+
+</style>
+
+</head>
+<body>
+
+<!-- ─── Header ─── -->
+<header id="app-header" style="display: none;">
+  <h1>DM Solitaire</h1>
+  <div style="flex: 1;"></div>
+  <button id="tab-list" class="tab active" onclick="switchScreen('screen-list')">一人回し</button>
+  <button id="tab-vs" class="tab" onclick="switchScreen('screen-vs')">VS</button>
+  <button id="tab-online" class="tab" onclick="switchScreen('screen-online')">🌐 対戦</button>
+  <button class="tab" onclick="logout()" style="margin-left: 8px;">ログアウト</button>
+</header>
+
+<!-- ─── Screen: Auth ─── -->
+<div class="screen active" id="screen-auth">
+  <div style="display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 20px;">
+    <div style="background: var(--surface); border-radius: 16px; padding: 40px; max-width: 400px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+      <h1 style="text-align: center; color: var(--accent); margin-bottom: 8px; font-size: 2rem;">DM Solitaire</h1>
+      <p style="text-align: center; color: var(--text-dim); margin-bottom: 32px;">デュエルマスターズ一人回しツール</p>
+      
+      <!-- 初期表示: メニュー -->
+      <div id="auth-menu">
+        <button class="btn btn-green" style="width: 100%; padding: 12px; margin-bottom: 12px; font-size: 1rem;" onclick="showAuthForm('login')">🔐 ログイン</button>
+        <button class="btn btn-orange" style="width: 100%; padding: 12px; margin-bottom: 12px; font-size: 1rem;" onclick="showAuthForm('register')">✏️ 新規登録</button>
+        <button class="btn btn-gray" style="width: 100%; padding: 12px; font-size: 1rem;" onclick="playAsGuest()">👤 ゲストプレイ</button>
+      </div>
+      
+      <!-- ログイン画面 -->
+      <div id="auth-login-form" style="display: none;">
+        <div class="ol-field" style="margin-bottom: 16px;">
+          <label>ユーザー名</label>
+          <input id="login-username" type="text" maxlength="20" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px;">
+        </div>
+        <div class="ol-field" style="margin-bottom: 24px;">
+          <label>暗証番号（4桁）</label>
+          <input id="login-pin" type="text" placeholder="1234" maxlength="4" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px;">
+        </div>
+        <button class="btn btn-green" style="width: 100%; padding: 12px; margin-bottom: 12px;" onclick="loginAccount()">ログイン</button>
+        <button class="btn btn-gray" style="width: 100%; padding: 12px;" onclick="showAuthForm('menu')">← 戻る</button>
+      </div>
+      
+      <!-- 新規登録画面 -->
+      <div id="auth-register-form" style="display: none;">
+        <div class="ol-field" style="margin-bottom: 16px;">
+          <label>ユーザー名</label>
+          <input id="register-username" type="text" maxlength="20" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px;">
+        </div>
+        <div class="ol-field" style="margin-bottom: 24px;">
+          <label>暗証番号（4桁の数字）</label>
+          <input id="register-pin" type="text" placeholder="1234" maxlength="4" style="width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 6px;">
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 16px;">※ 暗証番号はデッキをクラウド保存するときに使用します</p>
+        <button class="btn btn-orange" style="width: 100%; padding: 12px; margin-bottom: 12px;" onclick="registerAccount()">作成</button>
+        <button class="btn btn-gray" style="width: 100%; padding: 12px;" onclick="showAuthForm('menu')">← 戻る</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Screen: Deck List ─── -->
+<div class="screen" id="screen-list">
+  <div style="padding: 12px; display: flex; gap: 8px; border-bottom: 1px solid var(--border); justify-content: space-between; align-items: center;">
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-green" onclick="newDeck()">＋ 新規</button>
+    </div>
+    <div style="font-size: 0.9rem; color: var(--text-dim);">
+      <span id="account-info" style="display: none;">
+        👤 <span id="username-display"></span>
+      </span>
+      <span id="guest-info" style="">ゲストプレイ</span>
+    </div>
+  </div>
+  <div class="list-scroll" id="list-scroll"></div>
+</div>
+
+<!-- ─── Screen: Deck Edit ─── -->
+<div class="screen" id="screen-edit">
+  <div class="edit-header">
+    <button class="btn btn-gray btn-sm" onclick="goBack()">← 戻る</button>
+    <input type="text" id="edit-name" placeholder="デッキ名">
+    <button class="btn btn-red btn-sm" onclick="deleteDeck()">削除</button>
+    <button class="btn btn-gray btn-sm" onclick="saveDeck()">保存</button>
+  </div>
+  
+  <div class="card-grid-wrap" id="edit-count-wrap">
+    <div style="margin-bottom: 12px; color: var(--text-dim);">
+      合計: <b id="edit-count">0</b> 枚
+    </div>
+    <div class="card-grid" id="card-grid"></div>
+  </div>
+
+  <div class="search-panel">
+    <div class="sr-wrap" id="sr-wrap" style="display: none;">
+      <div class="sr-grid" id="sr-grid"></div>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="sr-input" placeholder="カード名で検索" oninput="srInput(this.value)">
+      <button class="btn-icon" id="sr-clear" style="display: none;" onclick="srClear()">✕</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Screen: Game ─── -->
+<div class="screen" id="screen-game">
+  <div class="game-hd">
+    <button class="btn-icon" onclick="confirmLeaveGame()">← 戻る</button>
+    <span class="game-turn" id="game-turn">ターン 1</span>
+    <button class="btn-icon" onclick="undoGame()">↩</button>
+  </div>
+  <div class="game-board">
+    <div class="zone" id="zone-enemy-battle"></div>
+    <div class="zone" id="zone-enemy-mana"></div>
+    <div class="zone" id="zone-shield"></div>
+    <div class="zone" id="zone-player-battle"></div>
+    <div class="zone" id="zone-player-mana"></div>
+    <div class="hand zone" id="zone-hand"></div>
+  </div>
+</div>
+
+<!-- ─── Screen: VS (Two Player) ─── -->
+<div class="screen" id="screen-vs">
+  <div style="padding: 12px; display: flex; gap: 8px; border-bottom: 1px solid var(--border); align-items: center;">
+    <button class="btn btn-gray btn-sm" onclick="goVsBack()">← 戻る</button>
+    <input type="text" id="vs-p1-name" placeholder="プレイヤー1">
+    <select id="vs-p1-deck" style="padding: 6px; border-radius: 4px; border: 1px solid var(--border);"></select>
+    <div style="flex: 1;"></div>
+    <input type="text" id="vs-p2-name" placeholder="プレイヤー2">
+    <select id="vs-p2-deck" style="padding: 6px; border-radius: 4px; border: 1px solid var(--border);"></select>
+    <button class="btn btn-green" onclick="startVs()">開始</button>
+  </div>
+  <div class="game-board" id="vs-board" style="display: none;">
+    <div class="zone" id="vs-zone-p2-battle"></div>
+    <div class="zone" id="vs-zone-p2-mana"></div>
+    <div class="zone" id="vs-zone-shield-p2"></div>
+    <div class="zone" id="vs-zone-shield-p1"></div>
+    <div class="zone" id="vs-zone-p1-mana"></div>
+    <div class="zone" id="vs-zone-p1-battle"></div>
+    <div class="hand zone" id="vs-zone-hand"></div>
+  </div>
+</div>
+
+<!-- ─── Screen: Online ─── -->
+<div class="screen" id="screen-online">
+  <div class="ol-form">
+    <h2>オンライン対戦</h2>
+    <div id="ol-lobby">
+      <div class="ol-field">
+        <label>デッキ選択</label>
+        <select id="ol-deck" style="padding: 8px; border: 1px solid var(--border); border-radius: 6px;"></select>
+      </div>
+      <button class="ol-btn ol-btn-primary" onclick="olCreateRoom()">🏠 ルーム作成</button>
+      <button class="ol-btn ol-btn-secondary" onclick="olShowJoin()">🚪 参加</button>
+    </div>
+    <div id="ol-join-form" style="display: none;">
+      <div class="ol-field">
+        <label>ルームコード</label>
+        <input id="ol-room-code" type="text" placeholder="例: ABCD-1234">
+      </div>
+      <button class="ol-btn ol-btn-primary" onclick="olJoinRoom()">参加する</button>
+      <button class="ol-btn ol-btn-secondary" onclick="olShowJoin()" style="display: inline;">キャンセル</button>
+    </div>
+    <div id="ol-waiting" style="display: none; text-align: center; padding: 40px;">
+      <p>相手を待機中...</p>
+      <p id="ol-room-display" style="font-weight: 700; color: var(--accent); margin-top: 12px;"></p>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Account Dialog ─── -->
+<div class="modal-ov" id="account-modal">
+  <div class="modal-sheet">
+    <h2>アカウント</h2>
+    <div id="account-login-view">
+      <div class="ol-field">
+        <label>ユーザー名</label>
+        <input id="acc-username" type="text" maxlength="20">
+      </div>
+      <div class="ol-field">
+        <label>暗証番号</label>
+        <input id="acc-pin" type="text" placeholder="4桁の数字" maxlength="4">
+      </div>
+      <button class="ol-btn ol-btn-primary" style="width: 100%;" onclick="loginAccount()">ログイン</button>
+      <button class="ol-btn ol-btn-secondary" style="width: 100%; margin-top: 8px;" onclick="toggleAccountView()">新規登録</button>
+      <button class="ol-btn ol-btn-secondary" style="width: 100%; margin-top: 8px;" onclick="closeAccountDialog()">閉じる</button>
+    </div>
+    <div id="account-register-view" style="display: none;">
+      <div class="ol-field">
+        <label>ユーザー名</label>
+        <input id="reg-username" type="text" maxlength="20">
+      </div>
+      <div class="ol-field">
+        <label>暗証番号</label>
+        <input id="reg-pin" type="text" placeholder="4桁の数字" maxlength="4">
+      </div>
+      <button class="ol-btn ol-btn-primary" style="width: 100%;" onclick="registerAccount()">登録</button>
+      <button class="ol-btn ol-btn-secondary" style="width: 100%; margin-top: 8px;" onclick="toggleAccountView()">ログイン画面へ</button>
+      <button class="ol-btn ol-btn-secondary" style="width: 100%; margin-top: 8px;" onclick="closeAccountDialog()">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Card Detail Sheet ─── -->
+<div class="bs-ov" id="card-detail-ov" onclick="closeCardDetail(event)">
+  <div class="bs-sheet" onclick="event.stopPropagation()">
+    <img id="bs-img" class="bs-img" style="display: none;">
+    <h3 id="bs-name"></h3>
+    <p id="bs-sub" style="color: var(--text-dim); font-size: 0.85rem; margin-bottom: 12px;"></p>
+    <p id="bs-desc" style="font-size: 0.9rem; margin-bottom: 12px; line-height: 1.5;"></p>
+    <div class="bs-row">
+      <button class="btn btn-gray btn-sm" onclick="closeCardDetail()">閉じる</button>
+      <button class="btn btn-gray btn-sm" onclick="bsDecr()">−</button>
+      <span id="bs-count" style="padding: 0 12px; min-width: 60px; text-align: center; font-weight: 700;"></span>
+      <button class="btn btn-gray btn-sm" onclick="bsIncr()">+</button>
+      <button class="btn btn-green btn-sm" onclick="bsRemove()">削除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Toast ─── -->
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+const PROXY = 'https://dm-solitaire-production.up.railway.app';
+
+const CIV_COLOR = {
+  fire: '#c2382b',
+  water: '#1d4ed8',
+  light: '#a16207',
+  dark: '#6d28d9',
+  nature: '#15803d',
+  multi: '#c2410c'
+};
+
+// ──── GLOBAL STATE ────
+let deckCards = [];
+let editDeckName = null;
+let savedDecks = {};
+let _bsCard = null;
+let _sr = { q: '', timer: null, busy: false, proxyPage: 1, all: [], done: false };
+let _detailCache = {};
+let _account = null;
+let _serverDeckNames = [];
+let _loadingServerDecks = false;
+
+// Game state
+let G = {
+  hand: [], battleZone: [], manaZone: [], deck: [], shields: [],
+  turn: 1
+};
+
+let VS = null;
+let OL = null;
+
+// ──── UTILITIES ────
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+function createAbortSignal(timeoutMs) {
+  if (AbortSignal.timeout) return AbortSignal.timeout(timeoutMs);
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), timeoutMs);
+  return controller.signal;
+}
+
+function civLabel(c) {
+  return { fire: '火文明', water: '水文明', light: '光文明', dark: '闇文明', nature: '自然文明', multi: '多色' }[c] || '';
+}
+
+// ──── SCREEN NAVIGATION ────
+function switchScreen(screenId) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(screenId).classList.add('active');
+  
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  const tabId = 'tab-' + screenId.replace('screen-', '');
+  document.getElementById(tabId)?.classList.add('active');
+  
+  // ヘッダーの表示/非表示
+  const header = document.getElementById('app-header');
+  if (screenId === 'screen-auth') {
+    header.style.display = 'none';
+  } else {
+    header.style.display = 'flex';
+  }
+}
+
+// ──── STORAGE ────
+function loadStorage() {
+  try {
+    savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  } catch {
+    savedDecks = {};
+  }
+}
+
+function writeStorage() {
+  localStorage.setItem('dm_decks', JSON.stringify(savedDecks));
+}
+
+function loadAccount() {
+  _account = null;
+  const saved = sessionStorage.getItem('dm_account');
+  if (saved) {
+    try {
+      _account = JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to parse account:', e);
+    }
+  }
+}
+
+function saveAccount(username, pin) {
+  _account = { username, pin };
+  try {
+    sessionStorage.setItem('dm_account', JSON.stringify(_account));
+  } catch (e) {
+    console.warn('Failed to save account (private mode?):', e);
+  }
+}
+
+function clearAccount() {
+  _account = null;
+  try {
+    sessionStorage.removeItem('dm_account');
+  } catch (e) {
+    console.warn('Failed to clear account:', e);
+  }
+}
+
+// ──── SERVER DECKS ────
+async function loadServerDecks() {
+  if (!_account || _loadingServerDecks) return;
+  
+  _loadingServerDecks = true;
+  try {
+    const r = await fetch(`${PROXY}/deck/list?username=${encodeURIComponent(_account.username)}&pin=${encodeURIComponent(_account.pin)}`, {
+      signal: createAbortSignal(5000)
+    });
+    const d = await r.json();
+    if (r.ok && d.decks && Array.isArray(d.decks)) {
+      _serverDeckNames = d.decks;
+      console.log(`[deck] Loaded ${d.decks.length} server decks`);
+    } else {
+      _serverDeckNames = [];
+      console.warn('[deck] Server deck list failed, using local decks only');
+    }
+  } catch (e) {
+    _serverDeckNames = [];
+    console.warn('[deck] Server connection error:', e.message);
+  } finally {
+    _loadingServerDecks = false;
+  }
+}
+
+async function fetchServerDeck(deckName) {
+  if (!_account) return null;
+  
+  try {
+    const r = await fetch(`${PROXY}/deck/get?username=${encodeURIComponent(_account.username)}&pin=${encodeURIComponent(_account.pin)}&deck_name=${encodeURIComponent(deckName)}`, {
+      signal: createAbortSignal(10000)
+    });
+    if (!r.ok) {
+      console.warn(`Failed to fetch deck: HTTP ${r.status}`);
+      return null;
+    }
+    const d = await r.json();
+    if (d && d.deck_data) {
+      return d.deck_data;
+    }
+  } catch (e) {
+    console.error('Failed to fetch server deck:', e.message);
+  }
+  return null;
+}
+
+// ──── AUTHENTICATION SCREEN ────
+function showAuthForm(form) {
+  document.getElementById('auth-menu').style.display = form === 'menu' ? 'block' : 'none';
+  document.getElementById('auth-login-form').style.display = form === 'login' ? 'block' : 'none';
+  document.getElementById('auth-register-form').style.display = form === 'register' ? 'block' : 'none';
+}
+
+function playAsGuest() {
+  _account = null;
+  try {
+    sessionStorage.removeItem('dm_account');
+  } catch (e) {
+    console.warn('Failed to clear account:', e);
+  }
+  switchScreen('screen-list');
+  renderDeckList();
+  toast('ゲストでプレイしています');
+}
+
+async function loginAccount() {
+  const username = document.getElementById('login-username').value.trim();
+  const pin = document.getElementById('login-pin').value.trim();
+  
+  if (!username) { toast('ユーザー名を入力してください'); return; }
+  if (pin.length !== 4 || !/^\d+$/.test(pin)) { toast('暗証番号は4桁の数字です'); return; }
+  
+  try {
+    const r = await fetch(`${PROXY}/profile/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, pin }),
+      signal: createAbortSignal(5000)
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(`ログイン失敗: ${d.error}`); return; }
+    saveAccount(username, pin);
+    document.getElementById('login-username').value = '';
+    document.getElementById('login-pin').value = '';
+    
+    // サーバーからデッキを取得
+    await loadServerDecks();
+    
+    switchScreen('screen-list');
+    renderDeckList();
+    toast('ログインしました');
+  } catch (e) {
+    toast(`エラー: ${e.message}`);
+  }
+}
+
+async function registerAccount() {
+  const username = document.getElementById('register-username').value.trim();
+  const pin = document.getElementById('register-pin').value.trim();
+  
+  if (!username) { toast('ユーザー名を入力してください'); return; }
+  if (pin.length !== 4 || !/^\d+$/.test(pin)) { toast('暗証番号は4桁の数字です'); return; }
+  
+  try {
+    const r = await fetch(`${PROXY}/profile/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, pin, last_deck: '' }),
+      signal: createAbortSignal(5000)
+    });
+    const d = await r.json();
+    if (!r.ok) { toast(`登録失敗: ${d.error}`); return; }
+    saveAccount(username, pin);
+    document.getElementById('register-username').value = '';
+    document.getElementById('register-pin').value = '';
+    
+    // サーバーからデッキを取得（新規登録時は0件のはず）
+    await loadServerDecks();
+    
+    switchScreen('screen-list');
+    renderDeckList();
+    toast('アカウントを作成しました');
+  } catch (e) {
+    toast(`エラー: ${e.message}`);
+  }
+}
+
+function logout() {
+  if (!confirm('ログアウトしますか？')) return;
+  clearAccount();
+  switchScreen('screen-auth');
+  showAuthForm('menu');
+  toast('ログアウトしました');
+}
+
+// ──── DECK LIST ────
+function renderDeckList() {
+  loadStorage();
+  
+  // アカウント情報の表示を更新
+  if (_account) {
+    document.getElementById('account-info').style.display = 'inline';
+    document.getElementById('username-display').textContent = _account.username;
+    document.getElementById('guest-info').style.display = 'none';
+  } else {
+    document.getElementById('account-info').style.display = 'none';
+    document.getElementById('guest-info').style.display = 'inline';
+  }
+  
+  const wrap = document.getElementById('list-scroll');
+  
+  // サーバーのデッキ + ローカルのデッキを統合
+  let allDeckNames = new Set();
+  
+  // ローカルデッキを追加
+  Object.keys(savedDecks).forEach(name => allDeckNames.add(name));
+  
+  // サーバーデッキを追加（ログイン時）
+  if (_serverDeckNames && Array.isArray(_serverDeckNames)) {
+    _serverDeckNames.forEach(name => allDeckNames.add(name));
+  }
+  
+  const keys = Array.from(allDeckNames).sort();
+  wrap.innerHTML = '';
+  
+  if (!keys.length) {
+    wrap.innerHTML = '<div class="empty-msg">デッキがありません<br>「＋ 新規」で作ってください</div>';
+    return;
+  }
+  
+  keys.forEach(name => {
+    // ローカルまたはサーバーのデッキから枚数を取得
+    const localDeck = savedDecks[name];
+    const total = localDeck ? localDeck.reduce((s, x) => s + (x.count || 0), 0) : 0;
+    
+    const el = document.createElement('div');
+    el.className = 'deck-item';
+    const isServer = _serverDeckNames && _serverDeckNames.includes(name) && !localDeck;
+    const badge = isServer ? ' ☁️' : '';
+    el.innerHTML = `
+      <div class="deck-item-name" onclick="openDeck('${esc(name)}')">${esc(name)}${badge}</div>
+      <div class="deck-item-count">${total}枚</div>
+      <button class="btn btn-red btn-sm" onclick="startGame('${esc(name)}')">▶</button>
+    `;
+    wrap.appendChild(el);
+  });
+}
+
+function newDeck() {
+  editDeckName = null;
+  deckCards = [];
+  document.getElementById('edit-name').value = '';
+  switchScreen('screen-edit');
+  renderCardGrid();
+  srReset();
+}
+
+function openDeck(name) {
+  editDeckName = name;
+  // ローカルデッキがあればそれを使用、なければサーバーから取得を試みる
+  if (savedDecks[name]) {
+    deckCards = JSON.parse(JSON.stringify(savedDecks[name]));
+  } else if (_serverDeckNames && _serverDeckNames.includes(name)) {
+    // サーバーから取得（非同期処理）
+    fetchServerDeck(name).then(deckData => {
+      if (deckData) {
+        deckCards = deckData;
+        renderCardGrid();
+      } else {
+        toast('デッキを取得できません');
+      }
+    });
+    deckCards = [];
+  } else {
+    deckCards = [];
+  }
+  document.getElementById('edit-name').value = name;
+  switchScreen('screen-edit');
+  renderCardGrid();
+  srReset();
+}
+
+function goBack() {
+  switchScreen('screen-list');
+  renderDeckList();
+}
+
+// ──── DECK EDIT ────
+function deckTotal() {
+  return deckCards.reduce((s, x) => s + x.count, 0);
+}
+
+function renderCardGrid() {
+  document.getElementById('edit-count').textContent = deckTotal();
+  const grid = document.getElementById('card-grid');
+  const sorted = [...deckCards].sort((a, b) => (a.card.cost || 0) - (b.card.cost || 0));
+  grid.innerHTML = '';
+  sorted.forEach(({ card, count }) => {
+    const el = document.createElement('div');
+    el.className = 'cg-card';
+    el.innerHTML = card.img
+      ? `<img src="${esc(card.img)}" alt="${esc(card.name)}" loading="lazy">`
+      : `<div class="cg-ph">${esc(card.name)}</div>`;
+    el.innerHTML += `<div class="cg-cost">${card.cost ?? '?'}</div><div class="cg-count">×${count}</div>`;
+    el.onclick = () => openCardDetail(card);
+    grid.appendChild(el);
+  });
+}
+
+function saveDeck() {
+  const n = document.getElementById('edit-name').value.trim();
+  if (!n) { toast('デッキ名を入力してください'); return; }
+  if (editDeckName && editDeckName !== n) delete savedDecks[editDeckName];
+  savedDecks[n] = JSON.parse(JSON.stringify(deckCards));
+  editDeckName = n;
+  writeStorage();
+  toast(`「${n}」を保存しました`);
+}
+
+function deleteDeck() {
+  const n = editDeckName;
+  if (!n || !savedDecks[n]) { toast('保存済みのデッキがありません'); return; }
+  if (!confirm(`「${n}」を削除しますか？`)) return;
+  delete savedDecks[n];
+  writeStorage();
+  goBack();
+  toast(`「${n}」を削除しました`);
+}
+
+// ──── CARD DETAIL ────
+function openCardDetail(card) {
+  _bsCard = card;
+  const entry = deckCards.find(x => x.card.name === card.name);
+  document.getElementById('bs-name').textContent = card.name;
+  document.getElementById('bs-sub').textContent = `コスト ${card.cost ?? '?'}  ${civLabel(card.civ)}`;
+  document.getElementById('bs-count').textContent = entry ? entry.count : 0;
+  const img = document.getElementById('bs-img');
+  if (card.img) {
+    img.src = card.img;
+    img.style.display = '';
+  } else {
+    img.style.display = 'none';
+  }
+  document.getElementById('card-detail-ov').classList.add('show');
+}
+
+function closeCardDetail(e) {
+  if (e && e.target !== document.getElementById('card-detail-ov')) return;
+  document.getElementById('card-detail-ov').classList.remove('show');
+  _bsCard = null;
+}
+
+function bsIncr() {
+  if (!_bsCard) return;
+  const idx = deckCards.findIndex(x => x.card.name === _bsCard.name);
+  if (idx < 0) deckCards.push({ card: _bsCard, count: 1 });
+  else deckCards[idx].count++;
+  document.getElementById('bs-count').textContent = deckCards.find(x => x.card.name === _bsCard.name).count;
+  renderCardGrid();
+}
+
+function bsDecr() {
+  if (!_bsCard) return;
+  const idx = deckCards.findIndex(x => x.card.name === _bsCard.name);
+  if (idx < 0) return;
+  deckCards[idx].count--;
+  if (deckCards[idx].count <= 0) deckCards.splice(idx, 1);
+  document.getElementById('bs-count').textContent = (deckCards.find(x => x.card.name === _bsCard.name) || {}).count || 0;
+  renderCardGrid();
+}
+
+function bsRemove() {
+  if (!_bsCard) return;
+  deckCards = deckCards.filter(x => x.card.name !== _bsCard.name);
+  closeCardDetail();
+  renderCardGrid();
+}
+
+// ──── SEARCH ────
+function srInput(val) {
+  document.getElementById('sr-clear').style.display = val ? '' : 'none';
+  clearTimeout(_sr.timer);
+  if (!val.trim()) { srReset(); return; }
+  _sr.timer = setTimeout(() => srStart(val.trim()), 400);
+}
+
+function srClear() {
+  document.getElementById('sr-input').value = '';
+  document.getElementById('sr-clear').style.display = 'none';
+  srReset();
+}
+
+function srReset() {
+  _sr = { q: '', timer: null, busy: false, proxyPage: 1, all: [], done: false };
+  document.getElementById('sr-wrap').style.display = 'none';
+  document.getElementById('sr-grid').innerHTML = '';
+}
+
+function srStart(q) {
+  _sr = { q, timer: null, busy: false, proxyPage: 1, all: [], done: false };
+  document.getElementById('sr-wrap').style.display = '';
+  document.getElementById('sr-grid').innerHTML = '<div class="sr-msg">検索中...</div>';
+  srFetch();
+}
+
+async function srFetch() {
+  if (_sr.busy || _sr.done) return;
+  _sr.busy = true;
+  const q = _sr.q;
+  try {
+    const r = await fetch(`${PROXY}/search?q=${encodeURIComponent(q)}&page=${_sr.proxyPage}`, { signal: createAbortSignal(15000) });
+    const d = await r.json();
+    if (_sr.q !== q) return;
+    if (d.cards && d.cards.length > 0) {
+      _sr.all.push(...d.cards);
+      _sr.proxyPage++;
+    } else {
+      _sr.done = true;
+    }
+  } catch {
+    if (_sr.q !== q) return;
+    document.getElementById('sr-grid').innerHTML = '<div class="sr-msg" style="color: #f87171;">エラー: プロキシを確認してください</div>';
+    _sr.busy = false;
+    return;
+  }
+  _sr.busy = false;
+  srRender();
+}
+
+function srRender() {
+  const grid = document.getElementById('sr-grid');
+  grid.innerHTML = '';
+  if (_sr.all.length === 0) {
+    grid.innerHTML = '<div class="sr-msg">結果がありません</div>';
+    return;
+  }
+  _sr.all.forEach(card => {
+    const el = document.createElement('div');
+    el.className = 'cg-card';
+    el.innerHTML = card.img
+      ? `<img src="${esc(card.img)}" alt="${esc(card.name)}" loading="lazy">`
+      : `<div class="cg-ph">${esc(card.name)}</div>`;
+    el.innerHTML += `<div class="cg-cost">${card.cost ?? '?'}</div>`;
+    el.onclick = () => srAddCard(card);
+    grid.appendChild(el);
+  });
+  if (!_sr.done) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-gray';
+    btn.textContent = 'もっと見る';
+    btn.onclick = () => srFetch();
+    grid.appendChild(btn);
+  }
+}
+
+function srAddCard(card) {
+  const idx = deckCards.findIndex(x => x.card.name === card.name);
+  if (idx < 0) deckCards.push({ card, count: 1 });
+  else deckCards[idx].count++;
+  renderCardGrid();
+  toast(`${card.name} を追加しました`);
+}
+
+// ──── GAME LOGIC ────
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function expandFrom(deckCards) {
+  const expanded = [];
+  deckCards.forEach(({ card, count }) => {
+    for (let i = 0; i < count; i++) {
+      expanded.push({ ...card, iid: Math.random().toString(36).substr(2, 9) });
+    }
+  });
+  return expanded;
+}
+
+function startGame(deckName) {
+  loadStorage();
+  
+  let deckData = null;
+  
+  // ローカルデッキから探す
+  if (savedDecks[deckName]) {
+    deckData = savedDecks[deckName];
+  } 
+  // サーバーデッキの場合は非同期で取得
+  else if (_serverDeckNames && _serverDeckNames.includes(deckName)) {
+    fetchServerDeck(deckName).then(data => {
+      if (data && data.length > 0) {
+        startGameWithData(deckName, data);
+      } else {
+        toast('デッキを取得できません');
+        switchScreen('screen-list');
+      }
+    });
+    return;
+  }
+  
+  if (!deckData || !deckData.length) {
+    toast('デッキが空です');
+    return;
+  }
+  
+  startGameWithData(deckName, deckData);
+}
+
+function startGameWithData(deckName, deckData) {
+  const expanded = expandFrom(deckData);
+  G = {
+    hand: [],
+    battleZone: [],
+    manaZone: [],
+    deck: shuffle(expanded),
+    shields: [],
+    turn: 1
+  };
+  
+  // Draw initial hand
+  for (let i = 0; i < 5 && G.deck.length; i++) {
+    G.hand.push(G.deck.pop());
+  }
+  
+  // Draw shields
+  for (let i = 0; i < 5 && G.deck.length; i++) {
+    G.shields.push({ ...G.deck.pop(), faceUp: false });
+  }
+  
+  switchScreen('screen-game');
+  renderGame();
+}
+
+function renderGame() {
+  document.getElementById('game-turn').textContent = `ターン ${G.turn}`;
+  
+  const renderZone = (zone, elem) => {
+    elem.innerHTML = '';
+    zone.forEach(card => {
+      const el = document.createElement('div');
+      el.className = 'card';
+      el.innerHTML = card.img
+        ? `<img src="${esc(card.img)}" alt="${esc(card.name)}" loading="lazy">`
+        : `<div class="card-name">${esc(card.name)}</div>`;
+      elem.appendChild(el);
+    });
+  };
+  
+  renderZone([], document.getElementById('zone-enemy-battle'));
+  renderZone([], document.getElementById('zone-enemy-mana'));
+  renderZone(G.battleZone, document.getElementById('zone-player-battle'));
+  renderZone(G.manaZone, document.getElementById('zone-player-mana'));
+  
+  // Shields
+  const shieldEl = document.getElementById('zone-shield');
+  shieldEl.innerHTML = '';
+  G.shields.forEach(s => {
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.textContent = s.faceUp ? '盾' : '🛡️';
+    shieldEl.appendChild(el);
+  });
+  
+  // Hand
+  const handEl = document.getElementById('zone-hand');
+  handEl.innerHTML = '';
+  G.hand.forEach(card => {
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.innerHTML = card.img
+      ? `<img src="${esc(card.img)}" alt="${esc(card.name)}" loading="lazy">`
+      : `<div class="card-name">${esc(card.name)}</div>`;
+    handEl.appendChild(el);
+  });
+}
+
+function confirmLeaveGame() {
+  if (!confirm('ゲームを終了しますか？')) return;
+  switchScreen('screen-list');
+  renderDeckList();
+}
+
+function undoGame() {
+  toast('アンドゥ機能は実装予定です');
+}
+
+// ──── VS MODE ────
+function goVsBack() {
+  switchScreen('screen-list');
+  renderDeckList();
+}
+
+function startVs() {
+  const p1name = document.getElementById('vs-p1-name').value.trim() || 'プレイヤー1';
+  const p2name = document.getElementById('vs-p2-name').value.trim() || 'プレイヤー2';
+  const p1deck = document.getElementById('vs-p1-deck').value;
+  const p2deck = document.getElementById('vs-p2-deck').value;
+  
+  loadStorage();
+  if (!savedDecks[p1deck] || !savedDecks[p2deck]) {
+    toast('デッキを選択してください');
+    return;
+  }
+  
+  const p1state = {
+    deck: shuffle(expandFrom(savedDecks[p1deck])),
+    hand: [], battleZone: [], manaZone: [], shields: []
+  };
+  
+  const p2state = {
+    deck: shuffle(expandFrom(savedDecks[p2deck])),
+    hand: [], battleZone: [], manaZone: [], shields: []
+  };
+  
+  // Initial hands and shields
+  [p1state, p2state].forEach(p => {
+    for (let i = 0; i < 5 && p.deck.length; i++) p.shields.push({ ...p.deck.pop(), faceUp: false });
+    for (let i = 0; i < 5 && p.deck.length; i++) p.hand.push(p.deck.pop());
+  });
+  
+  VS = {
+    p1: p1state, p2: p2state,
+    turn: 1, active: 'p1', p1Name: p1name, p2Name: p2name
+  };
+  
+  document.getElementById('vs-board').style.display = 'flex';
+  switchScreen('screen-vs');
+  renderVs();
+}
+
+function renderVs() {
+  if (!VS) return;
+  
+  const renderZone = (zone, elem) => {
+    elem.innerHTML = '';
+    zone.forEach(card => {
+      const el = document.createElement('div');
+      el.className = 'card';
+      el.innerHTML = card.img
+        ? `<img src="${esc(card.img)}" alt="${esc(card.name)}" loading="lazy">`
+        : `<div class="card-name">${esc(card.name)}</div>`;
+      elem.appendChild(el);
+    });
+  };
+  
+  // P2 zones (opponent - top)
+  renderZone(VS.p2.battleZone, document.getElementById('vs-zone-p2-battle'));
+  renderZone(VS.p2.manaZone, document.getElementById('vs-zone-p2-mana'));
+  
+  // Shield zones
+  const shieldP2 = document.getElementById('vs-zone-shield-p2');
+  shieldP2.innerHTML = '';
+  VS.p2.shields.forEach(s => {
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.textContent = '🛡️';
+    shieldP2.appendChild(el);
+  });
+  
+  const shieldP1 = document.getElementById('vs-zone-shield-p1');
+  shieldP1.innerHTML = '';
+  VS.p1.shields.forEach(s => {
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.textContent = '🛡️';
+    shieldP1.appendChild(el);
+  });
+  
+  // P1 zones (player - bottom)
+  renderZone(VS.p1.battleZone, document.getElementById('vs-zone-p1-battle'));
+  renderZone(VS.p1.manaZone, document.getElementById('vs-zone-p1-mana'));
+  
+  // Hand (my hand)
+  const handEl = document.getElementById('vs-zone-hand');
+  handEl.innerHTML = '';
+  VS.p1.hand.forEach(card => {
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.innerHTML = card.img
+      ? `<img src="${esc(card.img)}" alt="${esc(card.name)}" loading="lazy">`
+      : `<div class="card-name">${esc(card.name)}</div>`;
+    handEl.appendChild(el);
+  });
+}
+
+// ──── ONLINE MODE - STUB ────
+function olCreateRoom() {
+  toast('オンライン機能は実装予定です');
+}
+
+function olShowJoin() {
+  document.getElementById('ol-join-form').style.display = 
+    document.getElementById('ol-join-form').style.display === 'none' ? '' : 'none';
+}
+
+function olJoinRoom() {
+  toast('オンライン機能は実装予定です');
+}
+
+// ──── INITIALIZATION ────
+window.addEventListener('DOMContentLoaded', () => {
+  loadStorage();
+  loadAccount();
+  
+  // アカウント情報があればサーバーからデッキを取得後、デッキ管理画面へ
+  if (_account) {
+    loadServerDecks().then(() => {
+      switchScreen('screen-list');
+      renderDeckList();
+    });
+  } else {
+    switchScreen('screen-auth');
+    showAuthForm('menu');
+  }
+  
+  // Populate deck selectors
+  const updateDeckSelectors = () => {
+    const keys = Object.keys(savedDecks);
+    const selects = [document.getElementById('vs-p1-deck'), document.getElementById('vs-p2-deck'), document.getElementById('ol-deck')];
+    selects.forEach(sel => {
+      sel.innerHTML = keys.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
+    });
+  };
+  updateDeckSelectors();
+});
+
+</script>
+
+</body>
+</html>

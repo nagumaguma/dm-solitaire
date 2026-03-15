@@ -238,6 +238,16 @@
 <script>
   // グローバル状態
   window._serverDeckNames = [];
+  window._deckEditing = null;        // 編集中のデッキ名
+  window._deckCards = [];            // 編集中のカード配列
+
+  /**
+   * デッキグローバル変数初期化
+   */
+  function resetDeckState() {
+    window._deckEditing = null;
+    window._deckCards = [];
+  }
 
   /**
    * 初期化メイン

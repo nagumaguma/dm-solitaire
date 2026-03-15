@@ -82,6 +82,7 @@ function updateMobileDeckList() {
       <div style="font-weight: 600; font-size: 0.95rem;">${escapeHtmlMobile(name)}</div>
       <div style="font-size: 0.85rem; color: #6b7280; margin: 6px 0;">📋 ${count}枚</div>
       <div style="display: flex; gap: 6px;">
+        <button onclick="openMobileDeck('${escapeHtmlMobile(name)}')" style="flex: 1; padding: 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">✏️ 編集</button>
         <button onclick="startMobileGame('${escapeHtmlMobile(name)}')" style="flex: 1; padding: 10px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">▶ START</button>
         <button onclick="deleteMobileDeck('${escapeHtmlMobile(name)}')" style="flex: 1; padding: 10px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">🗑️</button>
       </div>
@@ -290,15 +291,158 @@ function deleteMobileDeck(name) {
   updateMobileDeckList();
 }
 
-function addToMobileDeck(cardJson) {
-  const card = JSON.parse(cardJson);
-  alert('デッキに追加機能は実装中');
+/**
+ * SP版 デッキ編集画面
+ */
+function renderMobileDeckEdit() {
+  const container = document.getElementById('app-mobile');
+  const deckName = window._deckEditing;
+  const cards = window._deckCards;
+  
+  const cardCount = cards.reduce((sum, c) => sum + (c.count || 1), 0);
+  
+  container.innerHTML = `
+    <div style="display: flex; flex-direction: column; height: 100vh; background: #f0f2f5;">
+      
+      <!-- ヘッダー -->
+      <div style="background: #dc2626; color: white; padding: 12px; font-weight: 600; text-align: center; display: flex; justify-content: space-between; align-items: center;">
+        <span onclick="renderMobileDeckList()" style="cursor: pointer; font-size: 1.2rem;">←</span>
+        <span>${escapeHtmlMobile(deckName)}</span>
+        <span style="font-size: 0.85rem;">${cardCount}/40</span>
+      </div>
+      
+      <!-- メインコンテンツ -->
+      <div style="flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px;">
+        
+        <!-- カード検索 -->
+        <div style="background: white; border-radius: 10px; padding: 12px;">
+          <h3 style="margin-bottom: 10px; font-size: 0.95rem;">カード追加</h3>
+          <input type="text" id="mobile-search-input" placeholder="カード名..." 
+            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 10px; font-size: 1rem;"
+            onkeyup="mobileSearchCards(this.value)">
+          <div id="mobile-search-results" style="display: flex; flex-direction: column; gap: 6px;"></div>
+        </div>
+        
+        <!-- デッキリスト -->
+        <div style="background: white; border-radius: 10px; padding: 12px;">
+          <h3 style="margin-bottom: 10px; font-size: 0.95rem;">デッキカード</h3>
+          <div id="mobile-deck-cards" style="display: flex; flex-direction: column; gap: 8px;">
+            ${cards.map((c, i) => `
+              <div style="padding: 10px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;">
+                <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 6px;">${escapeHtmlMobile(c.name)}</div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-size: 0.8rem; color: #6b7280;">${escapeHtmlMobile(c.text || '')}</span>
+                  <div style="display: flex; gap: 4px;">
+                    <button onclick="decrementMobileCardCount(${i})" style="width: 28px; height: 28px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">−</button>
+                    <span style="width: 28px; text-align: center; font-weight: 600;">${c.count || 1}</span>
+                    <button onclick="incrementMobileCardCount(${i})" style="width: 28px; height: 28px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">+</button>
+                    <button onclick="removeMobileCard(${i})" style="width: 28px; height: 28px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer;">🗑️</button>
+                  </div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        
+      </div>
+      
+      <!-- ボタン -->
+      <div style="background: white; padding: 12px; display: flex; gap: 8px; border-top: 1px solid #e5e7eb;">
+        <button onclick="playMobileDeckGame()" style="flex: 1; padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">▶ ゲーム</button>
+        <button onclick="saveMobileDeck()" style="flex: 1; padding: 12px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">💾 保存</button>
+      </div>
+      
+    </div>
+  `;
 }
 
 /**
- * HTML エスケープ
+ * デッキ編集を開く（SP版）
  */
-function escapeHtmlMobile(str) {
+function openMobileDeck(name) {
+  const savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  window._deckEditing = name;
+  window._deckCards = savedDecks[name] ? JSON.parse(JSON.stringify(savedDecks[name])) : [];
+  renderMobileDeckEdit();
+}
+
+/**
+ * カード枚数増加（SP版）
+ */
+function incrementMobileCardCount(idx) {
+  const card = window._deckCards[idx];
+  if (!card) return;
+  card.count = (card.count || 1) + 1;
+  if (card.count > 4) card.count = 4;
+  renderMobileDeckEdit();
+}
+
+/**
+ * カード枚数減少（SP版）
+ */
+function decrementMobileCardCount(idx) {
+  const card = window._deckCards[idx];
+  if (!card) return;
+  card.count = (card.count || 1) - 1;
+  if (card.count < 1) {
+    window._deckCards.splice(idx, 1);
+  }
+  renderMobileDeckEdit();
+}
+
+/**
+ * カード削除（SP版）
+ */
+function removeMobileCard(idx) {
+  window._deckCards.splice(idx, 1);
+  renderMobileDeckEdit();
+}
+
+/**
+ * デッキに カード追加（SP版）
+ */
+function addToMobileDeck(cardJson) {
+  try {
+    const card = JSON.parse(cardJson);
+    
+    const existing = window._deckCards.find(c => c.id === card.id);
+    if (existing) {
+      existing.count = (existing.count || 1) + 1;
+      if (existing.count > 4) existing.count = 4;
+    } else {
+      window._deckCards.push({ ...card, count: 1 });
+    }
+    
+    renderMobileDeckEdit();
+  } catch (e) {
+    console.error('カード追加エラー:', e);
+  }
+}
+
+/**
+ * デッキ保存（SP版）
+ */
+function saveMobileDeck() {
+  const decks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  decks[window._deckEditing] = window._deckCards;
+  localStorage.setItem('dm_decks', JSON.stringify(decks));
+  alert('デッキを保存しました');
+}
+
+/**
+ * デッキからゲーム開始（SP版）
+ */
+function playMobileDeckGame() {
+  if (!window._deckCards.length) {
+    alert('デッキが空です');
+    return;
+  }
+  
+  engineMobile.initGame(window._deckCards);
+  renderMobileGame();
+}
+
+
   return String(str ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
