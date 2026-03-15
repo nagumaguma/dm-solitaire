@@ -1,1 +1,1 @@
-web: python dm-proxy-server.py
+web: python -u dm-proxy-server.py
