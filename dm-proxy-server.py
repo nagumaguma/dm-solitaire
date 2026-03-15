@@ -1202,8 +1202,8 @@ class Handler(BaseHTTPRequestHandler):
 
         # GET /deck/list?username=X&pin=Y
         elif parsed.path == "/deck/list":
-            username = parsed_qs.get("username", [""])[0].strip()
-            pin = str(parsed_qs.get("pin", [""])[0]).strip()
+            username = qs.get("username", [""])[0].strip()
+            pin = str(qs.get("pin", [""])[0]).strip()
             
             if not username or not pin:
                 return self._json({"error": "username and pin required"}, 400)
@@ -1222,9 +1222,9 @@ class Handler(BaseHTTPRequestHandler):
 
         # GET /deck/get?username=X&pin=Y&deck_name=Z
         elif parsed.path == "/deck/get":
-            username = parsed_qs.get("username", [""])[0].strip()
-            pin = str(parsed_qs.get("pin", [""])[0]).strip()
-            deck_name = parsed_qs.get("deck_name", [""])[0].strip()
+            username = qs.get("username", [""])[0].strip()
+            pin = str(qs.get("pin", [""])[0]).strip()
+            deck_name = qs.get("deck_name", [""])[0].strip()
             
             if not username or not pin or not deck_name:
                 return self._json({"error": "username, pin, deck_name required"}, 400)
