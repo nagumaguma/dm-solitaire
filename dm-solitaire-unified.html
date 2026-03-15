@@ -1013,6 +1013,7 @@ async function loginAccount() {
     const d = await r.json();
     if (!r.ok) { toast(`ログイン失敗: ${d.error}`); return; }
     saveAccount(username, pin);
+    loadAccount();  // セッションストレージから再度読み込み
     document.getElementById('login-username').value = '';
     document.getElementById('login-pin').value = '';
     
