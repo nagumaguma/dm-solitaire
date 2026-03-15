@@ -5,6 +5,14 @@
 
 let engine = null;
 
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 /**
  * PC版UI初期化
  */
@@ -79,10 +87,11 @@ function updateDesktopDeckList() {
     el.innerHTML = `
       <div style="font-weight: 600; font-size: 0.9rem;">${escapeHtml(name)}</div>
       <div style="font-size: 0.8rem; color: #6b7280; margin: 4px 0;">📋 ${count}枚</div>
-      <div style="display: flex; gap: 6px;">
-        <button onclick="openDesktopDeck('${escapeHtml(name)}')" style="flex: 1; padding: 6px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">✏️ 編集</button>
-        <button onclick="startDesktopGame('${escapeHtml(name)}')" style="flex: 1; padding: 6px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">▶ START</button>
-        <button onclick="deleteDesktopDeck('${escapeHtml(name)}')" style="flex: 1; padding: 6px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🗑️</button>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        <button onclick="openDesktopDeck('${escapeHtml(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">✏️ 編集</button>
+        <button onclick="startDesktopGame('${escapeHtml(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">▶ START</button>
+        <button onclick="showDesktopOnlineModal('${escapeHtml(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🌐 オンライン</button>
+        <button onclick="deleteDesktopDeck('${escapeHtml(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🗑️</button>
       </div>
     `;
     deckList.appendChild(el);
@@ -100,7 +109,10 @@ function updateDesktopDeckList() {
       el.onmouseout = () => el.style.background = '#fef3c7';
       el.innerHTML = `
         <div style="font-weight: 600; font-size: 0.9rem;">☁️ ${escapeHtml(name)}</div>
-        <button onclick="startDesktopGame('${escapeHtml(name)}')" style="width: 100%; margin-top: 6px; padding: 6px; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">▶ START</button>
+        <div style="display: flex; gap: 6px; margin-top: 6px;">
+          <button onclick="startDesktopGame('${escapeHtml(name)}')" style="flex: 1; padding: 6px; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">▶ START</button>
+          <button onclick="showDesktopOnlineModal('${escapeHtml(name)}')" style="flex: 1; padding: 6px; background: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🌐 オンライン</button>
+        </div>
       `;
       deckList.appendChild(el);
     }
@@ -158,12 +170,14 @@ async function startDesktopGame(deckName) {
   }
   
   if (!deckData || !deckData.length) {
-    alert('デッキを読み込めません');
+    alert('デッキが取得できませんでした。ネットワークまたはデッキ名を確認してください。');
     return;
   }
   
   // ゲームエンジン初期化
   engine.initGame(deckData);
+  window._ol = null;
+  window._olOpponent = null;
   renderDesktopGame();
 }
 
@@ -173,12 +187,20 @@ async function startDesktopGame(deckName) {
 function renderDesktopGame() {
   const state = engine.getState();
   const gameBoard = document.getElementById('desktop-game-board');
+  const ol = window._ol;
+  const opp = window._olOpponent || {};
+  const isMyTurn = ol && window._olCurrentPlayer && ((ol.p === 'p1' && window._olCurrentPlayer === 1) || (ol.p === 'p2' && window._olCurrentPlayer === 2));
   
   gameBoard.innerHTML = `
     <div style="font-size: 0.85rem;">
       <div style="margin-bottom: 12px; padding: 8px; background: #f3f4f6; border-radius: 4px;">
         <strong>ターン:</strong> ${state.turn}
+        ${ol ? `<span style="margin-left: 8px;">${isMyTurn ? '<span style="color: #059669;">自分のターン</span>' : '<span style="color: #6b7280;">相手のターン</span>'}</span>` : ''}
       </div>
+      ${ol ? `<div style="margin-bottom: 8px; padding: 6px; background: #fef3c7; border-radius: 4px; font-size: 0.8rem;">
+        <strong>🌐</strong> ${escapeHtml(ol.p1Name)} vs ${ol.p2Name ? escapeHtml(ol.p2Name) : '待機中'}
+        ${opp.hand !== undefined ? `｜ 相手: 手札${opp.hand} バトル${opp.battleZone || 0} マナ${opp.manaZone || 0} シールド${opp.shields || 0}` : ''}
+      </div>` : ''}
       
       <div style="margin-bottom: 10px;">
         <strong style="display: block; margin-bottom: 4px;">デッキ残枚数</strong>
@@ -266,6 +288,7 @@ function renderDesktopGame() {
 
 function playDesktopCard(idx, zone) {
   engine.playCard(engine.state.hand[idx], zone);
+  if (window._ol) olSendActionDesktop('state');
   renderDesktopGame();
 }
 
@@ -330,6 +353,7 @@ function dropDesktopCard(event, zone) {
   const card = engine.state.hand[_currentDragIdx];
   if (card) {
     engine.playCard(card, zone);
+    if (window._ol) olSendActionDesktop('state');
     renderDesktopGame();
   }
   
@@ -338,11 +362,13 @@ function dropDesktopCard(event, zone) {
 
 function drawDesktopCard() {
   engine.drawCard();
+  if (window._ol) olSendActionDesktop('state');
   renderDesktopGame();
 }
 
 function turnDesktopEnd() {
   engine.turnEnd();
+  if (window._ol) olSendActionDesktop('turn_end');
   renderDesktopGame();
 }
 
@@ -553,10 +579,203 @@ function getCivLabel(civ) {
   }[civ] || civ;
 }
 
+// ─── オンライン対戦（PC版）────────────────────────────────────────────────
 
-  return String(str ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+let _olReconnectTimerDesktop = null;
+
+function showDesktopOnlineModal(deckName) {
+  window._olDeckName = deckName;
+  const overlay = document.getElementById('desktop-ol-overlay');
+  if (overlay) {
+    overlay.style.display = 'flex';
+    document.getElementById('desktop-ol-deck-name').textContent = deckName;
+    document.getElementById('desktop-ol-player-name').value = '';
+    document.getElementById('desktop-ol-room-code').value = '';
+    return;
+  }
+  const div = document.createElement('div');
+  div.id = 'desktop-ol-overlay';
+  div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center;';
+  div.innerHTML = `
+    <div style="background:white;border-radius:12px;padding:24px;max-width:360px;width:90%;box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+      <h3 style="margin-bottom:16px;">🌐 オンライン対戦</h3>
+      <p style="font-size:0.9rem;color:#6b7280;margin-bottom:12px;">デッキ: <strong id="desktop-ol-deck-name">${escapeHtml(deckName)}</strong></p>
+      <label style="display:block;margin-bottom:4px;font-size:0.85rem;">プレイヤー名</label>
+      <input type="text" id="desktop-ol-player-name" placeholder="Player 1" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;margin-bottom:16px;">
+      <div style="margin-bottom:12px;">
+        <button type="button" onclick="olCreateRoomDesktop()" style="width:100%;padding:12px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">ルームを作成</button>
+      </div>
+      <hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb;">
+      <label style="display:block;margin-bottom:4px;font-size:0.85rem;">ルームコード（6文字）</label>
+      <input type="text" id="desktop-ol-room-code" placeholder="ABCD12" maxlength="6" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;margin-bottom:12px;letter-spacing:4px;text-transform:uppercase;">
+      <button type="button" onclick="olJoinRoomDesktop()" style="width:100%;padding:12px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">参加する</button>
+      <button type="button" onclick="document.getElementById('desktop-ol-overlay').style.display='none'" style="width:100%;margin-top:10px;padding:10px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;cursor:pointer;">キャンセル</button>
+    </div>
+  `;
+  document.body.appendChild(div);
+}
+
+async function olCreateRoomDesktop() {
+  const deckName = window._olDeckName;
+  if (!deckName) return;
+  const name = (document.getElementById('desktop-ol-player-name').value || 'Player 1').trim().slice(0, 20);
+  const deckData = await getDesktopDeckDataForOnline(deckName);
+  if (!deckData || !deckData.length) {
+    alert('デッキが取得できませんでした。');
+    return;
+  }
+  const result = await NetworkService.createRoom(name);
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
+  const room = result.room;
+  window._ol = { room, p: 'p1', p1Name: name, p2Name: null, eventSource: null, reconnectAttempt: 0 };
+  window._olDeckName = deckName;
+  window._olDeckData = deckData;
+  document.getElementById('desktop-ol-overlay').querySelector('div').innerHTML = `
+    <h3 style="margin-bottom:16px;">ルーム作成完了</h3>
+    <p style="font-size:1.2rem;font-weight:700;letter-spacing:8px;color:#059669;margin:16px 0;">${room}</p>
+    <p style="font-size:0.9rem;color:#6b7280;">相手にこのコードを伝えてください。参加を待っています...</p>
+    <button type="button" onclick="olCancelDesktopWait()" style="width:100%;margin-top:16px;padding:10px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;">キャンセル</button>
+  `;
+  const es = NetworkService.createEventSource(room, 'p1');
+  window._ol.eventSource = es;
+  es.addEventListener('joined', (e) => {
+    const data = JSON.parse(e.data);
+    window._ol.p2Name = data.p2_name || 'Player 2';
+    es.close();
+    document.getElementById('desktop-ol-overlay').style.display = 'none';
+    startDesktopOnlineGame();
+  });
+  es.onerror = () => {
+    es.close();
+    if (!window._ol || !window._ol.reconnectAttempt) window._ol.reconnectAttempt = 0;
+    if (window._ol.reconnectAttempt < 3) {
+      window._ol.reconnectAttempt++;
+      const delay = Math.pow(2, window._ol.reconnectAttempt) * 1000;
+      setTimeout(() => {
+        const es2 = NetworkService.createEventSource(window._ol.room, 'p1');
+        window._ol.eventSource = es2;
+        es2.addEventListener('joined', (e) => {
+          const data = JSON.parse(e.data);
+          window._ol.p2Name = data.p2_name || 'Player 2';
+          es2.close();
+          document.getElementById('desktop-ol-overlay').style.display = 'none';
+          startDesktopOnlineGame();
+        });
+        es2.onerror = es.onerror;
+      }, delay);
+    } else {
+      alert('接続に失敗しました。ロビーに戻ります。');
+      olCancelDesktopWait();
+    }
+  };
+}
+
+function olCancelDesktopWait() {
+  if (window._ol && window._ol.eventSource) {
+    window._ol.eventSource.close();
+  }
+  window._ol = null;
+  window._olDeckName = null;
+  window._olDeckData = null;
+  const ov = document.getElementById('desktop-ol-overlay');
+  if (ov) ov.style.display = 'none';
+  renderDesktopDeckList();
+}
+
+async function olJoinRoomDesktop() {
+  const deckName = window._olDeckName;
+  const code = (document.getElementById('desktop-ol-room-code').value || '').trim().toUpperCase().slice(0, 6);
+  if (!code || code.length !== 6) {
+    alert('ルームコードは6文字で入力してください。');
+    return;
+  }
+  const name = (document.getElementById('desktop-ol-player-name').value || 'Player 2').trim().slice(0, 20);
+  const deckData = await getDesktopDeckDataForOnline(deckName);
+  if (!deckData || !deckData.length) {
+    alert('デッキが取得できませんでした。');
+    return;
+  }
+  const result = await NetworkService.joinRoom(code, name);
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
+  document.getElementById('desktop-ol-overlay').style.display = 'none';
+  window._ol = { room: code, p: 'p2', p1Name: result.p1_name || 'Player 1', p2Name: name, eventSource: null, reconnectAttempt: 0 };
+  window._olDeckName = deckName;
+  window._olDeckData = deckData;
+  startDesktopOnlineGame();
+}
+
+async function getDesktopDeckDataForOnline(deckName) {
+  const savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  if (savedDecks[deckName]) return Array.isArray(savedDecks[deckName]) ? savedDecks[deckName] : null;
+  const account = AuthService.getCurrentAccount();
+  if (account) return await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
+  return null;
+}
+
+function startDesktopOnlineGame() {
+  const deckData = window._olDeckData;
+  if (!deckData || !window._ol) return;
+  if (window._ol.eventSource) window._ol.eventSource.close();
+  window._olOpponent = { hand: 5, battleZone: 0, manaZone: 0, shields: 5, deck: 30 };
+  window._olCurrentPlayer = window._ol.p === 'p1' ? 1 : 2;
+  engine.initGame(deckData);
+  window._ol.eventSource = null;
+  olStartEventListenerDesktop();
+  renderDesktopGame();
+  setTimeout(() => olSendActionDesktop('state'), 200);
+}
+
+function olStartEventListenerDesktop() {
+  if (!window._ol || !engine) return;
+  if (window._ol.eventSource) window._ol.eventSource.close();
+  const es = NetworkService.createEventSource(window._ol.room, window._ol.p);
+  window._ol.eventSource = es;
+  es.addEventListener('opponent_state', (e) => {
+    const data = JSON.parse(e.data);
+    const other = window._ol.p === 'p1' ? data.p2 : data.p1;
+    if (other) window._olOpponent = other;
+    if (data.active) window._olCurrentPlayer = data.active === 'p1' ? 1 : 2;
+    renderDesktopGame();
+  });
+  es.addEventListener('turn_end', (e) => {
+    const data = JSON.parse(e.data);
+    if (data.turn) engine.state.turn = data.turn;
+    window._olCurrentPlayer = data.active === 'p1' ? 1 : 2;
+    renderDesktopGame();
+  });
+  es.onerror = () => {
+    es.close();
+    if (!window._ol) return;
+    window._ol.reconnectAttempt = (window._ol.reconnectAttempt || 0) + 1;
+    if (window._ol.reconnectAttempt < 3) {
+      const delay = Math.pow(2, window._ol.reconnectAttempt) * 1000;
+      setTimeout(olStartEventListenerDesktop, delay);
+    } else {
+      alert('接続が切れました。ロビーに戻ります。');
+      window._ol = null;
+      window._olOpponent = null;
+      renderDesktopDeckList();
+    }
+  };
+}
+
+function olSendActionDesktop(actionType) {
+  if (!window._ol || !engine) return;
+  const s = engine.state;
+  const payload = {
+    room: window._ol.room,
+    p: window._ol.p,
+    type: actionType,
+    turn: s.turn,
+    active: actionType === 'turn_end' ? (window._ol.p === 'p1' ? 'p2' : 'p1') : window._ol.p,
+    p1: window._ol.p === 'p1' ? { hand: s.hand.length, battleZone: s.battleZone.length, manaZone: s.manaZone.length, shields: s.shields.length, deck: s.deck.length, graveyard: 0 } : null,
+    p2: window._ol.p === 'p2' ? { hand: s.hand.length, battleZone: s.battleZone.length, manaZone: s.manaZone.length, shields: s.shields.length, deck: s.deck.length, graveyard: 0 } : null
+  };
+  NetworkService.sendAction(payload);
 }

@@ -5,6 +5,27 @@
 
 const NetworkService = {
   /**
+   * API ベースURL（index.html で window.DM_API_BASE を設定可能）
+   */
+  getApiBase() {
+    return (typeof window !== 'undefined' && window.DM_API_BASE) || 'http://localhost:8765';
+  },
+
+  /**
+   * タイムアウト付き AbortSignal（AbortSignal.timeout 未対応環境用）
+   * @param {number} ms
+   * @returns {AbortSignal|undefined}
+   */
+  _abortSignal(ms) {
+    if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+      return AbortSignal.timeout(ms);
+    }
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), ms);
+    return ctrl.signal;
+  },
+
+  /**
    * サーバーデッキ一覧を取得
    * @param {string} username
    * @param {string} pin
@@ -12,9 +33,10 @@ const NetworkService = {
    */
   async loadServerDecks(username, pin) {
     try {
+      const base = this.getApiBase();
       const query = `username=${encodeURIComponent(username)}&pin=${encodeURIComponent(pin)}`;
-      const res = await fetch(`http://localhost:8765/deck/list?${query}`, {
-        signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined
+      const res = await fetch(`${base}/deck/list?${query}`, {
+        signal: this._abortSignal(10000)
       });
 
       if (!res.ok) {
@@ -23,7 +45,7 @@ const NetworkService = {
       }
 
       const data = await res.json();
-      return Array.isArray(data) ? data : [];
+      return Array.isArray(data.decks) ? data.decks : [];
     } catch (error) {
       console.error('デッキ一覧取得エラー:', error);
       return [];
@@ -39,9 +61,10 @@ const NetworkService = {
    */
   async fetchServerDeck(username, pin, deckName) {
     try {
+      const base = this.getApiBase();
       const query = `username=${encodeURIComponent(username)}&pin=${encodeURIComponent(pin)}&deck_name=${encodeURIComponent(deckName)}`;
-      const res = await fetch(`http://localhost:8765/deck/get?${query}`, {
-        signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined
+      const res = await fetch(`${base}/deck/get?${query}`, {
+        signal: this._abortSignal(10000)
       });
 
       if (!res.ok) {
@@ -50,7 +73,8 @@ const NetworkService = {
       }
 
       const data = await res.json();
-      return Array.isArray(data) ? data : null;
+      const deck = data.deck_data;
+      return Array.isArray(deck) ? deck : null;
     } catch (error) {
       console.error('デッキ取得エラー:', error);
       return null;
@@ -65,9 +89,10 @@ const NetworkService = {
    */
   async searchCards(q, page = 1) {
     try {
+      const base = this.getApiBase();
       const query = `q=${encodeURIComponent(q)}&page=${page}`;
-      const res = await fetch(`http://localhost:8765/search?${query}`, {
-        signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined
+      const res = await fetch(`${base}/search?${query}`, {
+        signal: this._abortSignal(10000)
       });
 
       if (!res.ok) {
@@ -76,10 +101,90 @@ const NetworkService = {
       }
 
       const data = await res.json();
-      return Array.isArray(data) ? data : [];
+      return Array.isArray(data.cards) ? data.cards : [];
     } catch (error) {
       console.error('検索エラー:', error);
       return [];
     }
+  },
+
+  // ─── オンライン対戦 ─────────────────────────────────────────────────────
+
+  /**
+   * ルーム作成
+   * @param {string} name - プレイヤー名
+   * @returns {Promise<{room: string, p: string}|{error: string}>}
+   */
+  async createRoom(name) {
+    const base = this.getApiBase();
+    const res = await fetch(`${base}/room/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: (name || 'Player 1').slice(0, 20) }),
+      signal: this._abortSignal(10000)
+    });
+    const data = await res.json();
+    if (!res.ok) return { error: data.error || 'ルーム作成に失敗しました' };
+    return data;
+  },
+
+  /**
+   * ルームに参加
+   * @param {string} roomCode - 6文字ルームコード
+   * @param {string} name - プレイヤー名
+   * @returns {Promise<{ok: boolean, p: string, p1_name: string}|{error: string}>}
+   */
+  async joinRoom(roomCode, name) {
+    const base = this.getApiBase();
+    const res = await fetch(`${base}/room/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: String(roomCode).trim().toUpperCase().slice(0, 6), name: (name || 'Player 2').slice(0, 20) }),
+      signal: this._abortSignal(10000)
+    });
+    const data = await res.json();
+    if (!res.ok) return { error: data.error || '参加に失敗しました' };
+    return data;
+  },
+
+  /**
+   * アクション送信（状態・ターン終了）
+   * @param {Object} payload - { room, p, type, turn, active, p1?, p2? }
+   */
+  sendAction(payload) {
+    const base = this.getApiBase();
+    fetch(`${base}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).catch(() => {});
+  },
+
+  /**
+   * SSE イベントストリーム取得
+   * @param {string} room
+   * @param {string} p - 'p1' | 'p2'
+   * @returns {EventSource}
+   */
+  createEventSource(room, p) {
+    const base = this.getApiBase();
+    return new EventSource(`${base}/events?room=${encodeURIComponent(room)}&p=${encodeURIComponent(p)}`);
+  },
+
+  /**
+   * チャット送信
+   * @param {string} room
+   * @param {string} p
+   * @param {string} message
+   * @returns {Promise<boolean>}
+   */
+  async sendChat(room, p, message) {
+    const base = this.getApiBase();
+    const res = await fetch(`${base}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room, p, message: String(message).slice(0, 200) })
+    });
+    return res.ok;
   }
 };

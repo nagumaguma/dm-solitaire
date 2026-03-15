@@ -76,21 +76,16 @@ auth-service.js         🔐 認証・セッション管理
 network-service.js      🌐 サーバー通信（API呼び出し）
 ui-desktop.js           💻 PC版UI（3カラムレイアウト）
 ui-mobile.js            📱 SP版UI（1カラムレイアウト）
-dm-proxy-server.py      🐍 バックエンド（Python Flask）
+dm-proxy-server.py      🐍 バックエンド（Python BaseHTTPRequestHandler）
 _archive/               📦 古いバージョン
-
-```
-file:///path/to/dm-solitaire-web.html
-或は
-http://localhost:8765 (ファイルプロトコルでなく、サーバーでホストする場合)
 ```
 
 #### 3. ローカルサーバーのデフォルト設定
 
-HTML ファイル内の `PROXY` 設定を確認：
+API ベース URL は `index.html` 読み込み前に `window.DM_API_BASE` で変更可能です（未設定時は `http://localhost:8765`）。
 
 ```javascript
-const PROXY = 'http://localhost:8765';  // デフォルト
+window.DM_API_BASE = 'http://localhost:8765';  // デフォルト（デプロイ時に上書き可）
 ```
 
 別ポートで起動する場合：
@@ -116,24 +111,24 @@ PORT=9999 python dm-proxy-server.py
 ### 2. 一人回しモード
 
 ```
-デッキ選択 → ゲーム開始 → 相手を自動生成してプレイ
+デッキ一覧でデッキを選択 → ▶ START → ゲーム開始
 ```
 
 シールド5枚 + 初期手札5枚でゲーム開始
 
 ### 3. マルチプレイ（友達と対戦）
 
-**相手をホストする側:**
+**ルームを作る側:**
 ```
-オンライン → 新規ルーム → ルームコード表示 → 友達に伝える
-```
-
-**友達が参加する側:**
-```
-オンライン → ルームに参加 → コード入力 → 対戦開始
+デッキ一覧でデッキを選択 → 🌐 オンライン → プレイヤー名入力 → ルームを作成 → 表示された6文字コードを友達に伝える
 ```
 
-操作は自分のシールド・ハンドを右クリック、相手のアクションはリアルタイム表示
+**参加する側:**
+```
+デッキを選択 → 🌐 オンライン → プレイヤー名・ルームコード（6文字）入力 → 参加する
+```
+
+相手の手札・バトル・マナ・シールド枚数がリアルタイムで表示され、ターン終了で相手に通知されます
 
 ### 4. アカウント作成（デッキクラウド保存）
 
@@ -390,8 +385,7 @@ CREATE TABLE decks (
 - 該当ドメインのキャッシュを「すべて削除」
 
 **対象ファイル:**
-- `dm-solitaire-web.html`
-- `dm-solitaire-sp.html`
+- `index.html` および読み込む JS（`ui-desktop.js`, `ui-mobile.js` 等）
 
 ---
 
@@ -478,26 +472,23 @@ BASE_URL=https://nagumaguma.github.io/dm-solitaire
 ### コード構成
 
 ```
-dm-solitaire-unified.html  (1500+ 行)  - 統合版フロント（SP/WEB 自動判定、推奨）
-dm-solitaire-sp.html       (2300+ 行)  - レガシー：スマホ版
-dm-solitaire-web.html      (2900+ 行)  - レガシー：PC版
-dm-proxy-server.py         (1360+ 行)  - バックエンド / API / DB
-dm_cache.db                (自動生成)  - SQLite データベース
+index.html                - エントリーポイント（認証・デバイス判定・DM_API_BASE 設定）
+game-engine.js            - ゲームロジック（UI 非依存）
+auth-service.js           - 認証・セッション
+network-service.js        - API 呼び出し（デッキ・検索・ルーム・SSE）
+ui-desktop.js             - PC 版 UI（3カラム：検索｜デッキ｜ゲーム・オンライン対戦）
+ui-mobile.js              - SP 版 UI（1カラム・オンライン対戦）
+dm-proxy-server.py        - バックエンド（BaseHTTPRequestHandler / API / SQLite）
+dm_cache.db               - SQLite（自動生成）
+_archive/                 - 旧版 HTML（dm-solitaire-*.html）
 ```
 
-### ファイル選択ガイド
+### エントリーポイント
 
-| ファイル | 対象 | 説明 |
-|----------|------|------|
-| **dm-solitaire-unified.html** | 全て | ✅ 推奨 - メディアクエリで自動切り替え、保守性 UP |
-| dm-solitaire-web.html | PC / WEB | 従来式、PC最適化 |
-| dm-solitaire-sp.html | スマホ | 従来式、スマホ最適化 |
-
-**推奨理由:**
-- 単一ファイルで保守が簡単
-- CSS @media で 768px を境に自動切り替え
-- デッキ・アカウント情報が共有（sessionStorage）
-- ファイルサイズ 1/2 以下
+| 用途 | ファイル | 説明 |
+|------|----------|------|
+| **本番** | **index.html** | 認証後、768px で PC/SP を切り替え。一人回し・オンライン対戦対応 |
+| アーカイブ | _archive/dm-solitaire-*.html | 旧版（参照用） |
 
 ---
 

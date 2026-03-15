@@ -5,6 +5,14 @@
 
 let engineMobile = null;
 
+function escapeHtmlMobile(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 /**
  * SP版UI初期化
  */
@@ -81,10 +89,11 @@ function updateMobileDeckList() {
     el.innerHTML = `
       <div style="font-weight: 600; font-size: 0.95rem;">${escapeHtmlMobile(name)}</div>
       <div style="font-size: 0.85rem; color: #6b7280; margin: 6px 0;">📋 ${count}枚</div>
-      <div style="display: flex; gap: 6px;">
-        <button onclick="openMobileDeck('${escapeHtmlMobile(name)}')" style="flex: 1; padding: 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">✏️ 編集</button>
-        <button onclick="startMobileGame('${escapeHtmlMobile(name)}')" style="flex: 1; padding: 10px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">▶ START</button>
-        <button onclick="deleteMobileDeck('${escapeHtmlMobile(name)}')" style="flex: 1; padding: 10px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">🗑️</button>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        <button onclick="openMobileDeck('${escapeHtmlMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">✏️ 編集</button>
+        <button onclick="startMobileGame('${escapeHtmlMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">▶ START</button>
+        <button onclick="showMobileOnlineModal('${escapeHtmlMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">🌐 オンライン</button>
+        <button onclick="deleteMobileDeck('${escapeHtmlMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">🗑️</button>
       </div>
     `;
     deckList.appendChild(el);
@@ -104,7 +113,10 @@ function updateMobileDeckList() {
       el.onmouseout = () => el.style.background = '#fef3c7';
       el.innerHTML = `
         <div style="font-weight: 600; font-size: 0.95rem;">☁️ ${escapeHtmlMobile(name)}</div>
-        <button onclick="startMobileGame('${escapeHtmlMobile(name)}')" style="width: 100%; margin-top: 8px; padding: 10px; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">▶ START</button>
+        <div style="display: flex; gap: 6px; margin-top: 8px;">
+          <button onclick="startMobileGame('${escapeHtmlMobile(name)}')" style="flex: 1; padding: 10px; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">▶ START</button>
+          <button onclick="showMobileOnlineModal('${escapeHtmlMobile(name)}')" style="flex: 1; padding: 10px; background: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">🌐 オンライン</button>
+        </div>
       `;
       deckList.appendChild(el);
     }
@@ -161,10 +173,12 @@ async function startMobileGame(deckName) {
   }
   
   if (!deckData || !deckData.length) {
-    alert('デッキを読み込めません');
+    alert('デッキが取得できませんでした。ネットワークまたはデッキ名を確認してください。');
     return;
   }
   
+  window._ol = null;
+  window._olOpponent = null;
   engineMobile.initGame(deckData);
   renderMobileGame();
 }
@@ -175,6 +189,9 @@ async function startMobileGame(deckName) {
 function renderMobileGame() {
   const state = engineMobile.getState();
   const container = document.getElementById('app-mobile');
+  const ol = window._ol;
+  const opp = window._olOpponent || {};
+  const isMyTurn = ol && window._olCurrentPlayer && ((ol.p === 'p1' && window._olCurrentPlayer === 1) || (ol.p === 'p2' && window._olCurrentPlayer === 2));
   
   container.innerHTML = `
     <div style="display: flex; flex-direction: column; height: 100vh; background: #0f172a; color: white;">
@@ -182,7 +199,12 @@ function renderMobileGame() {
       <!-- ヘッダー -->
       <div style="background: #dc2626; padding: 12px; font-weight: 600; text-align: center; font-size: 0.95rem;">
         ターン ${state.turn} | デッキ: ${state.deck.length}
+        ${ol ? ` | ${isMyTurn ? '自分のターン' : '相手のターン'}` : ''}
       </div>
+      ${ol ? `<div style="padding: 8px 12px; background: #1e293b; font-size: 0.8rem; color: #cbd5e1;">
+        🌐 ${escapeHtmlMobile(ol.p1Name)} vs ${ol.p2Name ? escapeHtmlMobile(ol.p2Name) : '待機中'}
+        ${opp.hand !== undefined ? `｜ 相手: 手札${opp.hand} バトル${opp.battleZone || 0} マナ${opp.manaZone || 0} シールド${opp.shields || 0}` : ''}
+      </div>` : ''}
       
       <!-- メインゲーム画面 -->
       <div style="flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding: 12px; gap: 12px;">
@@ -254,16 +276,19 @@ function renderMobileGame() {
 function playMobileCard(idx) {
   const zone = confirm('バトルに配置? (OK: バトル, キャンセル: マナ)') ? 'battle' : 'mana';
   engineMobile.playCard(engineMobile.state.hand[idx], zone);
+  if (window._ol) olSendActionMobile('state');
   renderMobileGame();
 }
 
 function drawMobileCard() {
   engineMobile.drawCard();
+  if (window._ol) olSendActionMobile('state');
   renderMobileGame();
 }
 
 function turnMobileEnd() {
   engineMobile.turnEnd();
+  if (window._ol) olSendActionMobile('turn_end');
   renderMobileGame();
 }
 
@@ -442,10 +467,196 @@ function playMobileDeckGame() {
   renderMobileGame();
 }
 
+// ─── オンライン対戦（SP版）────────────────────────────────────────────────
 
-  return String(str ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+function showMobileOnlineModal(deckName) {
+  window._olDeckName = deckName;
+  const overlay = document.getElementById('mobile-ol-overlay');
+  if (overlay) {
+    overlay.style.display = 'flex';
+    document.getElementById('mobile-ol-deck-name').textContent = deckName;
+    document.getElementById('mobile-ol-player-name').value = '';
+    document.getElementById('mobile-ol-room-code').value = '';
+    return;
+  }
+  const div = document.createElement('div');
+  div.id = 'mobile-ol-overlay';
+  div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:2000;display:flex;align-items:center;justify-content:center;padding:16px;';
+  div.innerHTML = `
+    <div style="background:white;border-radius:12px;padding:20px;max-width:360px;width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.3);">
+      <h3 style="margin-bottom:12px;font-size:1.1rem;">🌐 オンライン対戦</h3>
+      <p style="font-size:0.9rem;color:#6b7280;margin-bottom:10px;">デッキ: <strong id="mobile-ol-deck-name">${escapeHtmlMobile(deckName)}</strong></p>
+      <label style="display:block;margin-bottom:4px;font-size:0.85rem;">プレイヤー名</label>
+      <input type="text" id="mobile-ol-player-name" placeholder="Player 1" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:6px;margin-bottom:12px;font-size:1rem;">
+      <button type="button" onclick="olCreateRoomMobile()" style="width:100%;padding:12px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;margin-bottom:16px;">ルームを作成</button>
+      <hr style="margin:12px 0;border:none;border-top:1px solid #e5e7eb;">
+      <label style="display:block;margin-bottom:4px;font-size:0.85rem;">ルームコード（6文字）</label>
+      <input type="text" id="mobile-ol-room-code" placeholder="ABCD12" maxlength="6" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:6px;margin-bottom:10px;letter-spacing:4px;text-transform:uppercase;font-size:1rem;">
+      <button type="button" onclick="olJoinRoomMobile()" style="width:100%;padding:12px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">参加する</button>
+      <button type="button" onclick="document.getElementById('mobile-ol-overlay').style.display='none'" style="width:100%;margin-top:10px;padding:10px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;cursor:pointer;">キャンセル</button>
+    </div>
+  `;
+  document.body.appendChild(div);
+}
+
+async function olCreateRoomMobile() {
+  const deckName = window._olDeckName;
+  if (!deckName) return;
+  const name = (document.getElementById('mobile-ol-player-name').value || 'Player 1').trim().slice(0, 20);
+  const deckData = await getMobileDeckDataForOnline(deckName);
+  if (!deckData || !deckData.length) {
+    alert('デッキが取得できませんでした。');
+    return;
+  }
+  const result = await NetworkService.createRoom(name);
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
+  const room = result.room;
+  window._ol = { room, p: 'p1', p1Name: name, p2Name: null, eventSource: null, reconnectAttempt: 0 };
+  window._olDeckName = deckName;
+  window._olDeckData = deckData;
+  document.getElementById('mobile-ol-overlay').querySelector('div').innerHTML = `
+    <h3 style="margin-bottom:12px;">ルーム作成完了</h3>
+    <p style="font-size:1.4rem;font-weight:700;letter-spacing:8px;color:#059669;margin:12px 0;">${room}</p>
+    <p style="font-size:0.9rem;color:#6b7280;">相手にこのコードを伝えてください。</p>
+    <button type="button" onclick="olCancelMobileWait()" style="width:100%;margin-top:16px;padding:12px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">キャンセル</button>
+  `;
+  const es = NetworkService.createEventSource(room, 'p1');
+  window._ol.eventSource = es;
+  es.addEventListener('joined', (e) => {
+    const data = JSON.parse(e.data);
+    window._ol.p2Name = data.p2_name || 'Player 2';
+    es.close();
+    document.getElementById('mobile-ol-overlay').style.display = 'none';
+    startMobileOnlineGame();
+  });
+  es.onerror = () => {
+    es.close();
+    if (!window._ol || !window._ol.reconnectAttempt) window._ol.reconnectAttempt = 0;
+    if (window._ol.reconnectAttempt < 3) {
+      window._ol.reconnectAttempt++;
+      const delay = Math.pow(2, window._ol.reconnectAttempt) * 1000;
+      setTimeout(() => {
+        const es2 = NetworkService.createEventSource(window._ol.room, 'p1');
+        window._ol.eventSource = es2;
+        es2.addEventListener('joined', (e) => {
+          const data = JSON.parse(e.data);
+          window._ol.p2Name = data.p2_name || 'Player 2';
+          es2.close();
+          document.getElementById('mobile-ol-overlay').style.display = 'none';
+          startMobileOnlineGame();
+        });
+        es2.onerror = es.onerror;
+      }, delay);
+    } else {
+      alert('接続に失敗しました。ロビーに戻ります。');
+      olCancelMobileWait();
+    }
+  };
+}
+
+function olCancelMobileWait() {
+  if (window._ol && window._ol.eventSource) window._ol.eventSource.close();
+  window._ol = null;
+  window._olDeckName = null;
+  window._olDeckData = null;
+  const ov = document.getElementById('mobile-ol-overlay');
+  if (ov) ov.style.display = 'none';
+  renderMobileDeckList();
+}
+
+async function olJoinRoomMobile() {
+  const deckName = window._olDeckName;
+  const code = (document.getElementById('mobile-ol-room-code').value || '').trim().toUpperCase().slice(0, 6);
+  if (!code || code.length !== 6) {
+    alert('ルームコードは6文字で入力してください。');
+    return;
+  }
+  const name = (document.getElementById('mobile-ol-player-name').value || 'Player 2').trim().slice(0, 20);
+  const deckData = await getMobileDeckDataForOnline(deckName);
+  if (!deckData || !deckData.length) {
+    alert('デッキが取得できませんでした。');
+    return;
+  }
+  const result = await NetworkService.joinRoom(code, name);
+  if (result.error) {
+    alert(result.error);
+    return;
+  }
+  document.getElementById('mobile-ol-overlay').style.display = 'none';
+  window._ol = { room: code, p: 'p2', p1Name: result.p1_name || 'Player 1', p2Name: name, eventSource: null, reconnectAttempt: 0 };
+  window._olDeckName = deckName;
+  window._olDeckData = deckData;
+  startMobileOnlineGame();
+}
+
+async function getMobileDeckDataForOnline(deckName) {
+  const savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  if (savedDecks[deckName]) return Array.isArray(savedDecks[deckName]) ? savedDecks[deckName] : null;
+  const account = AuthService.getCurrentAccount();
+  if (account) return await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
+  return null;
+}
+
+function startMobileOnlineGame() {
+  const deckData = window._olDeckData;
+  if (!deckData || !window._ol) return;
+  if (window._ol.eventSource) window._ol.eventSource.close();
+  window._olOpponent = { hand: 5, battleZone: 0, manaZone: 0, shields: 5, deck: 30 };
+  window._olCurrentPlayer = window._ol.p === 'p1' ? 1 : 2;
+  engineMobile.initGame(deckData);
+  window._ol.eventSource = null;
+  olStartEventListenerMobile();
+  renderMobileGame();
+  setTimeout(() => olSendActionMobile('state'), 200);
+}
+
+function olStartEventListenerMobile() {
+  if (!window._ol || !engineMobile) return;
+  if (window._ol.eventSource) window._ol.eventSource.close();
+  const es = NetworkService.createEventSource(window._ol.room, window._ol.p);
+  window._ol.eventSource = es;
+  es.addEventListener('opponent_state', (e) => {
+    const data = JSON.parse(e.data);
+    const other = window._ol.p === 'p1' ? data.p2 : data.p1;
+    if (other) window._olOpponent = other;
+    if (data.active) window._olCurrentPlayer = data.active === 'p1' ? 1 : 2;
+    renderMobileGame();
+  });
+  es.addEventListener('turn_end', (e) => {
+    const data = JSON.parse(e.data);
+    if (data.turn) engineMobile.state.turn = data.turn;
+    window._olCurrentPlayer = data.active === 'p1' ? 1 : 2;
+    renderMobileGame();
+  });
+  es.onerror = () => {
+    es.close();
+    if (!window._ol) return;
+    window._ol.reconnectAttempt = (window._ol.reconnectAttempt || 0) + 1;
+    if (window._ol.reconnectAttempt < 3) {
+      setTimeout(olStartEventListenerMobile, Math.pow(2, window._ol.reconnectAttempt) * 1000);
+    } else {
+      alert('接続が切れました。ロビーに戻ります。');
+      window._ol = null;
+      window._olOpponent = null;
+      renderMobileDeckList();
+    }
+  };
+}
+
+function olSendActionMobile(actionType) {
+  if (!window._ol || !engineMobile) return;
+  const s = engineMobile.state;
+  const payload = {
+    room: window._ol.room,
+    p: window._ol.p,
+    type: actionType,
+    turn: s.turn,
+    active: actionType === 'turn_end' ? (window._ol.p === 'p1' ? 'p2' : 'p1') : window._ol.p,
+    p1: window._ol.p === 'p1' ? { hand: s.hand.length, battleZone: s.battleZone.length, manaZone: s.manaZone.length, shields: s.shields.length, deck: s.deck.length, graveyard: 0 } : null,
+    p2: window._ol.p === 'p2' ? { hand: s.hand.length, battleZone: s.battleZone.length, manaZone: s.manaZone.length, shields: s.shields.length, deck: s.deck.length, graveyard: 0 } : null
+  };
+  NetworkService.sendAction(payload);
 }

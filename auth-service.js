@@ -8,6 +8,13 @@ const AuthService = {
   _account: null,
 
   /**
+   * API ベースURL（NetworkService と共通）
+   */
+  _getApiBase() {
+    return (typeof window !== 'undefined' && window.DM_API_BASE) || 'http://localhost:8765';
+  },
+
+  /**
    * アカウント情報をSessionStorageに保存
    * @param {string} username
    * @param {string} pin
@@ -64,20 +71,19 @@ const AuthService = {
    */
   async login(username, pin) {
     try {
-      const res = await fetch('http://localhost:8765/profile/login', {
+      const res = await fetch(`${this._getApiBase()}/profile/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `name=${encodeURIComponent(username)}&password=${encodeURIComponent(pin)}`
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: String(username).trim(), pin: String(pin).trim() })
       });
 
       const data = await res.json();
 
-      if (data.success) {
+      if (res.ok && !data.error) {
         this.saveAccount(username, pin);
         return { success: true, message: 'ログイン成功' };
-      } else {
-        return { success: false, message: data.message || 'ログイン失敗' };
       }
+      return { success: false, message: data.error || 'ログイン失敗' };
     } catch (error) {
       console.error('ログイン中にエラー:', error);
       return { success: false, message: 'ネットワークエラー: ' + error.message };
@@ -92,20 +98,19 @@ const AuthService = {
    */
   async register(username, pin) {
     try {
-      const res = await fetch('http://localhost:8765/profile/create', {
+      const res = await fetch(`${this._getApiBase()}/profile/create`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `name=${encodeURIComponent(username)}&password=${encodeURIComponent(pin)}`
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: String(username).trim().slice(0, 20), pin: String(pin).trim() })
       });
 
       const data = await res.json();
 
-      if (data.success) {
+      if (res.ok && !data.error) {
         this.saveAccount(username, pin);
         return { success: true, message: '登録成功' };
-      } else {
-        return { success: false, message: data.message || '登録失敗' };
       }
+      return { success: false, message: data.error || '登録失敗' };
     } catch (error) {
       console.error('登録中にエラー:', error);
       return { success: false, message: 'ネットワークエラー: ' + error.message };
