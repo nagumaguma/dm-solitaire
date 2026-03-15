@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DM Solitaire</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    :root {
+      --accent: #dc2626;
+      --accent2: #ea580c;
+      --bg: #f0f2f5;
+      --text: #111827;
+      --text-dim: #6b7280;
+    }
+    
+    body {
+      font-family: 'Segoe UI', 'Hiragino Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    /* 認証画面 */
+    #auth-screen {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      z-index: 1000;
+    }
+
+    #auth-screen.active {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+    }
+
+    .auth-box {
+      background: white;
+      border-radius: 12px;
+      padding: 32px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+      max-width: 380px;
+      width: 90%;
+    }
+
+    .auth-box h1 {
+      text-align: center;
+      margin-bottom: 24px;
+      color: var(--accent);
+      font-size: 1.8rem;
+    }
+
+    .auth-form {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .auth-form input {
+      padding: 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 1rem;
+    }
+
+    .auth-form button {
+      padding: 12px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #991b1b;
+    }
+
+    .btn-secondary {
+      background: #e5e7eb;
+      color: var(--text);
+    }
+
+    .btn-secondary:hover {
+      background: #d1d5db;
+    }
+
+    .auth-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 20px;
+    }
+
+    .auth-tab {
+      flex: 1;
+      padding: 10px;
+      background: #f3f4f6;
+      border: 2px solid transparent;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      text-align: center;
+      transition: all 0.2s;
+    }
+
+    .auth-tab.active {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+
+    .auth-form-section {
+      display: none;
+    }
+
+    .auth-form-section.active {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .error-msg {
+      color: #dc2626;
+      font-size: 0.9rem;
+      text-align: center;
+      padding: 8px;
+      background: #fee2e2;
+      border-radius: 4px;
+      display: none;
+    }
+
+    .error-msg.show {
+      display: block;
+    }
+
+    /* ゲーム画面 */
+    #app-desktop,
+    #app-mobile {
+      display: none;
+    }
+
+    #app-desktop.active {
+      display: block;
+    }
+
+    #app-mobile.active {
+      display: block;
+    }
+
+    @media (max-width: 768px) {
+      #app-desktop {
+        display: none !important;
+      }
+      
+      #app-mobile.active {
+        display: flex !important;
+      }
+    }
+
+    @media (min-width: 769px) {
+      #app-mobile {
+        display: none !important;
+      }
+      
+      #app-desktop.active {
+        display: grid !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- 認証画面 -->
+<div id="auth-screen">
+  <div class="auth-box">
+    <h1>🎮 DM Solitaire</h1>
+
+    <div class="auth-tabs">
+      <div class="auth-tab active" onclick="switchAuthTab('login')">ログイン</div>
+      <div class="auth-tab" onclick="switchAuthTab('register')">新規登録</div>
+      <div class="auth-tab" onclick="switchAuthTab('guest')">ゲスト</div>
+    </div>
+
+    <div id="error-msg" class="error-msg"></div>
+
+    <!-- ログインフォーム -->
+    <div id="login-form" class="auth-form-section active">
+      <input type="text" id="login-username" placeholder="ユーザー名" autocomplete="username">
+      <input type="password" id="login-pin" placeholder="PIN" autocomplete="current-password">
+      <button class="btn-primary" onclick="submitLogin()">ログイン</button>
+    </div>
+
+    <!-- 登録フォーム -->
+    <div id="register-form" class="auth-form-section">
+      <input type="text" id="register-username" placeholder="ユーザー名" autocomplete="username">
+      <input type="password" id="register-pin" placeholder="PIN" autocomplete="new-password">
+      <input type="password" id="register-pin-confirm" placeholder="PIN確認" autocomplete="new-password">
+      <button class="btn-primary" onclick="submitRegister()">登録</button>
+    </div>
+
+    <!-- ゲストフォーム -->
+    <div id="guest-form" class="auth-form-section">
+      <p style="text-align: center; color: var(--text-dim); margin-bottom: 12px;">
+        ユーザー登録なしでプレイできます
+      </p>
+      <button class="btn-primary" onclick="submitGuest()">ゲストでプレイ</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ゲーム画面（PC版） -->
+<div id="app-desktop"></div>
+
+<!-- ゲーム画面（SP版） -->
+<div id="app-mobile"></div>
+
+<!-- スクリプト読み込み -->
+<script src="game-engine.js"></script>
+<script src="auth-service.js"></script>
+<script src="network-service.js"></script>
+<script src="ui-desktop.js"></script>
+<script src="ui-mobile.js"></script>
+
+<script>
+  // グローバル状態
+  window._serverDeckNames = [];
+
+  /**
+   * 初期化メイン
+   */
+  async function init() {
+    // SessionStorageからアカウント復元
+    const account = AuthService.loadAccount();
+
+    if (account) {
+      // ログイン済み → ゲームUI表示
+      await showGameUI(account);
+    } else {
+      // 未ログイン → 認証画面表示
+      showAuthUI();
+    }
+  }
+
+  /**
+   * 認証画面表示
+   */
+  function showAuthUI() {
+    document.getElementById('auth-screen').classList.add('active');
+    document.getElementById('app-desktop').classList.remove('active');
+    document.getElementById('app-mobile').classList.remove('active');
+  }
+
+  /**
+   * ゲーム画面表示
+   */
+  async function showGameUI(account) {
+    // サーバーデッキ取得
+    window._serverDeckNames = await NetworkService.loadServerDecks(account.username, account.pin);
+
+    // デバイス判定
+    const isMobile = window.innerWidth < 768 || navigator.maxTouchPoints > 1;
+
+    document.getElementById('auth-screen').classList.remove('active');
+
+    if (isMobile) {
+      document.getElementById('app-mobile').classList.add('active');
+      initMobileUI();
+    } else {
+      document.getElementById('app-desktop').classList.add('active');
+      initDesktopUI();
+    }
+  }
+
+  /**
+   * 認証タブ切り替え
+   */
+  function switchAuthTab(tab) {
+    document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.auth-form-section').forEach(f => f.classList.remove('active'));
+    document.getElementById('error-msg').classList.remove('show');
+
+    document.querySelector(`[onclick="switchAuthTab('${tab}')"]`).classList.add('active');
+    document.getElementById(tab === 'guest' ? 'guest-form' : tab + '-form').classList.add('active');
+  }
+
+  /**
+   * ログイン送信
+   */
+  async function submitLogin() {
+    const username = document.getElementById('login-username').value.trim();
+    const pin = document.getElementById('login-pin').value.trim();
+
+    if (!username || !pin) {
+      showError('ユーザー名とPINを入力してください');
+      return;
+    }
+
+    const result = await AuthService.login(username, pin);
+    if (result.success) {
+      await showGameUI({ username, pin });
+    } else {
+      showError(result.message);
+    }
+  }
+
+  /**
+   * 登録送信
+   */
+  async function submitRegister() {
+    const username = document.getElementById('register-username').value.trim();
+    const pin = document.getElementById('register-pin').value.trim();
+    const confirm = document.getElementById('register-pin-confirm').value.trim();
+
+    if (!username || !pin) {
+      showError('ユーザー名とPINを入力してください');
+      return;
+    }
+
+    if (pin !== confirm) {
+      showError('PINが一致しません');
+      return;
+    }
+
+    const result = await AuthService.register(username, pin);
+    if (result.success) {
+      await showGameUI({ username, pin });
+    } else {
+      showError(result.message);
+    }
+  }
+
+  /**
+   * ゲスト送信
+   */
+  async function submitGuest() {
+    AuthService.guest();
+    window._serverDeckNames = [];
+    
+    const isMobile = window.innerWidth < 768 || navigator.maxTouchPoints > 1;
+    
+    document.getElementById('auth-screen').classList.remove('active');
+    
+    if (isMobile) {
+      document.getElementById('app-mobile').classList.add('active');
+      initMobileUI();
+    } else {
+      document.getElementById('app-desktop').classList.add('active');
+      initDesktopUI();
+    }
+  }
+
+  /**
+   * エラー表示
+   */
+  function showError(msg) {
+    const el = document.getElementById('error-msg');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 3000);
+  }
+
+  /**
+   * ログアウト（全UIから呼ばれる）
+   */
+  function logout() {
+    AuthService.logout();
+    window._serverDeckNames = [];
+    document.getElementById('app-desktop').classList.remove('active');
+    document.getElementById('app-mobile').classList.remove('active');
+    document.getElementById('login-username').value = '';
+    document.getElementById('login-pin').value = '';
+    showAuthUI();
+  }
+
+  /**
+   * ウィンドウリサイズ対応
+   */
+  window.addEventListener('resize', () => {
+    const isMobile = window.innerWidth < 768 || navigator.maxTouchPoints > 1;
+    const desktop = document.getElementById('app-desktop').classList.contains('active');
+    const mobile = document.getElementById('app-mobile').classList.contains('active');
+
+    if ((isMobile && desktop) || (!isMobile && mobile)) {
+      location.reload();
+    }
+  });
+
+  // ページ読み込み時初期化
+  window.addEventListener('load', init);
+</script>
+
+</body>
+</html>
