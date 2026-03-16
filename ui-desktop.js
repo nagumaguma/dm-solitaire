@@ -13,6 +13,12 @@ let _desktopSearchController = null;
 let _desktopDelegatedEventsBound = false;
 let _desktopDeckHydrateToken = 0;
 const _desktopSearchHydrateNoImage = new Set();
+let _desktopZoneMenuState = null;
+let _desktopZoneMenuGlobalBound = false;
+let _desktopUnderInsertState = null;
+let _desktopDetailCardState = null;
+let _desktopDetailRequestToken = 0;
+let _desktopDetailAllowAdd = true;
 let _desktopSearchState = {
   query: '',
   page: 0,
@@ -141,6 +147,10 @@ function bindDesktopDelegatedEvents() {
       addToDesktopDeck(decodeDesktopData(target.getAttribute('data-card-json')));
       return;
     }
+    if (action === 'show-card-detail') {
+      showDesktopCardDetail(decodeDesktopData(target.getAttribute('data-card-json')));
+      return;
+    }
     if (action === 'inc-card') {
       incrementDesktopCardCount(Number(target.getAttribute('data-idx')));
       return;
@@ -241,6 +251,190 @@ function getDesktopCardShortName(name, limit = 8) {
   return n.length > limit ? `${n.slice(0, limit)}…` : n;
 }
 
+function getDesktopUnderCardCount(card) {
+  if (!card || !Array.isArray(card.underCards) || !card.underCards.length) return 0;
+  return card.underCards.reduce((sum, underCard) => sum + 1 + getDesktopUnderCardCount(underCard), 0);
+}
+
+function renderDesktopUnderLayers(count) {
+  const layerCount = Math.min(8, Math.max(0, Number(count) || 0));
+  if (!layerCount) return '';
+  return Array.from({ length: layerCount }).map(() => '<span class="dg-under-layer"></span>').join('');
+}
+
+function getDesktopCardTypeLabel(type) {
+  const normalized = String(type || '').toLowerCase();
+  if (!normalized) return '-';
+  if (normalized.includes('evolution') || normalized.includes('進化')) return '進化クリーチャー';
+  if (normalized.includes('creature') || normalized.includes('クリーチャー')) return 'クリーチャー';
+  if (normalized.includes('spell') || normalized.includes('呪文')) return '呪文';
+  return String(type || '-');
+}
+
+function ensureDesktopCardDetailModal() {
+  let modal = document.getElementById('desktop-card-detail-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'desktop-card-detail-modal';
+    modal.className = 'dm-card-detail-modal';
+    modal.innerHTML = `
+      <div class="dm-card-detail-backdrop" onclick="closeDesktopCardDetailModal()"></div>
+      <div class="dm-card-detail-body">
+        <div class="dm-card-detail-head">
+          <div id="desktop-card-detail-title" class="dm-card-detail-title">カード詳細</div>
+          <button type="button" class="dm-card-detail-close" onclick="closeDesktopCardDetailModal()">×</button>
+        </div>
+        <div id="desktop-card-detail-content" class="dm-card-detail-content"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+  return modal;
+}
+
+function closeDesktopCardDetailModal() {
+  const modal = document.getElementById('desktop-card-detail-modal');
+  if (modal) {
+    modal.classList.remove('open');
+  }
+  _desktopDetailRequestToken += 1;
+  _desktopDetailCardState = null;
+  _desktopDetailAllowAdd = true;
+}
+
+function renderDesktopCardDetailContent(card, opts = {}) {
+  const content = document.getElementById('desktop-card-detail-content');
+  const title = document.getElementById('desktop-card-detail-title');
+  if (!content || !title) return;
+  const allowAdd = opts.allowAdd !== undefined ? !!opts.allowAdd : _desktopDetailAllowAdd;
+
+  if (opts.loading) {
+    title.textContent = 'カード詳細';
+    content.innerHTML = '<div class="dm-card-detail-loading">カード情報を取得中…</div>';
+    return;
+  }
+
+  if (opts.error) {
+    title.textContent = 'カード詳細';
+    content.innerHTML = `<div class="dm-card-detail-error">${escapeHtml(opts.error)}</div>`;
+    return;
+  }
+
+  const current = NetworkService.normalizeCardData(card || {});
+  const imageUrl = getDesktopCardImageUrl(current);
+  const civClass = getDesktopCardCivClass(current);
+  const civLabel = getCivLabel(civClass) || '-';
+  const cost = Number.isFinite(Number(current?.cost)) ? Number(current.cost) : '-';
+  const typeLabel = getDesktopCardTypeLabel(current?.type);
+  const power = current?.power ? String(current.power) : '-';
+  const sourceId = String(current?.sourceId || current?.id || current?.cardId || '').trim() || '-';
+  const bodyText = String(current?.text || '').trim();
+  const rowRace = current?.race
+    ? `<tr><th>種族</th><td>${escapeHtml(String(current.race))}</td></tr>`
+    : '';
+
+  title.textContent = current?.name || 'カード詳細';
+  content.innerHTML = `
+    <div class="dm-card-detail-main">
+      <div class="dm-card-detail-art-wrap ${imageUrl ? '' : 'placeholder'}">
+        ${imageUrl
+          ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(current?.name || 'CARD')}" class="dm-card-detail-art" onerror="handleDesktopCardImageError(this)">`
+          : '<div class="dm-card-detail-art-placeholder">NO IMG</div>'}
+      </div>
+      <table class="dm-card-detail-table">
+        <tr><th>文明</th><td><span class="dm-card-detail-civ ${escapeHtml(civClass)}">${escapeHtml(civLabel)}</span></td></tr>
+        <tr><th>コスト</th><td>${escapeHtml(String(cost))}</td></tr>
+        <tr><th>種類</th><td>${escapeHtml(typeLabel)}</td></tr>
+        <tr><th>パワー</th><td>${escapeHtml(power)}</td></tr>
+        ${rowRace}
+        <tr><th>ID</th><td class="dm-card-detail-id">${escapeHtml(sourceId)}</td></tr>
+      </table>
+    </div>
+    ${bodyText ? `<div class="dm-card-detail-text">${escapeHtml(bodyText).replace(/\n/g, '<br>')}</div>` : '<div class="dm-card-detail-text empty">テキスト情報なし</div>'}
+    ${allowAdd
+      ? `<div class="dm-card-detail-actions">
+          <input id="desktop-card-detail-count" type="number" min="1" max="4" value="1" class="dm-card-detail-count" />
+          <span class="dm-card-detail-count-label">枚</span>
+          <button type="button" class="dm-card-detail-add" onclick="addDesktopCardFromDetail()">＋ デッキに追加</button>
+        </div>`
+      : ''}
+  `;
+}
+
+async function resolveDesktopDetailCard(card) {
+  const base = NetworkService.normalizeCardData(card || {});
+  const lookup = String(base?.sourceId || base?.id || '').trim();
+  if (!lookup || lookup.includes('|')) return base;
+
+  try {
+    const detail = await NetworkService.fetchCardDetail(lookup);
+    if (!detail) return base;
+    const normalizedDetail = NetworkService.normalizeCardData(detail);
+    return {
+      ...base,
+      ...normalizedDetail,
+      name: normalizedDetail?.name || base?.name,
+      text: normalizedDetail?.text || base?.text,
+      imageUrl: getDesktopCardImageUrl(normalizedDetail) || getDesktopCardImageUrl(base),
+      thumb: getDesktopCardImageUrl(normalizedDetail) || getDesktopCardImageUrl(base),
+      img: getDesktopCardImageUrl(normalizedDetail) || getDesktopCardImageUrl(base)
+    };
+  } catch {
+    return base;
+  }
+}
+
+async function showDesktopCardDetail(cardJson, opts = {}) {
+  const allowAdd = opts.allowAdd !== false;
+  let raw;
+  try {
+    raw = typeof cardJson === 'string' ? JSON.parse(cardJson) : cardJson;
+  } catch {
+    showDesktopToast('カード情報の読み込みに失敗しました', 'warn');
+    return;
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    showDesktopToast('カード情報の読み込みに失敗しました', 'warn');
+    return;
+  }
+
+  _desktopDetailAllowAdd = allowAdd;
+
+  const modal = ensureDesktopCardDetailModal();
+  modal.classList.add('open');
+  renderDesktopCardDetailContent(null, { loading: true, allowAdd });
+
+  const token = ++_desktopDetailRequestToken;
+  const base = NetworkService.normalizeCardData(raw);
+  _desktopDetailCardState = base;
+  renderDesktopCardDetailContent(base, { allowAdd });
+
+  const resolved = await resolveDesktopDetailCard(base);
+  if (token !== _desktopDetailRequestToken) return;
+  _desktopDetailCardState = resolved;
+  renderDesktopCardDetailContent(resolved, { allowAdd });
+}
+
+function openDesktopDeckCardDetail(cardJson) {
+  const decoded = decodeDesktopData(cardJson);
+  showDesktopCardDetail(decoded, { allowAdd: false });
+}
+
+async function addDesktopCardFromDetail() {
+  if (!_desktopDetailCardState) return;
+
+  const input = document.getElementById('desktop-card-detail-count');
+  const requested = Number(input?.value);
+  const count = Math.max(1, Math.min(4, Number.isFinite(requested) ? Math.floor(requested) : 1));
+  if (input) input.value = String(count);
+
+  const ok = await addToDesktopDeck(JSON.stringify(_desktopDetailCardState), count);
+  if (ok) {
+    closeDesktopCardDetailModal();
+  }
+}
+
 function renderDesktopSearchResults() {
   const container = document.getElementById('desktop-search-results');
   if (!container) return;
@@ -267,7 +461,10 @@ function renderDesktopSearchResults() {
             <div class="dl-search-text">${escapeHtml(card.text || '')}</div>
           </div>
         </div>
-        <button type="button" data-dg-action="add-card" data-card-json="${payload}" class="dl-add-btn">+追加</button>
+        <div class="dl-search-actions">
+          <button type="button" data-dg-action="show-card-detail" data-card-json="${payload}" class="dl-detail-btn">詳細</button>
+          <button type="button" data-dg-action="add-card" data-card-json="${payload}" class="dl-add-btn">+追加</button>
+        </div>
       </div>
     `;
   }).join('');
@@ -395,9 +592,18 @@ function renderDesktopBackCards(count, palette = 'default') {
   return `<div class="dg-back-cards">${cards}${rest}</div>`;
 }
 
+function normalizeDesktopPublicCard(card) {
+  const normalized = NetworkService.normalizeCardData(card);
+  const underCards = Array.isArray(card?.underCards)
+    ? card.underCards.map((underCard) => normalizeDesktopPublicCard(underCard))
+    : [];
+  normalized.underCards = underCards;
+  return normalized;
+}
+
 function normalizeDesktopPublicCards(cards) {
   if (!Array.isArray(cards)) return [];
-  return cards.map((card) => NetworkService.normalizeCardData(card));
+  return cards.map((card) => normalizeDesktopPublicCard(card));
 }
 
 function normalizeDesktopPublicZone(zone) {
@@ -417,27 +623,33 @@ function normalizeDesktopOpponentState(rawState) {
   };
 }
 
+function serializeDesktopPublicCard(card) {
+  const name = String(card?.name || card?.nameEn || '').trim();
+  const cost = card?.cost ?? '';
+  const power = String(card?.power || '').trim();
+  const civilization = String(card?.civilization || card?.civ || '').trim();
+  const imageUrl = String(card?.imageUrl || card?.img || card?.thumb || '').trim();
+  const underCards = Array.isArray(card?.underCards)
+    ? card.underCards.map((underCard) => serializeDesktopPublicCard(underCard))
+    : [];
+
+  return {
+    name,
+    cost,
+    power,
+    civilization,
+    civ: civilization,
+    imageUrl,
+    img: imageUrl,
+    thumb: imageUrl,
+    tapped: !!card?.tapped,
+    underCards
+  };
+}
+
 function serializeDesktopPublicCards(cards) {
   if (!Array.isArray(cards)) return [];
-  return cards.map((card) => {
-    const name = String(card?.name || card?.nameEn || '').trim();
-    const cost = card?.cost ?? '';
-    const power = String(card?.power || '').trim();
-    const civilization = String(card?.civilization || card?.civ || '').trim();
-    const imageUrl = String(card?.imageUrl || card?.img || card?.thumb || '').trim();
-
-    return {
-      name,
-      cost,
-      power,
-      civilization,
-      civ: civilization,
-      imageUrl,
-      img: imageUrl,
-      thumb: imageUrl,
-      tapped: !!card?.tapped
-    };
-  });
+  return cards.map((card) => serializeDesktopPublicCard(card));
 }
 
 function buildDesktopPublicState(state) {
@@ -557,6 +769,10 @@ function initDesktopUI() {
  * 3カラムレイアウトのデッキ一覧画面
  */
 function renderDesktopDeckList() {
+  closeDesktopCardZoneMenu();
+  closeDesktopHandPicker();
+  _desktopUnderInsertState = null;
+
   const container = document.getElementById('app-desktop');
   const savedDecks = getSavedDecks();
   const localDeckNames = Object.keys(savedDecks);
@@ -595,9 +811,11 @@ function renderDesktopDeckList() {
   const uniqueCount = orderedCards.length;
 
   const nameListHtml = orderedCards.length
-    ? orderedCards.map((c, i) => `
+    ? orderedCards.map((c, i) => {
+      const payload = escapeAttrJs(encodeURIComponent(JSON.stringify(c)));
+      return `
       <div class="dl-edit-card dl-name-row">
-        <div class="dl-edit-card-main">
+        <div class="dl-edit-card-main" onclick="openDesktopDeckCardDetail('${payload}')">
           <div class="dl-edit-card-name">${escapeHtml(getDesktopCardDisplayName(c))}</div>
           <div class="dl-edit-card-text">コスト ${escapeHtml(getDesktopCardCostLabel(c))} / ${escapeHtml(String(c.count || 1))}枚</div>
         </div>
@@ -608,7 +826,8 @@ function renderDesktopDeckList() {
           <button type="button" data-dg-action="remove-card" data-idx="${i}" class="dl-count-btn delete">削除</button>
         </div>
       </div>
-    `).join('')
+    `;
+    }).join('')
     : '<div class="dl-empty-editor">カードがありません。左から検索して追加できます。</div>';
 
   const expandedCards = [];
@@ -624,8 +843,9 @@ function renderDesktopDeckList() {
       const cost = getDesktopCardCostLabel(card);
       const civClass = getDesktopCardCivClass(card);
       const thumb = renderDesktopCardThumb(card, 'dl-grid-thumb');
+      const payload = escapeAttrJs(encodeURIComponent(JSON.stringify(card)));
       return `
-        <div class="dl-grid-card ${civClass}" title="${escapeHtml(getDesktopCardDisplayName(card))}">
+        <div class="dl-grid-card ${civClass}" title="${escapeHtml(getDesktopCardDisplayName(card))}" onclick="openDesktopDeckCardDetail('${payload}')">
           ${thumb}
           <div class="dl-grid-meta">
             <span class="dl-grid-cost">${escapeHtml(String(cost))}</span>
@@ -857,6 +1077,7 @@ async function startDesktopGame(deckName) {
     window._olOpponent = null;
   }
   _desktopSelectedShieldIdx = null;
+  _desktopUnderInsertState = null;
   _desktopNeedDrawGuide = true;
   renderDesktopGame();
 }
@@ -865,7 +1086,17 @@ async function startDesktopGame(deckName) {
  * ゲーム画面レンダリング（PC版）
  */
 function renderDesktopGame() {
+  closeDesktopCardZoneMenu();
+  closeDesktopHandPicker();
   const state = engine.getState();
+
+  if (_desktopUnderInsertState) {
+    const sourceCards = state[_desktopUnderInsertState.fromZone];
+    if (!Array.isArray(sourceCards) || !sourceCards[_desktopUnderInsertState.fromIndex]) {
+      _desktopUnderInsertState = null;
+    }
+  }
+
   if (_desktopSelectedShieldIdx !== null && _desktopSelectedShieldIdx >= state.shields.length) {
     _desktopSelectedShieldIdx = null;
   }
@@ -909,14 +1140,47 @@ function renderDesktopGame() {
     const power = card?.power ? String(card.power) : '';
     const shortName = getDesktopCardShortName(card?.name || '', 8);
     const imageUrl = getDesktopCardImageUrl(card);
+    const underCount = getDesktopUnderCardCount(card);
+    const sourceZone = zoneClass === 'battle'
+      ? 'battleZone'
+      : (zoneClass === 'mana'
+        ? 'manaZone'
+        : (zoneClass === 'grave' ? 'graveyard' : ''));
+    const isOpponentCard = String(extra || '').includes('opponent');
+    const isOwnBoardCard = !isOpponentCard && idx >= 0 && (sourceZone === 'battleZone' || sourceZone === 'manaZone');
+    const isUnderSource = !!_desktopUnderInsertState
+      && _desktopUnderInsertState.fromZone === sourceZone
+      && _desktopUnderInsertState.fromIndex === idx;
+
+    const chipClasses = [
+      'dg-card-chip',
+      zoneClass,
+      civ,
+      tapped,
+      extra,
+      imageUrl ? 'has-image' : '',
+      underCount > 0 ? 'has-under' : '',
+      _desktopUnderInsertState && isOwnBoardCard ? 'stack-target' : '',
+      isUnderSource ? 'under-source' : ''
+    ].filter(Boolean).join(' ');
+
+    const onClickAttr = isOwnBoardCard
+      ? `onclick="onDesktopBoardCardClick('${sourceZone}', ${idx})"`
+      : '';
+    const contextMenuAttr = (!isOpponentCard && idx >= 0 && sourceZone)
+      ? `oncontextmenu="openDesktopCardZoneMenu(event, '${sourceZone}', ${idx})"`
+      : '';
 
     return `
-      <div class="dg-card-chip ${zoneClass} ${civ} ${tapped} ${extra} ${imageUrl ? 'has-image' : ''}"
+      <div class="${chipClasses}"
         title="${escapeHtml(card?.name || '')}"
         onmouseenter="showDesktopCardPreview(event, -1, '${escapeAttrJs(JSON.stringify(card))}')"
         onmouseleave="hideDesktopCardPreview()"
-        ${idx >= 0 && zoneClass === 'battle' ? `onclick="tapDesktopCard('battleZone', ${idx})"` : ''}
-        ${idx >= 0 && zoneClass === 'mana' ? `onclick="tapDesktopCard('manaZone', ${idx})"` : ''}>
+        ${onClickAttr}
+        ${contextMenuAttr}
+        data-zone="${sourceZone}"
+        data-index="${idx}">
+        ${underCount > 0 ? `<div class="dg-under-stack" aria-hidden="true">${renderDesktopUnderLayers(underCount)}</div><div class="dg-under-count">+${underCount}</div>` : ''}
         ${imageUrl
           ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(card?.name || 'CARD')}" class="dg-card-chip-img" loading="lazy" decoding="async" onerror="handleDesktopCardImageError(this)">`
           : `<div class="dg-card-cost">${escapeHtml(String(cost))}</div>
@@ -926,17 +1190,27 @@ function renderDesktopGame() {
     `;
   };
 
+  const deckTopIndex = Math.max(0, state.deck.length - 1);
+  const graveTopIndex = Math.max(0, state.graveyard.length - 1);
+  const deckTopCard = state.deck.length ? state.deck[state.deck.length - 1] : null;
+  const graveTopCard = state.graveyard.length ? state.graveyard[state.graveyard.length - 1] : null;
+  const deckTopImage = getDesktopCardImageUrl(deckTopCard);
+  const graveTopImage = getDesktopCardImageUrl(graveTopCard);
+
   container.innerHTML = `
     <div class="dg-full-root">
       <div class="dg-full-header ${headerTurnClass}">
         <div class="dg-full-head-meta">
-          <div class="dg-full-turn">ターン ${state.turn}</div>
-          ${ol ? `<div class="dg-full-state ${isMyTurn ? 'mine' : 'opponent'}">${isMyTurn ? 'あなたのターン' : '相手のターン'}</div>` : ''}
-          ${ol ? `<div class="dg-full-match">${escapeHtml(ol.p1Name)} vs ${ol.p2Name ? escapeHtml(ol.p2Name) : '待機中'}</div>` : ''}
+          <div class="dg-turn-pill">ターン <b>${state.turn}</b> | 手札 <b>${state.hand.length}</b> | マナ <b>${state.manaZone.length}</b></div>
+          ${ol ? `<div class="dg-full-state ${isMyTurn ? 'mine' : 'opponent'}">${isMyTurn ? 'あなたのターン' : '相手のターン'}</div>` : '<div class="dg-full-state solo">一人回し</div>'}
+          ${ol ? `<div class="dg-full-match">${escapeHtml(ol.p1Name)} vs ${ol.p2Name ? escapeHtml(ol.p2Name) : '待機中'}</div>` : '<div class="dg-full-match">一人回しモード</div>'}
         </div>
         <div class="dg-full-head-actions">
           <button onclick="drawDesktopCard()" class="dg-btn draw ${_desktopNeedDrawGuide ? 'guide' : ''}">ドロー</button>
           <button onclick="turnDesktopEnd()" class="dg-btn end">ターン終了（相手にパス）</button>
+          <button onclick="moveDesktopDeckTopTo('manaZone')" class="dg-btn deck-mana">トップ→マナ</button>
+          <button onclick="moveDesktopDeckTopTo('graveyard')" class="dg-btn deck-grave">トップ→墓地</button>
+          <button onclick="moveDesktopDeckTopTo('shields')" class="dg-btn deck-shield">トップ→シールド</button>
           <button onclick="moveDesktopToGraveyard('battle')" class="dg-btn battle-grave">戦→墓地</button>
           <button onclick="moveDesktopToGraveyard('mana')" class="dg-btn mana-grave">マナ→墓地</button>
           <button onclick="returnDesktopFromGraveyard('hand')" class="dg-btn grave-return">墓地→手札</button>
@@ -976,8 +1250,34 @@ function renderDesktopGame() {
 
           <div class="dg-me-wrap">
             <div class="dg-me-title">自分エリア: ${escapeHtml(myName)}</div>
-            <strong class="dg-zone-title">デッキ残枚数</strong>
-            <div class="dg-deck-count">${state.deck.length}</div>
+            <div class="dg-pile-row">
+              <button
+                type="button"
+                class="dg-pile-btn deck ${deckTopImage ? 'has-image' : ''}"
+                onclick="openDesktopDeckTopMenu(event)"
+                oncontextmenu="openDesktopDeckTopMenu(event)"
+                title="山札トップの操作">
+                <span class="dg-pile-label">山札</span>
+                ${deckTopImage
+                  ? `<img src="${escapeHtml(deckTopImage)}" alt="山札トップ" class="dg-pile-thumb" loading="lazy" decoding="async" onerror="handleDesktopCardImageError(this)">`
+                  : '<span class="dg-pile-empty">空</span>'}
+                <span class="dg-pile-count">${state.deck.length}</span>
+              </button>
+
+              <button
+                type="button"
+                class="dg-pile-btn grave ${graveTopImage ? 'has-image' : ''}"
+                onclick="openDesktopGraveyardModal()"
+                ${state.graveyard.length ? `oncontextmenu="openDesktopCardZoneMenu(event, 'graveyard', ${graveTopIndex})"` : ''}
+                title="墓地を表示">
+                <span class="dg-pile-label">墓地</span>
+                ${graveTopImage
+                  ? `<img src="${escapeHtml(graveTopImage)}" alt="墓地トップ" class="dg-pile-thumb" loading="lazy" decoding="async" onerror="handleDesktopCardImageError(this)">`
+                  : '<span class="dg-pile-empty">空</span>'}
+                <span class="dg-pile-count">${state.graveyard.length}</span>
+              </button>
+            </div>
+            ${_desktopUnderInsertState ? '<div class="dg-zone-hint">重ね先を選択中: バトル/マナのカードをクリック</div>' : ''}
           </div>
 
           <div class="dg-section">
@@ -990,7 +1290,8 @@ function renderDesktopGame() {
                 const imageUrl = getDesktopCardImageUrl(c);
                 return `
                   <div class="dg-card-chip hand ${civ} ${imageUrl ? 'has-image' : ''}" draggable="true"
-                    onclick="playDesktopCard(${i}, 'battle')"
+                    onclick="selectDesktopHandCard(${i}, event)"
+                    oncontextmenu="openDesktopCardZoneMenu(event, 'hand', ${i})"
                     onmouseenter="showDesktopCardPreview(event, ${i})"
                     onmouseleave="hideDesktopCardPreview()"
                     ondragstart="dragDesktopCard(event, ${i})"
@@ -1030,20 +1331,12 @@ function renderDesktopGame() {
               ${state.shields.length ? state.shields.map((c, i) => `
                 <div class="dg-card-chip shield ${_desktopSelectedShieldIdx === i ? 'selected' : ''}"
                   onclick="selectDesktopShield(${i})"
+                  oncontextmenu="openDesktopCardZoneMenu(event, 'shields', ${i})"
                   title="${escapeHtml(c.name || 'シールド')}">
                   SH
                 </div>
               `).join('') : '<div class="dg-zone-empty">カードなし</div>'}
             </div>
-          </div>
-
-          <div class="dg-section">
-            <strong class="dg-zone-title">墓地 (${state.graveyard.length})</strong>
-            <div class="dg-grave-zone clickable" onclick="openDesktopGraveyardModal()">
-              ${state.graveyard.length ? state.graveyard.slice(-10).map(c => renderChip(c, 'grave')).join('') : '<div class="dg-zone-empty">カードなし</div>'}
-              ${state.graveyard.length > 10 ? `<div class="dg-more-chip">+${state.graveyard.length - 10}</div>` : ''}
-            </div>
-            <div class="dg-zone-hint">クリックで墓地一覧</div>
           </div>
         </div>
 
@@ -1062,6 +1355,150 @@ function renderDesktopGame() {
   `;
 
   if (ol) renderDesktopChatMessages();
+}
+
+function selectDesktopHandCard(idx, event) {
+  if (window._ol && !canActDesktopOnline()) {
+    showDesktopToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const index = Number(idx);
+  const hand = engine?.state?.hand;
+  if (!Array.isArray(hand) || !Number.isInteger(index) || !hand[index]) return;
+
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  closeDesktopCardZoneMenu();
+  closeDesktopHandPicker();
+
+  const picker = document.createElement('div');
+  picker.id = 'desktop-hand-picker';
+  picker.className = 'dg-hand-picker';
+  picker.innerHTML = `
+    <button type="button" onclick="playDesktopCard(${index}, 'battle')">バトルゾーンへ</button>
+    <button type="button" onclick="playDesktopCard(${index}, 'mana')">マナゾーンへ</button>
+    <button type="button" class="cancel" onclick="closeDesktopHandPicker()">キャンセル</button>
+  `;
+
+  document.body.appendChild(picker);
+
+  const rect = event?.currentTarget?.getBoundingClientRect?.();
+  const pickerRect = picker.getBoundingClientRect();
+  const rawLeft = rect ? rect.left : (window.innerWidth / 2 - pickerRect.width / 2);
+  const rawTop = rect ? (rect.bottom + 6) : (window.innerHeight / 2 - pickerRect.height / 2);
+  const left = Math.max(8, Math.min(rawLeft, window.innerWidth - pickerRect.width - 8));
+  const top = Math.max(8, Math.min(rawTop, window.innerHeight - pickerRect.height - 8));
+
+  picker.style.left = `${left}px`;
+  picker.style.top = `${top}px`;
+
+  setTimeout(() => {
+    document.addEventListener('click', closeDesktopHandPicker, { once: true });
+  }, 0);
+}
+
+function closeDesktopHandPicker() {
+  const picker = document.getElementById('desktop-hand-picker');
+  if (picker) picker.remove();
+}
+
+function onDesktopBoardCardClick(zone, idx) {
+  if (_desktopUnderInsertState) {
+    const sameSource = _desktopUnderInsertState.fromZone === zone
+      && _desktopUnderInsertState.fromIndex === idx;
+    if (sameSource) {
+      _desktopUnderInsertState = null;
+      showDesktopToast('重ね配置をキャンセルしました', 'info');
+      renderDesktopGame();
+      return;
+    }
+
+    insertDesktopCardUnderTarget(zone, idx);
+    return;
+  }
+
+  tapDesktopCard(zone, idx);
+}
+
+function setDesktopCardTapped(zone, idx, tapped) {
+  closeDesktopCardZoneMenu();
+
+  if (window._ol && !canActDesktopOnline()) {
+    showDesktopToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const cards = engine?.state?.[zone];
+  const card = Array.isArray(cards) ? cards[idx] : null;
+  if (!card) return;
+
+  const nextTapped = !!tapped;
+  const ok = window.GameController?.setCardTapped
+    ? window.GameController.setCardTapped(engine, zone, idx, nextTapped)
+    : ((!!card.tapped === nextTapped) ? true : engine.tapCard(zone, idx));
+  if (!ok) {
+    showDesktopToast('タップ状態を変更できませんでした', 'warn');
+    return;
+  }
+
+  if (window._ol) olSendActionDesktop('state');
+  renderDesktopGame();
+}
+
+function prepareDesktopInsertUnder(fromZone, fromIndex) {
+  closeDesktopCardZoneMenu();
+
+  if (window._ol && !canActDesktopOnline()) {
+    showDesktopToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const idx = Number(fromIndex);
+  const source = engine?.state?.[fromZone];
+  if (!Array.isArray(source) || !Number.isInteger(idx) || !source[idx]) {
+    showDesktopToast('重ねるカードが見つかりません', 'warn');
+    return;
+  }
+
+  _desktopUnderInsertState = { fromZone, fromIndex: idx };
+  showDesktopToast('重ね先の盤面カードをクリックしてください', 'info', 2600);
+  renderDesktopGame();
+}
+
+function insertDesktopCardUnderTarget(targetZone, targetIndex) {
+  if (!_desktopUnderInsertState) return;
+  if (targetZone !== 'battleZone' && targetZone !== 'manaZone') {
+    showDesktopToast('重ね先はバトル/マナのみです', 'warn');
+    return;
+  }
+
+  if (window._ol && !canActDesktopOnline()) {
+    showDesktopToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const fromZone = _desktopUnderInsertState.fromZone;
+  const fromIndex = _desktopUnderInsertState.fromIndex;
+  const idx = Number(targetIndex);
+
+  const ok = window.GameController?.insertCardUnderCard
+    ? window.GameController.insertCardUnderCard(engine, fromZone, fromIndex, targetZone, idx)
+    : (typeof engine.insertCardUnderCard === 'function'
+      ? engine.insertCardUnderCard(fromZone, fromIndex, targetZone, idx)
+      : false);
+
+  if (!ok) {
+    showDesktopToast('カードを下に重ねられませんでした', 'warn');
+    return;
+  }
+
+  _desktopUnderInsertState = null;
+  if (window._ol) olSendActionDesktop('state');
+  renderDesktopGame();
 }
 
 function tapDesktopCard(zone, idx) {
@@ -1112,7 +1549,308 @@ function canActDesktopOnline() {
   return window._olCurrentPlayer === me;
 }
 
+function getDesktopZoneLabel(zoneKey) {
+  const labels = {
+    hand: '手札',
+    battleZone: 'バトル',
+    manaZone: 'マナ',
+    shields: 'シールド',
+    deck: '山札',
+    graveyard: '墓地'
+  };
+  return labels[zoneKey] || zoneKey;
+}
+
+function getDesktopCardZoneActions(sourceZone, sourceCard) {
+  const actions = [];
+  const move = (label, toZone, position = 'top', red = false) => ({ kind: 'move', label, toZone, position, red });
+
+  if (sourceZone === 'hand') {
+    actions.push(
+      move('マナゾーンへ', 'manaZone'),
+      move('バトルゾーンへ', 'battleZone'),
+      move('シールドへ', 'shields'),
+      move('山札トップへ', 'deck', 'top'),
+      move('山札ボトムへ', 'deck', 'bottom'),
+      { kind: 'sep' },
+      move('墓地へ', 'graveyard', 'top', true),
+      { kind: 'sep' },
+      { kind: 'under', label: '盤面カードの下へ（対象選択）' }
+    );
+  } else if (sourceZone === 'battleZone') {
+    actions.push(
+      { kind: 'tap', label: sourceCard?.tapped ? 'アンタップ' : 'タップ（攻撃）', tapped: !sourceCard?.tapped },
+      move('手札へ', 'hand'),
+      move('マナゾーンへ', 'manaZone'),
+      move('シールドへ', 'shields'),
+      move('山札トップへ', 'deck', 'top'),
+      move('山札ボトムへ', 'deck', 'bottom'),
+      { kind: 'under', label: '盤面カードの下へ（対象選択）' },
+      { kind: 'sep' },
+      move('墓地へ', 'graveyard', 'top', true)
+    );
+  } else if (sourceZone === 'manaZone') {
+    actions.push(
+      { kind: 'tap', label: sourceCard?.tapped ? 'アンタップ' : 'タップ（マナ使用）', tapped: !sourceCard?.tapped },
+      move('手札へ', 'hand'),
+      move('バトルゾーンへ', 'battleZone'),
+      move('シールドへ', 'shields'),
+      move('山札トップへ', 'deck', 'top'),
+      move('山札ボトムへ', 'deck', 'bottom'),
+      { kind: 'sep' },
+      move('墓地へ', 'graveyard', 'top', true)
+    );
+  } else if (sourceZone === 'shields') {
+    actions.push(
+      move('手札へ（シールドブレイク）', 'hand'),
+      move('マナゾーンへ', 'manaZone'),
+      move('バトルゾーンへ', 'battleZone'),
+      move('山札トップへ', 'deck', 'top'),
+      move('山札ボトムへ', 'deck', 'bottom'),
+      { kind: 'sep' },
+      move('墓地へ', 'graveyard', 'top', true),
+      { kind: 'sep' },
+      { kind: 'under', label: '盤面カードの下へ（対象選択）' }
+    );
+  } else if (sourceZone === 'graveyard') {
+    actions.push(
+      move('手札へ', 'hand'),
+      move('バトルゾーンへ', 'battleZone'),
+      move('マナゾーンへ', 'manaZone'),
+      move('シールドへ', 'shields'),
+      move('山札トップへ', 'deck', 'top'),
+      move('山札ボトムへ', 'deck', 'bottom')
+    );
+  } else if (sourceZone === 'deck') {
+    actions.push(
+      move('手札へ', 'hand'),
+      move('バトルゾーンへ', 'battleZone'),
+      move('マナゾーンへ', 'manaZone'),
+      move('シールドへ', 'shields'),
+      move('墓地へ', 'graveyard', 'top', true),
+      move('山札ボトムへ', 'deck', 'bottom')
+    );
+  }
+
+  if (actions.length && actions[actions.length - 1].kind === 'sep') {
+    actions.pop();
+  }
+  if (actions.length) {
+    actions.push({ kind: 'sep' });
+  }
+  actions.push({ kind: 'detail', label: 'カード詳細' });
+
+  return actions;
+}
+
+function ensureDesktopCardZoneMenu() {
+  let menu = document.getElementById('desktop-card-zone-menu');
+  if (!menu) {
+    menu = document.createElement('div');
+    menu.id = 'desktop-card-zone-menu';
+    menu.className = 'dg-zone-menu';
+    document.body.appendChild(menu);
+  }
+
+  if (!_desktopZoneMenuGlobalBound) {
+    document.addEventListener('click', (event) => {
+      const node = document.getElementById('desktop-card-zone-menu');
+      if (!node || !node.classList.contains('open')) return;
+      if (node.contains(event.target)) return;
+      closeDesktopCardZoneMenu();
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        closeDesktopCardZoneMenu();
+        if (_desktopUnderInsertState) {
+          _desktopUnderInsertState = null;
+          renderDesktopGame();
+        }
+      }
+    });
+
+    window.addEventListener('resize', closeDesktopCardZoneMenu);
+    window.addEventListener('scroll', closeDesktopCardZoneMenu, true);
+    _desktopZoneMenuGlobalBound = true;
+  }
+
+  return menu;
+}
+
+function closeDesktopCardZoneMenu() {
+  _desktopZoneMenuState = null;
+  const menu = document.getElementById('desktop-card-zone-menu');
+  if (!menu) return;
+  menu.classList.remove('open');
+  menu.innerHTML = '';
+}
+
+function moveDesktopCardBetweenZones(fromZone, fromIndex, toZone, position = 'top') {
+  closeDesktopCardZoneMenu();
+
+  if (window._ol && !canActDesktopOnline()) {
+    showDesktopToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const options = { position: position === 'bottom' ? 'bottom' : 'top' };
+  const ok = window.GameController
+    ? window.GameController.moveCardBetweenZones(engine, fromZone, fromIndex, toZone, options)
+    : engine.moveCardBetweenZones(fromZone, fromIndex, toZone, options);
+
+  if (!ok) {
+    showDesktopToast('カード移動に失敗しました', 'warn');
+    return;
+  }
+
+  if (window._ol) olSendActionDesktop('state');
+  renderDesktopGame();
+}
+
+function moveDesktopDeckTopTo(toZone) {
+  const deck = engine?.state?.deck;
+  if (!Array.isArray(deck) || deck.length === 0) {
+    showDesktopToast('山札がありません', 'warn');
+    return;
+  }
+
+  moveDesktopCardBetweenZones('deck', deck.length - 1, toZone, 'top');
+}
+
+function openDesktopDeckTopMenu(event) {
+  const deck = engine?.state?.deck;
+  if (!Array.isArray(deck) || deck.length === 0) {
+    showDesktopToast('山札がありません', 'warn');
+    return;
+  }
+
+  openDesktopCardZoneMenu(event, 'deck', deck.length - 1);
+}
+
+function openDesktopCardDetailFromZone(sourceZone, sourceIndex) {
+  const source = engine?.state?.[sourceZone];
+  const idx = Number(sourceIndex);
+  if (!Array.isArray(source) || !Number.isInteger(idx) || !source[idx]) {
+    showDesktopToast('カード情報が見つかりません', 'warn');
+    return;
+  }
+
+  closeDesktopCardZoneMenu();
+  showDesktopCardDetail(source[idx], { allowAdd: false });
+}
+
+function openDesktopCardZoneMenu(event, sourceZone, sourceIndex) {
+  event.preventDefault();
+  event.stopPropagation();
+  closeDesktopHandPicker();
+
+  if (!engine || !engine.state) return;
+
+  if (window._ol && !canActDesktopOnline()) {
+    showDesktopToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const source = engine.state[sourceZone];
+  const idx = Number(sourceIndex);
+  if (!Array.isArray(source) || !source.length || !Number.isInteger(idx) || !source[idx]) {
+    showDesktopToast('移動できるカードがありません', 'warn');
+    return;
+  }
+
+  const sourceCard = source[idx];
+  const actions = getDesktopCardZoneActions(sourceZone, sourceCard);
+  if (!actions.length) return;
+
+  const menu = ensureDesktopCardZoneMenu();
+  _desktopZoneMenuState = { sourceZone, sourceIndex: idx };
+
+  const actionHtml = actions.map((action) => {
+    if (action.kind === 'sep') {
+      return '<div class="dg-zone-menu-sep" aria-hidden="true"></div>';
+    }
+
+    const className = [
+      'dg-zone-menu-btn',
+      action.kind === 'detail' ? 'detail' : '',
+      action.red ? 'red' : ''
+    ].filter(Boolean).join(' ');
+
+    if (action.kind === 'tap') {
+      return `
+        <button
+          type="button"
+          class="${className}"
+          onclick="setDesktopCardTapped('${sourceZone}', ${idx}, ${action.tapped ? 'true' : 'false'})">
+          ${escapeHtml(action.label)}
+        </button>
+      `;
+    }
+
+    if (action.kind === 'under') {
+      return `
+        <button
+          type="button"
+          class="${className}"
+          onclick="prepareDesktopInsertUnder('${sourceZone}', ${idx})">
+          ${escapeHtml(action.label)}
+        </button>
+      `;
+    }
+
+    if (action.kind === 'detail') {
+      return `
+        <button
+          type="button"
+          class="${className}"
+          onclick="openDesktopCardDetailFromZone('${sourceZone}', ${idx})">
+          ${escapeHtml(action.label)}
+        </button>
+      `;
+    }
+
+    return `
+      <button
+        type="button"
+        class="${className}"
+        onclick="moveDesktopCardBetweenZones('${sourceZone}', ${idx}, '${action.toZone}', '${action.position || 'top'}')">
+        ${escapeHtml(action.label)}
+      </button>
+    `;
+  }).join('');
+
+  menu.innerHTML = `
+    <div class="dg-zone-menu-head">${escapeHtml(getDesktopZoneLabel(sourceZone))} の操作</div>
+    <div class="dg-zone-menu-list">
+      ${actionHtml}
+    </div>
+  `;
+  menu.classList.add('open');
+  menu.style.left = `${event.pageX}px`;
+  menu.style.top = `${event.pageY}px`;
+
+  requestAnimationFrame(() => {
+    if (!menu.classList.contains('open')) return;
+    const rect = menu.getBoundingClientRect();
+    let left = event.pageX;
+    let top = event.pageY;
+
+    if (rect.right > window.innerWidth - 8) {
+      left = Math.max(8, window.scrollX + window.innerWidth - rect.width - 8);
+    }
+    if (rect.bottom > window.innerHeight - 8) {
+      top = Math.max(8, window.scrollY + window.innerHeight - rect.height - 8);
+    }
+
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  });
+}
+
 function playDesktopCard(idx, zone) {
+  closeDesktopHandPicker();
+
   if (window._ol && !canActDesktopOnline()) {
     showDesktopToast('相手のターンです', 'warn');
     return;
@@ -1583,21 +2321,22 @@ function removeDesktopCard(idx) {
 /**
  * デッキに カード追加
  */
-async function addToDesktopDeck(cardJson) {
+async function addToDesktopDeck(cardJson, addCount = 1) {
   try {
     if (!window._deckEditing) {
       showDesktopToast('先に編集するデッキを選択してください', 'warn');
-      return;
+      return false;
     }
 
-    const rawCard = JSON.parse(cardJson);
+    const rawCard = typeof cardJson === 'string' ? JSON.parse(cardJson) : cardJson;
     const card = await NetworkService.enrichCardImage(rawCard);
     const normalized = NetworkService.normalizeCardData(card);
     const normalizedKey = String(normalized.cardId || normalized.id || '');
+    const count = Math.max(1, Math.min(4, Number.isFinite(Number(addCount)) ? Math.floor(Number(addCount)) : 1));
 
     const existing = window._deckCards.find(c => String(c.cardId || c.id || '') === normalizedKey);
     if (existing) {
-      existing.count = (existing.count || 1) + 1;
+      existing.count = (existing.count || 1) + count;
       if (existing.count > 4) existing.count = 4;
 
       if (!existing.cardId && normalized.cardId) {
@@ -1613,13 +2352,15 @@ async function addToDesktopDeck(cardJson) {
         existing.img = normalized.imageUrl;
       }
     } else {
-      window._deckCards.push({ ...normalized, count: 1 });
+      window._deckCards.push({ ...normalized, count });
     }
 
     sortCurrentDesktopDeckCards();
     renderDesktopDeckList();
+    return true;
   } catch (e) {
     console.error('カード追加エラー:', e);
+    return false;
   }
 }
 
@@ -2277,6 +3018,7 @@ function startDesktopOnlineGame() {
     window._olChatLogDesktop = [];
   }
   _desktopSelectedShieldIdx = null;
+  _desktopUnderInsertState = null;
   _desktopNeedDrawGuide = true;
   appendDesktopChatMessage('SYSTEM', 'オンライン対戦を開始しました。', 'sys');
 

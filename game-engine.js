@@ -173,7 +173,7 @@ class GameEngine {
     if (idx < 0 || idx >= zone.length) return false;
 
     this._saveState();
-    const card = zone.splice(idx, 1)[0];
+    const card = this._takeCardFromZone(zoneKey, idx);
     if (!card) return false;
 
     if (zoneKey === 'shields' && card.faceUp !== undefined) {
@@ -182,6 +182,46 @@ class GameEngine {
 
     this.state.graveyard.push(card);
     return true;
+  }
+
+  _normalizeUnderCards(card) {
+    if (!card || typeof card !== 'object') return [];
+
+    if (!Array.isArray(card.underCards)) {
+      card.underCards = [];
+      return card.underCards;
+    }
+
+    card.underCards = card.underCards.filter((item) => item && typeof item === 'object');
+    return card.underCards;
+  }
+
+  _takeCardFromZone(zoneKey, idx) {
+    const zone = this.state[zoneKey];
+    if (!Array.isArray(zone) || idx < 0 || idx >= zone.length) return null;
+
+    const card = zone[idx];
+    if (!card) return null;
+
+    const isStackZone = zoneKey === 'battleZone' || zoneKey === 'manaZone';
+    const underCards = this._normalizeUnderCards(card);
+
+    if (isStackZone && underCards.length > 0) {
+      const nextTop = underCards.shift();
+      if (nextTop && typeof nextTop === 'object') {
+        const nextUnder = this._normalizeUnderCards(nextTop);
+        nextTop.underCards = [...nextUnder, ...underCards];
+        zone[idx] = nextTop;
+      } else {
+        zone.splice(idx, 1);
+      }
+
+      card.underCards = [];
+      return card;
+    }
+
+    zone.splice(idx, 1);
+    return card;
   }
 
   /**
@@ -216,6 +256,149 @@ class GameEngine {
       this.state[zoneKey].push(card);
     }
 
+    return true;
+  }
+
+  /**
+   * 任意ゾーン間でカードを移動
+   * @param {string} fromZone
+   * @param {number} fromIndex
+   * @param {string} toZone
+   * @param {{position?: 'top'|'bottom'}} options
+   */
+  moveCardBetweenZones(fromZone, fromIndex, toZone, options = {}) {
+    const zoneMap = {
+      hand: 'hand',
+      battle: 'battleZone',
+      battleZone: 'battleZone',
+      mana: 'manaZone',
+      manaZone: 'manaZone',
+      deck: 'deck',
+      shield: 'shields',
+      shields: 'shields',
+      grave: 'graveyard',
+      graveyard: 'graveyard'
+    };
+
+    const sourceKey = zoneMap[fromZone];
+    const targetKey = zoneMap[toZone];
+    if (!sourceKey || !targetKey) return false;
+
+    const source = this.state[sourceKey];
+    const target = this.state[targetKey];
+    if (!Array.isArray(source) || !Array.isArray(target) || source.length === 0) return false;
+
+    const idx = Number.isInteger(fromIndex)
+      ? fromIndex
+      : (fromIndex < 0 ? source.length - 1 : Number(fromIndex));
+    if (!Number.isInteger(idx) || idx < 0 || idx >= source.length) return false;
+
+    this._saveState();
+
+    const card = this._takeCardFromZone(sourceKey, idx);
+    if (!card) return false;
+
+    if (sourceKey === 'shields' && card.faceUp !== undefined) {
+      delete card.faceUp;
+    }
+
+    if (targetKey === 'shields') {
+      card.faceUp = false;
+      card.tapped = false;
+    } else {
+      if (card.faceUp !== undefined) delete card.faceUp;
+      if (targetKey === 'battleZone' || targetKey === 'manaZone' || targetKey === 'hand') {
+        card.tapped = false;
+      }
+    }
+
+    const position = options?.position === 'bottom' ? 'bottom' : 'top';
+    if (targetKey === 'deck') {
+      // deck top is array tail because drawCard() uses pop().
+      if (position === 'bottom') {
+        target.unshift(card);
+      } else {
+        target.push(card);
+      }
+      return true;
+    }
+
+    if (targetKey === 'battleZone' && position === 'bottom') {
+      target.unshift(card);
+      return true;
+    }
+
+    if (targetKey === 'graveyard' && position === 'bottom') {
+      target.unshift(card);
+      return true;
+    }
+
+    target.push(card);
+    return true;
+  }
+
+  /**
+   * 任意カードを盤面カードの下に重ねる
+   * @param {string} fromZone
+   * @param {number} fromIndex
+   * @param {string} targetZone - 'battleZone' | 'manaZone' | 'battle' | 'mana'
+   * @param {number} targetIndex
+   */
+  insertCardUnderCard(fromZone, fromIndex, targetZone, targetIndex) {
+    const zoneMap = {
+      hand: 'hand',
+      battle: 'battleZone',
+      battleZone: 'battleZone',
+      mana: 'manaZone',
+      manaZone: 'manaZone',
+      deck: 'deck',
+      shield: 'shields',
+      shields: 'shields',
+      grave: 'graveyard',
+      graveyard: 'graveyard'
+    };
+
+    const sourceKey = zoneMap[fromZone];
+    const targetKey = zoneMap[targetZone];
+    if (!sourceKey || !targetKey) return false;
+    if (targetKey !== 'battleZone' && targetKey !== 'manaZone') return false;
+
+    const source = this.state[sourceKey];
+    const target = this.state[targetKey];
+    if (!Array.isArray(source) || !Array.isArray(target) || !target.length) return false;
+
+    const sourceIdx = Number.isInteger(fromIndex) ? fromIndex : Number(fromIndex);
+    const rawTargetIdx = Number.isInteger(targetIndex) ? targetIndex : Number(targetIndex);
+    if (!Number.isInteger(sourceIdx) || !Number.isInteger(rawTargetIdx)) return false;
+    if (sourceIdx < 0 || sourceIdx >= source.length) return false;
+    if (rawTargetIdx < 0 || rawTargetIdx >= target.length) return false;
+    if (sourceKey === targetKey && sourceIdx === rawTargetIdx) return false;
+
+    this._saveState();
+
+    let adjustedTargetIdx = rawTargetIdx;
+    if (sourceKey === targetKey && sourceIdx < rawTargetIdx) {
+      adjustedTargetIdx -= 1;
+    }
+
+    const card = this._takeCardFromZone(sourceKey, sourceIdx);
+    if (!card) return false;
+
+    if (sourceKey === 'shields' && card.faceUp !== undefined) {
+      delete card.faceUp;
+    }
+    if (card.faceUp !== undefined) {
+      delete card.faceUp;
+    }
+
+    card.tapped = false;
+
+    const targetCard = target[adjustedTargetIdx];
+    if (!targetCard || typeof targetCard !== 'object') return false;
+
+    const underCards = this._normalizeUnderCards(targetCard);
+    underCards.push(card);
+    targetCard.underCards = underCards;
     return true;
   }
 

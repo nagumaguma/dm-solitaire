@@ -155,6 +155,25 @@
     return !!engine.tapCard(zone, idx);
   }
 
+  function setCardTapped(engine, zone, idx, tapped) {
+    if (!engine || !engine.state) return false;
+
+    const zoneMap = {
+      battle: 'battleZone',
+      mana: 'manaZone',
+      battleZone: 'battleZone',
+      manaZone: 'manaZone'
+    };
+    const zoneKey = zoneMap[zone] || zone;
+    const cards = engine.state[zoneKey];
+    const card = Array.isArray(cards) ? cards[idx] : null;
+    if (!card) return false;
+
+    const nextTapped = !!tapped;
+    if (!!card.tapped === nextTapped) return true;
+    return !!engine.tapCard(zone, idx);
+  }
+
   function breakShield(engine, selectedIndex) {
     if (!engine) return { ok: false, card: null };
     const card = engine.breakShield(selectedIndex);
@@ -189,6 +208,16 @@
     return !!engine.returnFromGraveyard(-1, toZone || 'hand');
   }
 
+  function moveCardBetweenZones(engine, fromZone, fromIndex, toZone, options) {
+    if (!engine || typeof engine.moveCardBetweenZones !== 'function') return false;
+    return !!engine.moveCardBetweenZones(fromZone, fromIndex, toZone, options || {});
+  }
+
+  function insertCardUnderCard(engine, fromZone, fromIndex, targetZone, targetIndex) {
+    if (!engine || typeof engine.insertCardUnderCard !== 'function') return false;
+    return !!engine.insertCardUnderCard(fromZone, fromIndex, targetZone, targetIndex);
+  }
+
   function undo(engine) {
     if (!engine) return false;
     return !!engine.undo();
@@ -221,27 +250,33 @@
     global._olChatLogMobile = [];
   }
 
+  function serializePublicCard(card) {
+    const name = String(card?.name || card?.nameEn || '').trim();
+    const cost = card?.cost ?? '';
+    const power = String(card?.power || '').trim();
+    const civilization = String(card?.civilization || card?.civ || '').trim();
+    const imageUrl = String(card?.imageUrl || card?.img || card?.thumb || '').trim();
+    const underCards = Array.isArray(card?.underCards)
+      ? card.underCards.map((underCard) => serializePublicCard(underCard))
+      : [];
+
+    return {
+      name,
+      cost,
+      power,
+      civilization,
+      civ: civilization,
+      imageUrl,
+      img: imageUrl,
+      thumb: imageUrl,
+      tapped: !!card?.tapped,
+      underCards
+    };
+  }
+
   function serializePublicCards(cards) {
     if (!Array.isArray(cards)) return [];
-    return cards.map((card) => {
-      const name = String(card?.name || card?.nameEn || '').trim();
-      const cost = card?.cost ?? '';
-      const power = String(card?.power || '').trim();
-      const civilization = String(card?.civilization || card?.civ || '').trim();
-      const imageUrl = String(card?.imageUrl || card?.img || card?.thumb || '').trim();
-
-      return {
-        name,
-        cost,
-        power,
-        civilization,
-        civ: civilization,
-        imageUrl,
-        img: imageUrl,
-        thumb: imageUrl,
-        tapped: !!card?.tapped
-      };
-    });
+    return cards.map((card) => serializePublicCard(card));
   }
 
   function buildPublicState(state) {
@@ -401,11 +436,14 @@
     initSoloGame,
     playCardByHandIndex,
     tapCard,
+    setCardTapped,
     breakShield,
     drawCard,
     turnEnd,
     moveToGraveyard,
     returnFromGraveyard,
+    moveCardBetweenZones,
+    insertCardUnderCard,
     undo,
     startOnlineMatch,
     sendOnlineAction,
