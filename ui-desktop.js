@@ -12,7 +12,9 @@ let _desktopSearchDebounceTimer = null;
 let _desktopSearchRequestToken = 0;
 let _desktopDelegatedEventsBound = false;
 let _desktopDeckHydrateToken = 0;
-const _desktopSearchHydrateNoImage = new Set();
+const _desktopSearchHydrateCooldownUntil = new Map();
+const DESKTOP_SEARCH_HYDRATE_NO_IMAGE_COOLDOWN_MS = 45 * 1000;
+const DESKTOP_SEARCH_HYDRATE_ERROR_COOLDOWN_MS = 8 * 1000;
 let _desktopZoneMenuState = null;
 let _desktopZoneMenuGlobalBound = false;
 let _desktopUnderInsertState = null;
@@ -582,6 +584,21 @@ function getDesktopSearchHydrateKey(card) {
   return normalized;
 }
 
+function shouldSkipDesktopSearchHydrate(key) {
+  if (!key) return false;
+  const until = Number(_desktopSearchHydrateCooldownUntil.get(key) || 0);
+  if (!until) return false;
+  if (Date.now() <= until) return true;
+  _desktopSearchHydrateCooldownUntil.delete(key);
+  return false;
+}
+
+function markDesktopSearchHydrateCooldown(key, cooldownMs = DESKTOP_SEARCH_HYDRATE_NO_IMAGE_COOLDOWN_MS) {
+  if (!key) return;
+  const duration = Math.max(0, Number(cooldownMs) || 0);
+  _desktopSearchHydrateCooldownUntil.set(key, Date.now() + duration);
+}
+
 async function hydrateDesktopSearchCards(items) {
   const sourceItems = Array.isArray(items) ? items : [];
   if (!sourceItems.length) return [];
@@ -591,19 +608,29 @@ async function hydrateDesktopSearchCards(items) {
     if (getDesktopCardImageUrl(normalizedCard)) return normalizedCard;
 
     const key = getDesktopSearchHydrateKey(normalizedCard);
-    if (key && _desktopSearchHydrateNoImage.has(key)) {
+    if (key && shouldSkipDesktopSearchHydrate(key)) {
       return normalizedCard;
     }
 
     try {
-      const enriched = await NetworkService.enrichCardImage(normalizedCard);
+      const enriched = await NetworkService.enrichCardImage(normalizedCard, {
+        retries: 1,
+        retryDelayMs: 300
+      });
       const normalized = NetworkService.normalizeCardData(enriched);
-      if (!getDesktopCardImageUrl(normalized) && key) {
-        _desktopSearchHydrateNoImage.add(key);
+      if (getDesktopCardImageUrl(normalized)) {
+        if (key) _desktopSearchHydrateCooldownUntil.delete(key);
+        return normalized;
+      }
+
+      if (key) {
+        markDesktopSearchHydrateCooldown(key, DESKTOP_SEARCH_HYDRATE_NO_IMAGE_COOLDOWN_MS);
       }
       return normalized;
     } catch {
-      if (key) _desktopSearchHydrateNoImage.add(key);
+      if (key) {
+        markDesktopSearchHydrateCooldown(key, DESKTOP_SEARCH_HYDRATE_ERROR_COOLDOWN_MS);
+      }
       return normalizedCard;
     }
   }));
@@ -767,6 +794,17 @@ function renderDesktopCardThumb(card, className = 'dl-search-thumb') {
 
 function handleDesktopCardImageError(img) {
   if (!img) return;
+  const currentSrc = String(img.getAttribute('src') || '').trim();
+  const retryCount = Number(img.dataset.imgRetryCount || 0);
+  if (currentSrc && retryCount < 2) {
+    const baseSrc = String(img.dataset.baseSrc || currentSrc).trim();
+    img.dataset.baseSrc = baseSrc;
+    img.dataset.imgRetryCount = String(retryCount + 1);
+    const sep = baseSrc.includes('?') ? '&' : '?';
+    img.src = `${baseSrc}${sep}_imgRetry=${Date.now()}_${retryCount + 1}`;
+    return;
+  }
+
   img.onerror = null;
   img.outerHTML = `<div class="${img.className} placeholder">NO IMG</div>`;
 }
@@ -3268,7 +3306,10 @@ async function hydrateDesktopDeckCards(cards) {
     if (!isDesktopCardHydrationNeeded(card)) {
       return card;
     }
-    const enriched = await NetworkService.enrichCardImage(card);
+    const enriched = await NetworkService.enrichCardImage(card, {
+      retries: 1,
+      retryDelayMs: 300
+    });
     return NetworkService.normalizeCardData(enriched);
   }));
 
@@ -3412,7 +3453,10 @@ async function addToDesktopDeck(cardJson, addCount = 1) {
     }
 
     const rawCard = typeof cardJson === 'string' ? JSON.parse(cardJson) : cardJson;
-    const card = await NetworkService.enrichCardImage(rawCard);
+    const card = await NetworkService.enrichCardImage(rawCard, {
+      retries: 2,
+      retryDelayMs: 350
+    });
     const normalized = NetworkService.normalizeCardData(card);
     const normalizedKey = String(normalized.cardId || normalized.id || '');
     const count = Math.max(1, Math.min(4, Number.isFinite(Number(addCount)) ? Math.floor(Number(addCount)) : 1));

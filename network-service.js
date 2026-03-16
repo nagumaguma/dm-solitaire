@@ -7,6 +7,8 @@ const NetworkService = {
   _cardDetailCache: new Map(),
   _searchCache: new Map(),
   _deckCache: new Map(),
+  _cardDetailCacheTtlMs: 60 * 60 * 1000,
+  _cardDetailNoImageCacheTtlMs: 90 * 1000,
   _searchCacheMaxEntries: 120,
   _searchCacheTtlMs: 5 * 60 * 1000,
   _deckCacheTtlMs: 3 * 60 * 1000,
@@ -97,6 +99,44 @@ const NetworkService = {
     return text;
   },
 
+  _getCardImageUrl(card) {
+    return String(card?.imageUrl || card?.img || card?.thumb || '').trim();
+  },
+
+  _detailNameCacheKey(name) {
+    const normalized = this._toHalfWidthAscii(name)
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) return '';
+    return `name:${normalized}`;
+  },
+
+  _getCachedCardDetail(cacheKey) {
+    if (!this._cardDetailCache.has(cacheKey)) return null;
+
+    const cachedEntry = this._cardDetailCache.get(cacheKey);
+    if (cachedEntry && typeof cachedEntry === 'object' && Object.prototype.hasOwnProperty.call(cachedEntry, 'data')) {
+      const ttl = cachedEntry?.hasImage ? this._cardDetailCacheTtlMs : this._cardDetailNoImageCacheTtlMs;
+      if ((Date.now() - Number(cachedEntry?.at || 0)) < ttl) {
+        return cachedEntry.data;
+      }
+      this._cardDetailCache.delete(cacheKey);
+      return null;
+    }
+
+    // Backward-compatible fallback for old cache format.
+    return cachedEntry || null;
+  },
+
+  _setCachedCardDetail(cacheKey, detail) {
+    this._cardDetailCache.set(cacheKey, {
+      data: detail,
+      at: Date.now(),
+      hasImage: !!this._getCardImageUrl(detail)
+    });
+  },
+
   makeCardId(card) {
     if (!card || typeof card !== 'object') return '';
 
@@ -154,18 +194,23 @@ const NetworkService = {
     };
   },
 
-  async fetchCardDetail(cardId) {
+  async fetchCardDetail(cardId, options = {}) {
     const cacheKey = this._detailLookupId(cardId);
     if (!cacheKey) return null;
 
-    if (this._cardDetailCache.has(cacheKey)) {
-      return this._cardDetailCache.get(cacheKey);
+    const timeoutRaw = Number(options?.timeoutMs);
+    const timeoutMs = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? Math.floor(timeoutRaw) : 20000;
+    const forceRefresh = options?.forceRefresh === true;
+
+    if (!forceRefresh) {
+      const cached = this._getCachedCardDetail(cacheKey);
+      if (cached) return cached;
     }
 
     try {
       const base = this.getApiBase();
       const res = await fetch(`${base}/detail?id=${encodeURIComponent(cacheKey)}`, {
-        signal: this._abortSignal(10000)
+        signal: this._abortSignal(timeoutMs)
       });
 
       if (!res.ok) {
@@ -173,31 +218,122 @@ const NetworkService = {
         return null;
       }
 
-      const data = await res.json();
+      const data = await this._readJsonSafe(res);
       const normalized = this.normalizeCardData(data);
-      this._cardDetailCache.set(cacheKey, normalized);
+      this._setCachedCardDetail(cacheKey, normalized);
       return normalized;
     } catch (error) {
-      console.error('カード詳細取得エラー:', error);
+      if (error?.name === 'AbortError') {
+        console.warn('カード詳細取得タイムアウト:', cacheKey, `${timeoutMs}ms`);
+      } else {
+        console.error('カード詳細取得エラー:', error);
+      }
       return null;
     }
   },
 
-  async enrichCardImage(card) {
+  async fetchCardDetailByName(cardName, options = {}) {
+    const safeName = String(cardName || '').trim();
+    if (!safeName) return null;
+
+    const cacheKey = this._detailNameCacheKey(safeName);
+    if (!cacheKey) return null;
+
+    const timeoutRaw = Number(options?.timeoutMs);
+    const timeoutMs = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? Math.floor(timeoutRaw) : 20000;
+    const forceRefresh = options?.forceRefresh === true;
+
+    if (!forceRefresh) {
+      const cached = this._getCachedCardDetail(cacheKey);
+      if (cached) return cached;
+    }
+
+    try {
+      const base = this.getApiBase();
+      const res = await fetch(`${base}/detail?name=${encodeURIComponent(safeName)}`, {
+        signal: this._abortSignal(timeoutMs)
+      });
+
+      if (!res.ok) {
+        console.warn('カード詳細取得失敗(name):', res.status, safeName);
+        return null;
+      }
+
+      const data = await this._readJsonSafe(res);
+      const normalized = this.normalizeCardData(data);
+      this._setCachedCardDetail(cacheKey, normalized);
+      return normalized;
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        console.warn('カード詳細取得タイムアウト(name):', safeName, `${timeoutMs}ms`);
+      } else {
+        console.error('カード詳細取得エラー(name):', error);
+      }
+      return null;
+    }
+  },
+
+  async enrichCardImage(card, options = {}) {
     const normalized = this.normalizeCardData(card);
     if (!normalized) return normalized;
-    if (normalized.imageUrl && normalized.name && Number.isFinite(Number(normalized.cost))) return normalized;
+    if (this._getCardImageUrl(normalized) && normalized.name && Number.isFinite(Number(normalized.cost))) return normalized;
 
     const detailId = this._detailLookupId(normalized.sourceId || normalized.id);
-    if (!detailId) return normalized;
+    const fallbackName = String(normalized.name || normalized.nameEn || '').trim();
+    if (!detailId && !fallbackName) return normalized;
 
-    const detail = await this.fetchCardDetail(detailId);
-    if (!detail) return normalized;
+    const retriesRaw = Number(options?.retries);
+    const retries = Number.isFinite(retriesRaw) ? Math.max(0, Math.min(4, Math.floor(retriesRaw))) : 1;
+    const retryDelayRaw = Number(options?.retryDelayMs);
+    const retryDelayMs = Number.isFinite(retryDelayRaw) ? Math.max(0, Math.floor(retryDelayRaw)) : 350;
+    const timeoutRaw = Number(options?.timeoutMs);
+    const timeoutMs = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? Math.floor(timeoutRaw) : 20000;
+    const totalAttempts = retries + 1;
+    let merged = normalized;
 
-    return this.normalizeCardData({
-      ...normalized,
-      ...detail
-    });
+    if (detailId) {
+      for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
+        const detail = await this.fetchCardDetail(detailId, {
+          timeoutMs,
+          forceRefresh: options?.forceDetailRefresh === true || attempt > 0
+        });
+
+        if (detail) {
+          merged = this.normalizeCardData({
+            ...merged,
+            ...detail
+          });
+          if (this._getCardImageUrl(merged)) {
+            return merged;
+          }
+        }
+
+        if (attempt < totalAttempts - 1) {
+          await this._wait(retryDelayMs * (attempt + 1));
+        }
+      }
+    }
+
+    if (!this._getCardImageUrl(merged) && fallbackName) {
+      const byName = await this.fetchCardDetailByName(fallbackName, {
+        timeoutMs,
+        forceRefresh: options?.forceDetailRefresh === true || !!detailId
+      });
+      if (byName) {
+        merged = this.normalizeCardData({
+          ...merged,
+          ...byName
+        });
+        if (this._getCardImageUrl(merged)) {
+          return merged;
+        }
+      }
+    }
+
+    if (!this._getCardImageUrl(merged) && retries > 0) {
+      console.warn('カード画像補完失敗:', detailId || `name:${fallbackName || 'unknown'}`, `attempts=${totalAttempts}`);
+    }
+    return merged;
   },
 
   /**

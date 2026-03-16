@@ -24,6 +24,7 @@ import string
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -155,6 +156,7 @@ def _clean_rooms():
 
 CACHE_DB  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dm_cache.db")
 CACHE_TTL = 90 * 86400  # 90 days
+CACHE_TTL_NO_IMAGE = 10 * 60  # 10 minutes for incomplete card detail
 
 
 def _verify_db_integrity():
@@ -282,6 +284,11 @@ def _delete_deck_from_db(username: str, deck_name: str):
         print(f"[db] delete deck error: {e}", file=sys.stderr, flush=True)
 
 
+def _cache_ttl(data: dict) -> int:
+    image = str(data.get("imageUrl") or data.get("img") or data.get("thumb") or "").strip()
+    return CACHE_TTL if image else CACHE_TTL_NO_IMAGE
+
+
 def _cache_get(cid: str) -> dict | None:
     try:
         con = sqlite3.connect(CACHE_DB)
@@ -289,8 +296,13 @@ def _cache_get(cid: str) -> dict | None:
             "SELECT data, cached_at FROM card_cache WHERE id = ?", (cid,)
         ).fetchone()
         con.close()
-        if row and (time.time() - row[1]) < CACHE_TTL:
-            return json.loads(row[0])
+        if not row:
+            return None
+
+        data = json.loads(row[0])
+        ttl = _cache_ttl(data)
+        if (time.time() - row[1]) < ttl:
+            return data
     except Exception as e:
         print(f"[cache] get error: {e}", file=sys.stderr, flush=True)
     return None
@@ -795,6 +807,35 @@ def _official_keyword(card_name: str) -> str:
     return card_name
 
 
+def _name_variants(card_name: str) -> list[str]:
+    """Generate conservative name variants to tolerate minor spacing/alias differences."""
+    base = str(card_name or "").strip()
+    if not base:
+        return []
+
+    variants: list[str] = []
+    seen: set[str] = set()
+
+    def _add(v: str):
+        t = str(v or "").strip()
+        if not t or t in seen:
+            return
+        seen.add(t)
+        variants.append(t)
+
+    _add(base)
+    squashed = re.sub(r'[\s　]+', '', base)
+    _add(squashed)
+    if squashed:
+        _add(_ja_insert_spaces(squashed))
+
+    tail = re.split(r'[\s　]+', base)[-1].strip()
+    if len(tail) >= 4:
+        _add(tail)
+
+    return variants[:4]
+
+
 def _img_from_official(card_name: str) -> str:
     """Get card image URL from the official Takara Tomy DM card database.
     Searches by card name, then verifies each result by fetching the detail
@@ -979,14 +1020,25 @@ def get_card_detail_dmwiki(name: str) -> dict | None:
         r for r in rows[2:] if not re.match(r'^DM\d', r)
     ).strip()
 
-    # Get card image: dmwiki HTML → dmwiki attach list → official → English wiki (by table name, then page name)
-    img_url = (
-        _img_from_dmwiki_html(html)
-        or _img_from_dmwiki_attach(name)
-        or _img_from_official(card_name)
-        or _img_from_en_wiki(card_name)
-        or (card_name != name and _img_from_en_wiki(name))
-    )
+    # Get card image: dmwiki HTML → dmwiki attach list → official (name variants) → English wiki (name variants)
+    img_url = _img_from_dmwiki_html(html) or _img_from_dmwiki_attach(name)
+    candidates = _name_variants(card_name)
+    if card_name != name:
+        for variant in _name_variants(name):
+            if variant not in candidates:
+                candidates.append(variant)
+
+    if not img_url:
+        for candidate in candidates:
+            img_url = _img_from_official(candidate)
+            if img_url:
+                break
+
+    if not img_url:
+        for candidate in candidates:
+            img_url = _img_from_en_wiki(candidate)
+            if img_url:
+                break
 
     return {
         "id":     f"dmwiki_{name}",
@@ -1004,14 +1056,35 @@ def get_card_detail_dmwiki(name: str) -> dict | None:
 
 # ─── Image proxy ──────────────────────────────────────────────────────────────
 
+IMG_FETCH_TIMEOUT = 15
+IMG_FETCH_RETRIES = 2
+
+
 def fetch_binary(url: str):
-    req = urllib.request.Request(url, headers={**WIKI_HEADERS, "Accept": "image/*"})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return r.read(), r.headers.get("Content-Type", "image/jpeg")
-    except Exception as e:
-        print(f"[img] {e}", file=sys.stderr, flush=True)
-        return None, None
+    last_error = None
+    for attempt in range(IMG_FETCH_RETRIES + 1):
+        req = urllib.request.Request(url, headers={**WIKI_HEADERS, "Accept": "image/*"})
+        try:
+            with urllib.request.urlopen(req, timeout=IMG_FETCH_TIMEOUT) as r:
+                return r.read(), r.headers.get("Content-Type", "image/jpeg"), 200
+        except urllib.error.HTTPError as e:
+            last_error = e
+            code = int(getattr(e, "code", 0) or 0)
+            print(f"[img] HTTP {code}: {url} (attempt {attempt + 1})", file=sys.stderr, flush=True)
+            if code == 404:
+                return None, None, 404
+        except Exception as e:
+            last_error = e
+            print(f"[img] {e} (attempt {attempt + 1})", file=sys.stderr, flush=True)
+
+        if attempt < IMG_FETCH_RETRIES:
+            time.sleep(0.25 * (attempt + 1))
+
+    if isinstance(last_error, urllib.error.HTTPError):
+        code = int(getattr(last_error, "code", 0) or 0)
+        if 400 <= code <= 599:
+            return None, None, code
+    return None, None, 504
 
 
 # ─── HTTP Handler ──────────────────────────────────────────────────────────────
@@ -1386,19 +1459,36 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"cards": cards, "query": q, "page": page, "total": total})
 
         # /detail?id=...  (prefix "dmwiki_" = dmwiki.net)
+        # /detail?name=... (dmwiki card name fallback)
         elif parsed.path == "/detail":
             pid = p("id")
-            if not pid:
-                return self._json({"error": "id required"}, 400)
-            cached = _cache_get(pid)
+            name = p("name").strip()
+            if not pid and not name:
+                return self._json({"error": "id or name required"}, 400)
+
+            cache_key = pid
+            if not cache_key:
+                lookup_name = name[7:] if name.startswith("dmwiki_") else name
+                cache_key = f"dmwiki_{lookup_name}"
+
+            cached = _cache_get(cache_key)
             if cached:
                 return self._json(cached)
-            if pid.startswith("dmwiki_"):
-                detail = get_card_detail_dmwiki(pid[7:])
+
+            if pid:
+                if pid.startswith("dmwiki_"):
+                    detail = get_card_detail_dmwiki(pid[7:])
+                else:
+                    detail = get_card_detail(pid)
             else:
-                detail = get_card_detail(pid)
+                lookup_name = name[7:] if name.startswith("dmwiki_") else name
+                detail = get_card_detail_dmwiki(lookup_name)
+
             if detail:
-                _cache_set(pid, detail)
+                image = str(detail.get("imageUrl") or detail.get("img") or detail.get("thumb") or "").strip()
+                if not image:
+                    print(f"[detail] image missing (short cache): {cache_key}", flush=True)
+                _cache_set(cache_key, detail)
                 self._json(detail)
             else:
                 self._json({"error": "not found"}, 404)
@@ -1408,7 +1498,7 @@ class Handler(BaseHTTPRequestHandler):
             url = p("url")
             if not url:
                 self.send_response(400); self.end_headers(); return
-            data, ctype = fetch_binary(url)
+            data, ctype, status = fetch_binary(url)
             if data:
                 self.send_response(200)
                 self.send_header("Content-Type", ctype or "image/jpeg")
@@ -1417,7 +1507,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(data)
             else:
-                self.send_response(404); self.end_headers()
+                self.send_response(status if status else 502)
+                self._cors()
+                self.end_headers()
 
         else:
             self._json({"error": "unknown endpoint"}, 404)

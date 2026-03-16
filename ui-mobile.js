@@ -13,7 +13,9 @@ let _mobileSearchDebounceTimer = null;
 let _mobileSearchController = null;
 let _mobileDelegatedEventsBound = false;
 let _mobileDeckHydrateToken = 0;
-const _mobileSearchHydrateNoImage = new Set();
+const _mobileSearchHydrateCooldownUntil = new Map();
+const MOBILE_SEARCH_HYDRATE_NO_IMAGE_COOLDOWN_MS = 45 * 1000;
+const MOBILE_SEARCH_HYDRATE_ERROR_COOLDOWN_MS = 8 * 1000;
 let _mobileSearchState = { query: '', page: 0, items: [], hasMore: false, loading: false };
 let _mobileZoneMenuState = null;
 let _mobileZoneMenuLongPressTimer = null;
@@ -75,6 +77,17 @@ function renderMobileCardThumb(card, className = 'ml-search-thumb') {
 
 function handleMobileCardImageError(img) {
   if (!img) return;
+  const currentSrc = String(img.getAttribute('src') || '').trim();
+  const retryCount = Number(img.dataset.imgRetryCount || 0);
+  if (currentSrc && retryCount < 2) {
+    const baseSrc = String(img.dataset.baseSrc || currentSrc).trim();
+    img.dataset.baseSrc = baseSrc;
+    img.dataset.imgRetryCount = String(retryCount + 1);
+    const sep = baseSrc.includes('?') ? '&' : '?';
+    img.src = `${baseSrc}${sep}_imgRetry=${Date.now()}_${retryCount + 1}`;
+    return;
+  }
+
   img.onerror = null;
   img.outerHTML = `<div class="${img.className} placeholder">NO IMG</div>`;
 }
@@ -1559,6 +1572,21 @@ function getMobileSearchHydrateKey(card) {
   return normalized;
 }
 
+function shouldSkipMobileSearchHydrate(key) {
+  if (!key) return false;
+  const until = Number(_mobileSearchHydrateCooldownUntil.get(key) || 0);
+  if (!until) return false;
+  if (Date.now() <= until) return true;
+  _mobileSearchHydrateCooldownUntil.delete(key);
+  return false;
+}
+
+function markMobileSearchHydrateCooldown(key, cooldownMs = MOBILE_SEARCH_HYDRATE_NO_IMAGE_COOLDOWN_MS) {
+  if (!key) return;
+  const duration = Math.max(0, Number(cooldownMs) || 0);
+  _mobileSearchHydrateCooldownUntil.set(key, Date.now() + duration);
+}
+
 async function hydrateMobileSearchCards(items) {
   const sourceItems = Array.isArray(items) ? items : [];
   if (!sourceItems.length) return [];
@@ -1568,19 +1596,29 @@ async function hydrateMobileSearchCards(items) {
     if (getMobileCardImageUrl(normalizedCard)) return normalizedCard;
 
     const key = getMobileSearchHydrateKey(normalizedCard);
-    if (key && _mobileSearchHydrateNoImage.has(key)) {
+    if (key && shouldSkipMobileSearchHydrate(key)) {
       return normalizedCard;
     }
 
     try {
-      const enriched = await NetworkService.enrichCardImage(normalizedCard);
+      const enriched = await NetworkService.enrichCardImage(normalizedCard, {
+        retries: 1,
+        retryDelayMs: 300
+      });
       const normalized = NetworkService.normalizeCardData(enriched);
-      if (!getMobileCardImageUrl(normalized) && key) {
-        _mobileSearchHydrateNoImage.add(key);
+      if (getMobileCardImageUrl(normalized)) {
+        if (key) _mobileSearchHydrateCooldownUntil.delete(key);
+        return normalized;
+      }
+
+      if (key) {
+        markMobileSearchHydrateCooldown(key, MOBILE_SEARCH_HYDRATE_NO_IMAGE_COOLDOWN_MS);
       }
       return normalized;
     } catch {
-      if (key) _mobileSearchHydrateNoImage.add(key);
+      if (key) {
+        markMobileSearchHydrateCooldown(key, MOBILE_SEARCH_HYDRATE_ERROR_COOLDOWN_MS);
+      }
       return normalizedCard;
     }
   }));
@@ -2999,7 +3037,10 @@ async function hydrateMobileDeckCards(cards) {
     if (!isMobileCardHydrationNeeded(card)) {
       return card;
     }
-    const enriched = await NetworkService.enrichCardImage(card);
+    const enriched = await NetworkService.enrichCardImage(card, {
+      retries: 1,
+      retryDelayMs: 300
+    });
     return NetworkService.normalizeCardData(enriched);
   }));
 
@@ -3141,7 +3182,10 @@ async function addToMobileDeck(cardJson, addCount = 1) {
     }
 
     const rawCard = typeof cardJson === 'string' ? JSON.parse(cardJson) : cardJson;
-    const card = await NetworkService.enrichCardImage(rawCard);
+    const card = await NetworkService.enrichCardImage(rawCard, {
+      retries: 2,
+      retryDelayMs: 350
+    });
     const normalized = NetworkService.normalizeCardData(card);
     const normalizedKey = String(normalized.cardId || normalized.id || '');
     const count = Math.max(1, Math.min(4, Number.isFinite(Number(addCount)) ? Math.floor(Number(addCount)) : 1));
