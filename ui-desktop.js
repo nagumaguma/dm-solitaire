@@ -97,6 +97,66 @@ function askDesktopConfirm(message, confirmLabel = 'OK', cancelLabel = 'キャ�
   });
 }
 
+function askDesktopInput(placeholder = 'デッキ名を入力') {
+  return new Promise((resolve) => {
+    let modal = document.getElementById('desktop-input-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'desktop-input-modal';
+      modal.className = 'dm-confirm-modal';
+      modal.innerHTML = `
+        <div class="dm-confirm-backdrop"></div>
+        <div class="dm-confirm-body">
+          <input id="desktop-input-field" class="dm-input-field" type="text" autocomplete="off">
+          <div class="dm-confirm-actions">
+            <button id="desktop-input-ok" class="dm-confirm-btn ok">OK</button>
+            <button id="desktop-input-cancel" class="dm-confirm-btn cancel">キャンセル</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    const input = document.getElementById('desktop-input-field');
+    const okBtn = document.getElementById('desktop-input-ok');
+    const cancelBtn = document.getElementById('desktop-input-cancel');
+    const backdrop = modal.querySelector('.dm-confirm-backdrop');
+
+    if (!input || !okBtn || !cancelBtn || !backdrop) {
+      resolve(null);
+      return;
+    }
+
+    input.placeholder = placeholder;
+    input.value = '';
+
+    const close = (result) => {
+      modal.classList.remove('open');
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      backdrop.onclick = null;
+      input.onkeydown = null;
+      resolve(result);
+    };
+
+    okBtn.onclick = () => close(input.value.trim() || null);
+    cancelBtn.onclick = () => close(null);
+    backdrop.onclick = () => close(null);
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        close(input.value.trim() || null);
+      }
+      if (e.key === 'Escape') {
+        close(null);
+      }
+    };
+
+    modal.classList.add('open');
+    input.focus();
+  });
+}
+
 function onDesktopSearchInput(query) {
   if (_desktopSearchDebounceTimer) clearTimeout(_desktopSearchDebounceTimer);
   _desktopSearchDebounceTimer = setTimeout(() => {
@@ -2067,8 +2127,8 @@ function closeDesktopGraveyardModal() {
   if (modal) modal.classList.remove('open');
 }
 
-function newDesktopDeck() {
-  const name = prompt('デッキ名を入力:');
+async function newDesktopDeck() {
+  const name = String(await askDesktopInput('デッキ名を入力') || '').trim();
   if (!name) return;
   
   const decks = getSavedDecks();
@@ -2567,13 +2627,13 @@ async function desktopOnlineCopyRoomId(silent = false) {
       await navigator.clipboard.writeText(room);
       if (!silent) desktopOnlineUpdateStatus(`ルームID ${room} をコピーしました。`);
     } else {
-      window.prompt('ルームIDをコピーしてください', room);
-      if (!silent) desktopOnlineUpdateStatus('ルームIDを手動でコピーしてください。');
+      showDesktopToast(`ルームID: ${room}`, 'info', 6000);
+      if (!silent) desktopOnlineUpdateStatus(`ルームID: ${room} をメモしてください。`);
     }
   } catch (err) {
     console.warn('clipboard write failed', err);
-    window.prompt('ルームIDをコピーしてください', room);
-    if (!silent) desktopOnlineUpdateStatus('ルームIDを手動でコピーしてください。');
+    showDesktopToast(`ルームID: ${room}`, 'info', 6000);
+    if (!silent) desktopOnlineUpdateStatus(`ルームID: ${room} をメモしてください。`);
   }
 }
 
@@ -3035,6 +3095,8 @@ function olStartEventListenerDesktop() {
   if (window._ol.eventSource) {
     window._ol.eventSource.close();
   }
+
+  window._ol.remoteSeq = 0;
 
   const room = window._ol.room;
   const player = window._ol.p;

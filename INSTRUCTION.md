@@ -1,145 +1,62 @@
-# DM Solitaire - 実装指示書 v4
+# DM Solitaire - 実装指示書 v5
 
-作成日: 2026-03-16（v3実行後のレビューを反映）
+作成日: 2026-03-16（v4実行後のレビューを反映）
 
 ---
 
-## 前回の指示（v3）の実施確認
+## 前回の指示（v4）の実施確認
 
 | 項目 | 状態 | 備考 |
 |---|---|---|
-| Bug 1: alert() → showDesktopToast() | ✅ 完了 | `showDesktopToast()` L1-43, 全 alert 置換済み |
-| Bug 2: confirm() → askDesktopConfirm() | ✅ 完了 | Promise モーダル L44- 実装, L1355, L1647 で使用 |
-| Design-1: ロビー配色統一 | ✅ 完了 | `index.html` L3433-3458 に V3 CSS オーバーライド追加済み |
-| Design-2: ターン開始ドロー促進 | ✅ 完了 | `_desktopNeedDrawGuide` / `_mobileNeedDrawGuide` フラグ + SSE ハンドラでセット済み |
-| Design-3: 手札カード文明色 | ✅ 完了 | `getDesktopCardCivClass(c)` が手札チップにも適用 (`ui-desktop.js` L987) |
-| Design-4: デッキ一覧 空状態・文明バッジ | ✅ 完了 | 空状態メッセージ + `.dl-civ-badge` 実装済み |
-| Design-5: ゾーン視認性向上 | ✅ 完了 | `.dg-zone-title` border-left + 空プレースホルダー追加 |
-| Design-6: モバイル ゾーン順序 | ✅ 完了 | シールドを BZ の前に移動済み |
-| Design-7: デスクトップ ヘッダーバー | ✅ 完了 | `.dg-header-bar.my-turn` / `.opp-turn` + `.dg-turn-badge` |
-| Design-8: 墓地モーダルビューア | ✅ 完了 | `openDesktopGraveyardModal()` / `closeDesktopGraveyardModal()` L1327 |
+| Bug 1: selectDesktopHandCard() + ゾーン選択ポップアップ | ✅ 完了 | `ui-desktop.js` L1360-1407。ターンガード・座標補正も完備 |
+| Bug 2: askDesktopInput() / askMobileInput() + newDeck() async化 | ❌ 未実装 | `newDesktopDeck()` L2071 / `newMobileDeck()` L1886 ともに `prompt()` のまま |
+| Bug 3: SSE reconnect 時の remoteSeq リセット | ❌ 未実装 | `olStartEventListenerDesktop()` L3032 / `olStartEventListenerMobile()` L2529 ともに `window._ol.remoteSeq = 0` なし |
+| Bug 4: clipboard fallback の window.prompt() 削除 | ❌ 未実装 | `desktopOnlineCopyRoomId()` L2570, L2575 に `window.prompt()` が残存 |
 
 ---
 
-## 新規バグ（今回発見・修正指示）
+## 今回の大規模変更の評価（良好）
+
+今回のアップデートで追加された以下の機能は**正常に動作する設計**であることを確認した。
+
+| 追加機能 | 評価 |
+|---|---|
+| `game-controller.js` 大幅拡充（GameController として window に export） | ✅ 問題なし |
+| `game-engine.js` に `moveCardBetweenZones()`, `insertCardUnderCard()` 追加 | ✅ 問題なし |
+| デスクトップ 右クリック ゾーンメニュー (`openDesktopCardZoneMenu()`) | ✅ 問題なし |
+| モバイル 長押しゾーンメニュー (`openMobileCardZoneMenu()`) | ✅ 問題なし |
+| カード詳細モーダル（両プラットフォーム） | ✅ 問題なし |
+| アンダーカード重ねシステム (`insertCardUnderCard()`) | ✅ 問題なし |
+| SSEハンドラでのターン開始時カードアンタップ + ドローガイド | ✅ 問題なし |
+| `createSearchController()` による検索ページング | ✅ 問題なし |
+| `.dark` / `.darkness` 両クラス対応 CSS | ✅ 問題なし |
 
 ---
 
-### Bug 1【🔴 高】デスクトップ 手札クリックが常にバトルゾーンへ
-
-**場所**: `ui-desktop.js` L993
-
-**症状**: 手札カードをクリックすると `playDesktopCard(i, 'battle')` が直接呼ばれ、常にバトルゾーンへ出る。マナゾーンへ置く操作がクリックでできない（ドラッグ&ドロップしか手段がない）。
-
-**確認コード**:
-```javascript
-// ui-desktop.js L993 (現在)
-onclick="playDesktopCard(${i}, 'battle')"
-```
-
-**修正方針**: クリックでゾーン選択ポップアップを表示する。
-
-#### 変更 1: `onclick` をピッカー呼び出しに変更
-
-```javascript
-// 変更前 (ui-desktop.js L993)
-onclick="playDesktopCard(${i}, 'battle')"
-
-// 変更後
-onclick="selectDesktopHandCard(${i}, event)"
-```
-
-#### 変更 2: `selectDesktopHandCard()` 関数を追加 (`ui-desktop.js` の先頭付近に追記)
-
-```javascript
-function selectDesktopHandCard(idx, event) {
-  event.stopPropagation();
-  closeDesktopHandPicker();
-
-  const picker = document.createElement('div');
-  picker.id = 'dg-hand-picker';
-  picker.className = 'dg-hand-picker';
-  picker.innerHTML = `
-    <button onclick="playDesktopCard(${idx},'battle');closeDesktopHandPicker()">バトルゾーン</button>
-    <button onclick="playDesktopCard(${idx},'mana');closeDesktopHandPicker()">マナゾーン</button>
-    <button onclick="closeDesktopHandPicker()" class="dg-hand-picker-cancel">キャンセル</button>
-  `;
-
-  const rect = event.currentTarget.getBoundingClientRect();
-  picker.style.top  = (rect.bottom + 6) + 'px';
-  picker.style.left = Math.min(rect.left, window.innerWidth - 160) + 'px';
-  document.body.appendChild(picker);
-
-  setTimeout(() => {
-    document.addEventListener('click', closeDesktopHandPicker, { once: true });
-  }, 0);
-}
-
-function closeDesktopHandPicker() {
-  const el = document.getElementById('dg-hand-picker');
-  if (el) el.remove();
-}
-```
-
-#### 変更 3: CSS を `index.html` の `</style>` 前に追加
-
-```css
-/* Hand zone picker popup */
-.dg-hand-picker {
-  position: fixed;
-  background: var(--panel, #faf6f1);
-  border: 1px solid var(--border, #e2d6c8);
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.18);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px;
-  z-index: 8500;
-  min-width: 130px;
-}
-.dg-hand-picker button {
-  background: none;
-  border: none;
-  padding: 7px 16px;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  color: var(--text, #3f332a);
-  text-align: left;
-  white-space: nowrap;
-}
-.dg-hand-picker button:hover {
-  background: var(--border, #e2d6c8);
-}
-.dg-hand-picker button.dg-hand-picker-cancel {
-  color: var(--text-dim, #a08060);
-  font-size: 0.8rem;
-}
-```
+## 未実装バグ（v4から引き続き修正が必要）
 
 ---
 
-### Bug 2【🟡 中】デッキ新規作成で `prompt()` を使用
+### Bug 1（再掲）【🟡 中】デッキ新規作成で `prompt()` を使用
 
-**場所**: `ui-desktop.js` L1333、`ui-mobile.js` L1271
+**場所**: `ui-desktop.js` L2071、`ui-mobile.js` L1886
 
-**症状**: 「新規デッキ」ボタン押下時に `prompt('デッキ名を入力:')` が呼ばれる。ネイティブダイアログがテーマと合わない。
+**症状**: 「新規デッキ」ボタン押下時に `prompt('デッキ名を入力:')` が呼ばれる。
 
-**確認コード**:
+**現在のコード**:
 ```javascript
-// ui-desktop.js L1333 (現在)
+// ui-desktop.js L2070 (現在)
 function newDesktopDeck() {
   const name = prompt('デッキ名を入力:');
 
-// ui-mobile.js L1271 (現在)
+// ui-mobile.js L1885 (現在)
 function newMobileDeck() {
   const name = String(prompt('デッキ名を入力:') || '').trim();
 ```
 
 **修正方針**: 既存の `dm-confirm-modal` 構造を流用してテキスト入力モーダルを追加する。
 
-#### 変更 1: `askDesktopInput()` を `ui-desktop.js` に追加（`askDesktopConfirm()` の直後）
+#### 変更 1: `askDesktopInput()` を `ui-desktop.js` に追加（`askDesktopConfirm()` の直後、L98付近）
 
 ```javascript
 function askDesktopInput(placeholder = 'デッキ名を入力') {
@@ -162,10 +79,10 @@ function askDesktopInput(placeholder = 'デッキ名を入力') {
       document.body.appendChild(modal);
     }
 
-    const input    = document.getElementById('desktop-input-field');
-    const okBtn    = document.getElementById('desktop-input-ok');
+    const input     = document.getElementById('desktop-input-field');
+    const okBtn     = document.getElementById('desktop-input-ok');
     const cancelBtn = document.getElementById('desktop-input-cancel');
-    const backdrop = modal.querySelector('.dm-confirm-backdrop');
+    const backdrop  = modal.querySelector('.dm-confirm-backdrop');
 
     input.placeholder = placeholder;
     input.value = '';
@@ -193,7 +110,7 @@ function askDesktopInput(placeholder = 'デッキ名を入力') {
 }
 ```
 
-#### 変更 2: `newDesktopDeck()` を async に変更 (`ui-desktop.js` L1332)
+#### 変更 2: `newDesktopDeck()` を async に変更（`ui-desktop.js` L2070）
 
 ```javascript
 // 変更前
@@ -207,7 +124,7 @@ async function newDesktopDeck() {
   if (!name) return;
 ```
 
-#### 変更 3: `askMobileInput()` を `ui-mobile.js` に追加（`askMobileConfirm()` の直後）
+#### 変更 3: `askMobileInput()` を `ui-mobile.js` に追加（`askMobileConfirm()` L215の直後）
 
 ```javascript
 function askMobileInput(placeholder = 'デッキ名を入力') {
@@ -261,7 +178,7 @@ function askMobileInput(placeholder = 'デッキ名を入力') {
 }
 ```
 
-#### 変更 4: `newMobileDeck()` を async に変更 (`ui-mobile.js` L1270)
+#### 変更 4: `newMobileDeck()` を async に変更（`ui-mobile.js` L1885）
 
 ```javascript
 // 変更前
@@ -275,10 +192,10 @@ async function newMobileDeck() {
   if (!name) return;
 ```
 
-#### 変更 5: CSS を `index.html` の `</style>` 前に追加（desktop/mobile 共通）
+#### 変更 5: CSS を `index.html` の `</style>` 前に追加
 
 ```css
-/* Input modal field */
+/* Input modal field (desktop & mobile shared) */
 .dm-input-field {
   width: 100%;
   border: 1px solid var(--border, #e2d6c8);
@@ -289,51 +206,41 @@ async function newMobileDeck() {
   background: #fff;
   margin-bottom: 14px;
   box-sizing: border-box;
+  display: block;
 }
 .dm-input-field:focus {
   outline: none;
   border-color: var(--accent, #b37a4c);
-  box-shadow: 0 0 0 2px rgba(179,122,76,0.15);
+  box-shadow: 0 0 0 2px rgba(179, 122, 76, 0.15);
 }
 ```
 
 ---
 
-### Bug 3【🟡 中】SSE 再接続後に相手の状態更新が無視される
+### Bug 2（再掲）【🔴 致命的】SSE 再接続後に相手の盤面更新が完全に無視される
 
-**場所**: `ui-desktop.js` L2290〜2300（`olStartEventListenerDesktop()`）、`ui-mobile.js` L1909〜1915（`olStartEventListenerMobile()`）
+**場所**: `ui-desktop.js` L3032〜3042（`olStartEventListenerDesktop()`）、`ui-mobile.js` L2529〜2535（`olStartEventListenerMobile()`）
 
-**症状**: SSE が切断→再接続されると `createEventSource()` が新しい接続を作るが、`window._ol.remoteSeq` がリセットされない。再接続後に受信した相手のパケットの `seq` が古い `remoteSeq` 以下と判断され、`shouldApplyRemotePayload()` が `false` を返し続ける。結果、再接続後に相手の盤面が一切更新されなくなる。
+**症状**: SSE 切断→再接続時に `window._ol.remoteSeq` がリセットされない。再接続後に受信したパケットの `seq` が古い `remoteSeq` 以下と判定され、`shouldApplyRemotePayload()` が永遠に `false` を返す。相手の手札枚数・BZ・マナ・シールドが一切更新されなくなる。
 
-**確認コード**:
+**現在のコード**（ui-desktop.js L3032）:
 ```javascript
-// ui-desktop.js L2290〜2300 (現在)
 function olStartEventListenerDesktop() {
   if (!window._ol || !engine) return;
 
   if (window._ol.eventSource) {
     window._ol.eventSource.close();
   }
-
-  const room = window._ol.room;      // ← ここに remoteSeq リセットがない
+                                    // ← ここに remoteSeq = 0 がない
+  const room = window._ol.room;
   const player = window._ol.p;
   const es = NetworkService.createEventSource(room, player);
-  window._ol.eventSource = es;
-
-// ui-mobile.js L1909〜1915 (現在)
-function olStartEventListenerMobile() {
-  if (!window._ol || !engineMobile) return;
-  if (window._ol.eventSource) window._ol.eventSource.close();
-
-  const room = window._ol.room;      // ← ここに remoteSeq リセットがない
-  const es = NetworkService.createEventSource(room, window._ol.p);
-  window._ol.eventSource = es;
 ```
 
-**修正**: 新しい EventSource を作る直前に `remoteSeq = 0` をリセットする。
+**修正**: 1行追加するだけ。
 
 ```javascript
-// ui-desktop.js の修正 (L2295〜2300 あたりに1行追加)
+// ui-desktop.js の修正 (L3037〜3038 の間に1行追加)
 function olStartEventListenerDesktop() {
   if (!window._ol || !engine) return;
 
@@ -341,57 +248,50 @@ function olStartEventListenerDesktop() {
     window._ol.eventSource.close();
   }
 
-  window._ol.remoteSeq = 0;          // ← 追加：再接続時にシーケンス番号をリセット
+  window._ol.remoteSeq = 0;          // ← 追加
 
   const room = window._ol.room;
   const player = window._ol.p;
   const es = NetworkService.createEventSource(room, player);
-  window._ol.eventSource = es;
-  // ... 以降は変更なし
+```
 
-// ui-mobile.js の修正 (L1911〜1915 あたりに1行追加)
+```javascript
+// ui-mobile.js の修正 (L2531〜2533 の間に1行追加)
 function olStartEventListenerMobile() {
   if (!window._ol || !engineMobile) return;
   if (window._ol.eventSource) window._ol.eventSource.close();
 
-  window._ol.remoteSeq = 0;          // ← 追加：再接続時にシーケンス番号をリセット
+  window._ol.remoteSeq = 0;          // ← 追加
 
   const room = window._ol.room;
   const es = NetworkService.createEventSource(room, window._ol.p);
-  window._ol.eventSource = es;
-  // ... 以降は変更なし
 ```
 
 ---
 
-### Bug 4【🟢 低】クリップボード失敗時に `window.prompt()` を使用
+### Bug 3（再掲）【🟢 低】クリップボード失敗時に `window.prompt()` を使用
 
-**場所**: `ui-desktop.js` L1829, L1834（`desktopOnlineCopyRoomId()` 関数内）
+**場所**: `ui-desktop.js` L2570, L2575（`desktopOnlineCopyRoomId()` 内）
 
-**症状**: Clipboard API が使えない環境でルームIDをコピーしようとすると `window.prompt()` が開く。ネイティブダイアログがテーマと合わず、またモバイルブラウザでは prompt が完全にブロックされる場合がある。
-
-**確認コード**:
+**現在のコード**（L2564〜2577）:
 ```javascript
-// ui-desktop.js L1825〜1836 (現在)
 try {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     await navigator.clipboard.writeText(room);
     if (!silent) desktopOnlineUpdateStatus(`ルームID ${room} をコピーしました。`);
   } else {
-    window.prompt('ルームIDをコピーしてください', room);  // L1829 ← 削除
+    window.prompt('ルームIDをコピーしてください', room);   // ← L2570 削除
     if (!silent) desktopOnlineUpdateStatus('ルームIDを手動でコピーしてください。');
   }
 } catch (err) {
   console.warn('clipboard write failed', err);
-  window.prompt('ルームIDをコピーしてください', room);     // L1834 ← 削除
+  window.prompt('ルームIDをコピーしてください', room);     // ← L2575 削除
   if (!silent) desktopOnlineUpdateStatus('ルームIDを手動でコピーしてください。');
 }
 ```
 
-**修正**: `window.prompt()` を削除し、`showDesktopToast()` でルームIDを目立つ表示に変更する。
-
+**修正後**:
 ```javascript
-// 変更後
 try {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     await navigator.clipboard.writeText(room);
@@ -412,13 +312,14 @@ try {
 ## 実装順序（推奨）
 
 ```
-Phase 1（バグ修正・高優先）:
-  1. Bug 1: selectDesktopHandCard() 追加 + onclick 変更 + CSS
-  2. Bug 2: askDesktopInput() / askMobileInput() 追加 + newDeck() async 化 + CSS
-  3. Bug 3: olStartEventListenerDesktop/Mobile に remoteSeq = 0 追加
+Phase 1（致命的バグ）:
+  1. Bug 2: olStartEventListenerDesktop/Mobile に window._ol.remoteSeq = 0 追加（1行追加ずつ）
 
-Phase 2（低優先バグ）:
-  4. Bug 4: clipboard fallback の window.prompt() → showDesktopToast() に変更
+Phase 2（中優先バグ）:
+  2. Bug 1: askDesktopInput() / askMobileInput() 追加 + newDeck() async 化 + .dm-input-field CSS 追加
+
+Phase 3（低優先）:
+  3. Bug 3: desktopOnlineCopyRoomId() の window.prompt() → showDesktopToast() に変更
 ```
 
 ---
@@ -427,9 +328,9 @@ Phase 2（低優先バグ）:
 
 | ファイル | 変更内容 |
 |---|---|
-| `ui-desktop.js` | `selectDesktopHandCard()` + `closeDesktopHandPicker()` 追加、手札 onclick 変更、`askDesktopInput()` 追加、`newDesktopDeck()` async 化、`olStartEventListenerDesktop()` に remoteSeq リセット追加、`desktopOnlineCopyRoomId()` の prompt → toast |
-| `ui-mobile.js` | `askMobileInput()` 追加、`newMobileDeck()` async 化、`olStartEventListenerMobile()` に remoteSeq リセット追加 |
-| `index.html` | `.dg-hand-picker` CSS 追加、`.dm-input-field` CSS 追加 |
+| `ui-desktop.js` | `askDesktopInput()` 追加（L98直後）、`newDesktopDeck()` async化（L2070）、`olStartEventListenerDesktop()` に remoteSeq = 0 追加（L3037付近）、`desktopOnlineCopyRoomId()` の prompt → toast（L2570/2575） |
+| `ui-mobile.js` | `askMobileInput()` 追加（L215直後）、`newMobileDeck()` async化（L1885）、`olStartEventListenerMobile()` に remoteSeq = 0 追加（L2531付近） |
+| `index.html` | `.dm-input-field` CSS 追加（`</style>` 前） |
 
 ---
 
@@ -437,9 +338,7 @@ Phase 2（低優先バグ）:
 
 - サーバーURL: `window.DM_API_BASE`（index.htmlで設定）
 - Railwayデプロイ: `https://dm-solitaire-production.up.railway.app`
-- デッキ形式: `[{id, name, civ, civilization, cost, type, power, race, text, count}, ...]`
+- `window.GameController`: 全操作の中継点として実装済み（`game-controller.js`）
 - SSEイベント: `opponent_state`, `turn_end`, `chat_message`, `ping`, `joined`
-- `/deck/list`, `/deck/get` はPOST（PINをbodyに含める）
-- 認証: sessionStorage に `{username, pin}` を保存
 - テーマカラー: `--bg: #f6efe6`, `--accent: #b37a4c`, `--text: #3f332a`, `--border: #e2d6c8`
-- `window.GameController`: 意図的に未定義（拡張ポイント）、全参照は `if (window.GameController)` でガード済み
+- 文明クラス: desktop は `dark`, mobile は `darkness` —両方 CSS に定義済みなので問題なし

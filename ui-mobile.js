@@ -458,6 +458,66 @@ function askMobileConfirm(message, confirmLabel = 'OK', cancelLabel = 'キャン
   });
 }
 
+function askMobileInput(placeholder = 'デッキ名を入力') {
+  return new Promise((resolve) => {
+    let modal = document.getElementById('mobile-input-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'mobile-input-modal';
+      modal.className = 'dm-confirm-modal';
+      modal.innerHTML = `
+        <div class="dm-confirm-backdrop"></div>
+        <div class="dm-confirm-body mobile">
+          <input id="mobile-input-field" class="dm-input-field" type="text" autocomplete="off">
+          <div class="dm-confirm-actions">
+            <button id="mobile-input-ok" class="dm-confirm-btn ok">OK</button>
+            <button id="mobile-input-cancel" class="dm-confirm-btn cancel">キャンセル</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    const input = document.getElementById('mobile-input-field');
+    const okBtn = document.getElementById('mobile-input-ok');
+    const cancelBtn = document.getElementById('mobile-input-cancel');
+    const backdrop = modal.querySelector('.dm-confirm-backdrop');
+
+    if (!input || !okBtn || !cancelBtn || !backdrop) {
+      resolve(null);
+      return;
+    }
+
+    input.placeholder = placeholder;
+    input.value = '';
+
+    const close = (result) => {
+      modal.classList.remove('open');
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      backdrop.onclick = null;
+      input.onkeydown = null;
+      resolve(result);
+    };
+
+    okBtn.onclick = () => close(input.value.trim() || null);
+    cancelBtn.onclick = () => close(null);
+    backdrop.onclick = () => close(null);
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        close(input.value.trim() || null);
+      }
+      if (e.key === 'Escape') {
+        close(null);
+      }
+    };
+
+    modal.classList.add('open');
+    input.focus();
+  });
+}
+
 function showMobileToast(message, type = 'info', timeout = 2200) {
   let el = document.getElementById('mobile-toast');
   if (!el) {
@@ -1882,8 +1942,8 @@ function undoMobileGame() {
   if (ok) renderMobileGame();
 }
 
-function newMobileDeck() {
-  const name = String(prompt('デッキ名を入力:') || '').trim();
+async function newMobileDeck() {
+  const name = String(await askMobileInput('デッキ名を入力') || '').trim();
   if (!name) return;
 
   const decks = getSavedDecksMobile();
@@ -2529,6 +2589,8 @@ function startMobileOnlineGame() {
 function olStartEventListenerMobile() {
   if (!window._ol || !engineMobile) return;
   if (window._ol.eventSource) window._ol.eventSource.close();
+
+  window._ol.remoteSeq = 0;
 
   const room = window._ol.room;
   const es = NetworkService.createEventSource(room, window._ol.p);
