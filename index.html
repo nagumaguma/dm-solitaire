@@ -951,7 +951,17 @@
       gap: 10px;
       height: 100vh;
       padding: 10px;
-      background: #f2f4f1;
+      background: radial-gradient(circle at 50% -25%, rgba(202,156,86,0.22) 0%, rgba(20,34,50,0.04) 48%), linear-gradient(130deg, #e9e4d7 0%, #efe9dd 48%, #e6dfd1 100%);
+    }
+
+    .dl-root-unified {
+      grid-template-columns: 270px 320px 1fr;
+    }
+
+    .dl-name-panel,
+    .dl-list-panel,
+    .dl-editor-panel {
+      min-height: 0;
     }
 
     .dl-root-focus {
@@ -977,8 +987,26 @@
       justify-content: space-between;
       align-items: flex-start;
       gap: 12px;
-      border-bottom: 1px solid #dbe3dc;
+      border-bottom: 1px solid #d8ccb7;
       padding-bottom: 10px;
+    }
+
+    .dl-focus-head.compact {
+      margin-bottom: 8px;
+      align-items: center;
+    }
+
+    .dl-name-summary {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.78rem;
+      color: #6f5338;
+      background: rgba(255, 255, 255, 0.66);
+      border: 1px solid rgba(162,129,95,0.25);
+      border-radius: 999px;
+      padding: 5px 10px;
+      white-space: nowrap;
     }
 
     .dl-focus-copy {
@@ -988,13 +1016,13 @@
     .dl-focus-title {
       margin: 0;
       font-size: 1.18rem;
-      color: #30463a;
+      color: #3f2b1b;
       letter-spacing: 0.02em;
     }
 
     .dl-focus-sub {
       margin: 6px 0 0;
-      color: #5d7268;
+      color: #70563c;
       font-size: 0.88rem;
       line-height: 1.45;
     }
@@ -1008,12 +1036,36 @@
     }
 
     .dl-panel {
-      background: #fafbf9;
+      background: linear-gradient(180deg, rgba(255,249,236,0.94) 0%, rgba(252,246,236,0.92) 100%);
       border-radius: 10px;
       padding: 12px;
       overflow-y: auto;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-      border: 1px solid #e0e5e0;
+      box-shadow: 0 6px 16px rgba(63,43,27,0.08);
+      border: 1px solid rgba(168,132,96,0.34);
+    }
+
+    .dl-search-panel,
+    .dl-list-panel,
+    .dl-editor-panel {
+      min-height: 0;
+    }
+
+    .dl-editor-panel {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .dl-editor-tools {
+      display: grid;
+      grid-template-columns: 1fr repeat(4, auto);
+      gap: 8px;
+      margin-bottom: 10px;
+      align-items: center;
+    }
+
+    .dl-select {
+      margin-bottom: 0;
+      min-width: 220px;
     }
 
     .dl-game-panel {
@@ -1023,7 +1075,7 @@
     .dl-heading {
       margin-bottom: 10px;
       font-size: 0.95rem;
-      color: #3d4a44;
+      color: #4c3421;
     }
 
     .dl-heading-inline {
@@ -1033,11 +1085,11 @@
     .dl-input {
       width: 100%;
       padding: 8px;
-      border: 1px solid #e0e5e0;
+      border: 1px solid #d2c0a8;
       border-radius: 6px;
       margin-bottom: 10px;
-      background: #fff;
-      color: #3d4a44;
+      background: rgba(255,255,255,0.84);
+      color: #3b2a1a;
       font-size: 0.88rem;
     }
 
@@ -1072,28 +1124,42 @@
     }
 
     .dl-mini-btn-online {
-      background: #b37a4c;
+      background: linear-gradient(180deg, #1f74b3 0%, #124d7e 100%);
       color: #fff;
+      border: 1px solid rgba(17,75,120,0.7);
     }
 
     .dl-mini-btn-ghost {
       padding: 4px 8px;
       font-size: 0.75rem;
-      background: transparent;
-      color: #6b7b72;
-      border: 1px solid #e0e5e0;
+      background: rgba(255,255,255,0.6);
+      color: #6b4c30;
+      border: 1px solid rgba(155,120,83,0.38);
     }
 
     .dl-main-btn {
       width: 100%;
       padding: 10px;
-      background: #6b8f8a;
+      background: linear-gradient(180deg, #1f74b3 0%, #124d7e 100%);
       color: #fff;
       border: none;
       border-radius: 6px;
       cursor: pointer;
       margin-bottom: 10px;
       font-weight: 600;
+    }
+
+    .dl-editor-tools .dl-main-btn {
+      width: auto;
+      margin-bottom: 0;
+      padding: 8px 12px;
+      font-size: 0.78rem;
+    }
+
+    .dl-focus-tools .dl-main-btn {
+      width: auto;
+      margin-bottom: 0;
+      padding: 8px 14px;
     }
 
     .dl-game-board {
@@ -1106,34 +1172,40 @@
 
     .dl-deck-item {
       padding: 10px;
-      background: #f5f6f4;
-      border: 1px solid #e0e5e0;
+      background: rgba(255,255,255,0.66);
+      border: 1px solid rgba(161,130,97,0.3);
       border-radius: 6px;
       transition: all 0.15s;
     }
 
     .dl-deck-item:hover {
-      background: #eef1ef;
+      background: rgba(255,255,255,0.88);
+    }
+
+    .dl-deck-item.selected {
+      border-color: rgba(31,116,179,0.58);
+      box-shadow: inset 0 0 0 1px rgba(31,116,179,0.2);
+      background: rgba(224,239,251,0.62);
     }
 
     .dl-deck-item.cloud {
-      background: #f0f3f1;
-      border-color: #c5d4ce;
+      background: rgba(239,244,255,0.72);
+      border-color: rgba(92,124,167,0.35);
     }
 
     .dl-deck-item.cloud:hover {
-      background: #e8efe8;
+      background: rgba(235,244,255,0.95);
     }
 
     .dl-deck-name {
       font-weight: 600;
       font-size: 0.9rem;
-      color: #3d4a44;
+      color: #3e2b18;
     }
 
     .dl-deck-meta {
       font-size: 0.8rem;
-      color: #6b7b72;
+      color: #6b4c30;
       margin: 4px 0;
     }
 
@@ -1158,31 +1230,31 @@
       font-size: 0.8rem;
     }
 
-    .dl-item-btn.edit { background: #7a94a8; }
-    .dl-item-btn.play { background: #7a9a7a; }
-    .dl-item-btn.online { background: #6b8f8a; }
-    .dl-item-btn.delete { background: #a67c7c; }
+    .dl-item-btn.edit { background: #3d6b97; }
+    .dl-item-btn.play { background: #3e875f; }
+    .dl-item-btn.online { background: #24679d; }
+    .dl-item-btn.delete { background: #9c5f68; }
 
     .dl-search-item {
       padding: 8px;
-      background: #f5f6f4;
-      border: 1px solid #e0e5e0;
+      background: rgba(255,255,255,0.7);
+      border: 1px solid rgba(158,127,93,0.26);
       border-radius: 4px;
       font-size: 0.8rem;
       transition: all 0.15s;
     }
 
     .dl-search-item:hover {
-      background: #eef1ef;
+      background: rgba(255,255,255,0.94);
     }
 
     .dl-search-name {
       font-weight: 600;
-      color: #3d4a44;
+      color: #432f1d;
     }
 
     .dl-search-text {
-      color: #6b7b72;
+      color: #6e5238;
       font-size: 0.75rem;
       margin-top: 2px;
       line-height: 1.35;
@@ -1192,7 +1264,7 @@
       width: 100%;
       margin-top: 4px;
       padding: 4px;
-      background: #7a94a8;
+      background: #2f77af;
       color: #fff;
       border: none;
       border-radius: 3px;
@@ -1203,27 +1275,111 @@
     .dl-edit-summary {
       margin-bottom: 12px;
       padding: 10px;
-      background: #eef1ef;
+      background: rgba(255,248,232,0.72);
       border-radius: 6px;
+      border: 1px solid rgba(168,132,96,0.28);
     }
 
     .dl-edit-title {
       font-weight: 600;
       font-size: 0.9rem;
       margin-bottom: 6px;
-      color: #3d4a44;
+      color: #3f2b1b;
     }
 
     .dl-edit-stats {
       font-size: 0.8rem;
-      color: #6b7b72;
+      color: #6c4d31;
       line-height: 1.45;
+    }
+
+    .dl-editor-card-list {
+      flex: 1;
+      min-height: 180px;
+      max-height: 46vh;
+      overflow-y: auto;
+      padding-right: 4px;
+      margin-bottom: 10px;
+    }
+
+    .dl-empty-editor {
+      color: #6d5238;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      padding: 10px;
+      border: 1px dashed rgba(161,130,97,0.42);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.55);
+    }
+
+    .dl-card-grid-wrap {
+      margin-top: 10px;
+      border-top: 1px solid rgba(160,126,92,0.22);
+      padding-top: 10px;
+    }
+
+    .dl-card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+      gap: 8px;
+      max-height: 44vh;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .dl-grid-card {
+      position: relative;
+      border-radius: 8px;
+      border: 1px solid rgba(112,86,60,0.22);
+      background: rgba(255,255,255,0.74);
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(60,40,20,0.1);
+    }
+
+    .dl-grid-thumb {
+      width: 100%;
+      aspect-ratio: 0.72;
+      object-fit: cover;
+      display: block;
+      background: #ece5d8;
+    }
+
+    .dl-grid-thumb.placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #7b6146;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      background: linear-gradient(145deg, #efe7d9 0%, #dfd3bf 100%);
+    }
+
+    .dl-grid-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 3px 5px;
+      font-size: 0.64rem;
+      color: #503722;
+      background: rgba(248, 240, 226, 0.92);
+      border-top: 1px solid rgba(130,101,74,0.2);
+    }
+
+    .dl-grid-cost {
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .dl-grid-copy {
+      color: #6a5035;
+      font-weight: 600;
     }
 
     .dl-edit-card {
       padding: 8px;
-      background: #f5f6f4;
-      border: 1px solid #e0e5e0;
+      background: rgba(255,255,255,0.74);
+      border: 1px solid rgba(158,127,93,0.24);
       border-radius: 6px;
       display: flex;
       justify-content: space-between;
@@ -1239,13 +1395,13 @@
     .dl-edit-card-name {
       font-weight: 600;
       font-size: 0.85rem;
-      color: #3d4a44;
+      color: #432f1d;
       margin-bottom: 2px;
     }
 
     .dl-edit-card-text {
       font-size: 0.7rem;
-      color: #6b7b72;
+      color: #6e5238;
       line-height: 1.35;
       word-break: break-word;
     }
@@ -1268,15 +1424,15 @@
     }
 
     .dl-count-btn.minus,
-    .dl-count-btn.delete { background: #a67c7c; }
-    .dl-count-btn.plus { background: #7a9a7a; font-weight: 700; }
+    .dl-count-btn.delete { background: #9c5f68; }
+    .dl-count-btn.plus { background: #3e875f; font-weight: 700; }
 
     .dl-count-num {
       width: 24px;
       text-align: center;
       font-weight: 600;
       font-size: 0.9rem;
-      color: #3d4a44;
+      color: #3f2b1b;
     }
 
     .dl-civ-list {
@@ -1288,11 +1444,21 @@
 
     .dl-civ-item {
       padding: 8px;
-      background: #eef1ef;
+      background: rgba(255,255,255,0.68);
       border-radius: 4px;
       display: flex;
       justify-content: space-between;
-      color: #3d4a44;
+      color: #3f2b1b;
+      border: 1px solid rgba(158,127,93,0.22);
+    }
+
+    .dl-civ-empty {
+      color: #6f5338;
+      font-size: 0.84rem;
+      padding: 8px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.6);
+      border: 1px dashed rgba(158,127,93,0.32);
     }
 
     .dl-civ-name,
@@ -1316,11 +1482,56 @@
       font-weight: 600;
     }
 
-    .dl-side-btn.play { background: #7a9a7a; }
-    .dl-side-btn.save { background: #6b8f8a; }
-    .dl-side-btn.cloud { background: #4f7fa0; }
-    .dl-side-btn.back { background: #a67c7c; }
+    .dl-side-btn.play { background: #3e875f; }
+    .dl-side-btn.save { background: #24679d; }
+    .dl-side-btn.cloud { background: #3d6b97; }
+    .dl-side-btn.back { background: #6f5a44; }
     .dl-side-btn.disabled { background: #bcc7cf; cursor: not-allowed; opacity: 0.75; }
+
+    .dl-cloud-quick {
+      margin-top: 10px;
+      border-top: 1px solid rgba(160,126,92,0.24);
+      padding-top: 10px;
+    }
+
+    .dl-cloud-title {
+      font-size: 0.78rem;
+      color: #6d5238;
+      margin-bottom: 6px;
+    }
+
+    .dl-cloud-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .dl-cloud-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(93,126,165,0.25);
+      background: rgba(236,244,255,0.75);
+    }
+
+    .dl-cloud-name {
+      color: #2f425a;
+      font-size: 0.78rem;
+      font-weight: 600;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .dl-cloud-actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
 
     /* Desktop online lobby */
     .dol-root {
@@ -3030,6 +3241,23 @@
     @media (max-width: 1280px) {
       .dl-root {
         grid-template-columns: 230px 1fr 280px;
+      }
+
+      .dl-root-unified {
+        grid-template-columns: 220px 280px 1fr;
+      }
+
+      .dl-editor-tools {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .dl-editor-tools .dl-select {
+        grid-column: 1 / -1;
+      }
+
+      .dl-cloud-item {
+        flex-direction: column;
+        align-items: flex-start;
       }
 
       .dl-root-focus {

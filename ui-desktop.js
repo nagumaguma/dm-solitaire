@@ -177,6 +177,31 @@ function getDeckCardTotal(cards) {
     : 0;
 }
 
+function getDesktopCardCostValue(card) {
+  const n = Number(card?.cost);
+  return Number.isFinite(n) ? n : 999;
+}
+
+function sortDesktopDeckCards(cards) {
+  const next = Array.isArray(cards) ? [...cards] : [];
+  next.sort((a, b) => {
+    const costDiff = getDesktopCardCostValue(a) - getDesktopCardCostValue(b);
+    if (costDiff !== 0) return costDiff;
+
+    const countDiff = (Number(b?.count) || 1) - (Number(a?.count) || 1);
+    if (countDiff !== 0) return countDiff;
+
+    return String(a?.name || '').localeCompare(String(b?.name || ''), 'ja');
+  });
+  return next;
+}
+
+function sortCurrentDesktopDeckCards() {
+  const sorted = sortDesktopDeckCards(window._deckCards || []);
+  window._deckCards = sorted;
+  return sorted;
+}
+
 function getDesktopUserLabel(account) {
   if (!account) return '';
   if (account.isGuest) return `ゲスト (${account.username || 'Guest'})`;
@@ -421,16 +446,155 @@ function initDesktopUI() {
  */
 function renderDesktopDeckList() {
   const container = document.getElementById('app-desktop');
+  const savedDecks = getSavedDecks();
+  const localDeckNames = Object.keys(savedDecks);
   const account = AuthService.getCurrentAccount();
   const userLabel = getDesktopUserLabel(account);
+  const editingState = window.GameController
+    ? window.GameController.getDeckEditingState()
+    : { deckName: window._deckEditing, cards: window._deckCards };
+  let deckName = editingState.deckName;
+  let cards = Array.isArray(editingState.cards) ? editingState.cards : [];
+
+  if (deckName && !Object.prototype.hasOwnProperty.call(savedDecks, deckName)) {
+    deckName = null;
+    cards = [];
+    if (window.GameController) {
+      window.GameController.setDeckEditingState(null, []);
+    } else {
+      window._deckEditing = null;
+      window._deckCards = [];
+    }
+  }
+
+  const orderedCards = sortDesktopDeckCards(cards);
+  if (deckName) {
+    window._deckCards = orderedCards;
+  }
+
+  const cloudDeckNames = Array.isArray(window._serverDeckNames) ? window._serverDeckNames : [];
+  const canCloudSave = !!(account && !account.isGuest && account.pin);
+  const hasDeckSelected = !!deckName;
+
+  const cardCount = getDeckCardTotal(orderedCards);
+  const uniqueCount = orderedCards.length;
+  const civCounts = {};
+  orderedCards.forEach((card) => {
+    const civ = card?.civilization || card?.civ || 'multi';
+    civCounts[civ] = (civCounts[civ] || 0) + (card?.count || 1);
+  });
+
+  const nameListHtml = orderedCards.length
+    ? orderedCards.map((c, i) => `
+      <div class="dl-edit-card dl-name-row">
+        <div class="dl-edit-card-main">
+          <div class="dl-edit-card-name">${escapeHtml(c.name)}</div>
+          <div class="dl-edit-card-text">コスト ${escapeHtml(String(getDesktopCardCostValue(c)))} / ${escapeHtml(String(c.count || 1))}枚</div>
+        </div>
+        <div class="dl-count-controls">
+          <button type="button" data-dg-action="dec-card" data-idx="${i}" class="dl-count-btn minus">-</button>
+          <span class="dl-count-num">${c.count || 1}</span>
+          <button type="button" data-dg-action="inc-card" data-idx="${i}" class="dl-count-btn plus">+</button>
+          <button type="button" data-dg-action="remove-card" data-idx="${i}" class="dl-count-btn delete">削除</button>
+        </div>
+      </div>
+    `).join('')
+    : '<div class="dl-empty-editor">カードがありません。左から検索して追加できます。</div>';
+
+  const expandedCards = [];
+  orderedCards.forEach((card) => {
+    const copies = Math.max(1, Number(card?.count) || 1);
+    for (let i = 0; i < copies; i++) {
+      expandedCards.push({ card, copyIndex: i + 1, copies });
+    }
+  });
+
+  const gridHtml = expandedCards.length
+    ? expandedCards.map(({ card, copyIndex, copies }) => {
+      const cost = getDesktopCardCostValue(card);
+      const civClass = getDesktopCardCivClass(card);
+      const thumb = renderDesktopCardThumb(card, 'dl-grid-thumb');
+      return `
+        <div class="dl-grid-card ${civClass}" title="${escapeHtml(card?.name || '')}">
+          ${thumb}
+          <div class="dl-grid-meta">
+            <span class="dl-grid-cost">${escapeHtml(String(cost))}</span>
+            ${copies > 1 ? `<span class="dl-grid-copy">${copyIndex}/${copies}</span>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('')
+    : '<div class="dl-empty-editor">選択中デッキのカード画像がここに並びます。</div>';
+
+  const civListHtml = Object.keys(civCounts).length
+    ? Object.entries(civCounts).map(([civ, count]) => `
+      <div class="dl-civ-item">
+        <span class="dl-civ-name">${escapeHtml(getCivLabel(civ))}</span>
+        <strong class="dl-civ-count">${count}枚</strong>
+      </div>
+    `).join('')
+    : '<div class="dl-civ-empty">文明構成はまだありません</div>';
+
+  const deckOptionsHtml = localDeckNames.length
+    ? localDeckNames.map((name) => `
+      <option value="${escapeHtml(name)}" ${deckName === name ? 'selected' : ''}>${escapeHtml(name)}</option>
+    `).join('')
+    : '<option value="">デッキがありません</option>';
+
+  const cloudQuickHtml = cloudDeckNames.length
+    ? `
+      <div class="dl-cloud-quick">
+        <div class="dl-cloud-title">クラウドデッキ（プレイ専用）</div>
+        <div class="dl-cloud-list">
+          ${cloudDeckNames.map((name) => {
+            const encodedName = encodeURIComponent(name);
+            return `
+              <div class="dl-cloud-item">
+                <span class="dl-cloud-name">${escapeHtml(name)}</span>
+                <div class="dl-cloud-actions">
+                  <button type="button" data-dg-action="start-game" data-deck="${encodedName}" class="dl-mini-btn dl-mini-btn-online">一人回し</button>
+                  <button type="button" data-dg-action="open-online" data-deck="${encodedName}" class="dl-mini-btn dl-mini-btn-ghost">オンライン</button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `
+    : '';
   
   container.innerHTML = `
-    <div class="dl-root dl-root-focus">
-      <div class="dl-panel dl-panel-focus">
-        <div class="dl-focus-head">
+    <div class="dl-root dl-root-unified">
+      <div class="dl-panel dl-search-panel">
+        <h3 class="dl-heading">カード検索</h3>
+        <input type="text" id="desktop-search-input" placeholder="カード名..." value="${escapeHtml(_desktopSearchState.query || '')}"
+          class="dl-input"
+          onkeyup="onDesktopSearchInput(this.value)">
+        <div id="desktop-search-results" class="dl-stack dl-stack-tight"></div>
+      </div>
+
+      <div class="dl-panel dl-list-panel">
+        <div class="dl-focus-head compact">
           <div class="dl-focus-copy">
-            <h2 class="dl-focus-title">デッキを選択</h2>
-            <p class="dl-focus-sub">ログイン直後はデッキ選択だけに集中。カード検索は編集画面で表示されます。</p>
+            <h2 class="dl-focus-title">ネームリスト</h2>
+            <p class="dl-focus-sub">ここで枚数を素早く調整できます。</p>
+          </div>
+          <div class="dl-name-summary">
+            <span>合計 ${cardCount}枚</span>
+            <span>ユニーク ${uniqueCount}</span>
+          </div>
+        </div>
+
+        <div id="desktop-name-list" class="dl-stack dl-stack-tight dl-editor-card-list">
+          ${hasDeckSelected ? nameListHtml : '<div class="dl-empty-editor">右パネルでデッキを選択するとカード名リストが表示されます。</div>'}
+        </div>
+      </div>
+
+      <div class="dl-panel dl-editor-panel">
+        <div class="dl-focus-head compact">
+          <div class="dl-focus-copy">
+            <h2 class="dl-focus-title">デッキ管理</h2>
+            <p class="dl-focus-sub">カードはコスト→枚数順で自動整列します。</p>
           </div>
           <div class="dl-inline-actions">
             <button type="button" onclick="renderDesktopOnlineLobby()" class="dl-mini-btn dl-mini-btn-online">オンライン対戦</button>
@@ -438,71 +602,101 @@ function renderDesktopDeckList() {
           </div>
         </div>
 
-        <div class="dl-focus-tools">
-          ${userLabel ? `<div class="dl-user-badge">${escapeHtml(userLabel)}</div>` : ''}
-          <button onclick="newDesktopDeck()" class="dl-main-btn">新規デッキ</button>
+        <div class="dl-editor-tools">
+          <select id="desktop-deck-select" class="dl-input dl-select" onchange="onDesktopDeckSelectChange(this.value)">
+            <option value="">デッキを選択</option>
+            ${deckOptionsHtml}
+          </select>
+          <button onclick="newDesktopDeck()" class="dl-main-btn">新規</button>
+          <button onclick="saveDesktopDeck()" ${hasDeckSelected ? '' : 'disabled'} class="dl-main-btn">保存</button>
+          <button onclick="saveDesktopDeckToCloud()" ${hasDeckSelected && canCloudSave ? '' : 'disabled'} class="dl-main-btn ${hasDeckSelected && canCloudSave ? '' : 'disabled'}">クラウド保存</button>
+          <button onclick="deleteSelectedDesktopDeck()" ${hasDeckSelected ? '' : 'disabled'} class="dl-main-btn">削除</button>
         </div>
 
-        <div id="desktop-deck-list" class="dl-stack"></div>
+        ${deckName ? `
+          <div class="dl-edit-summary">
+            <div class="dl-edit-title">${escapeHtml(deckName)}</div>
+            <div class="dl-edit-stats">
+              <div>カード枚数: <strong>${cardCount}</strong> / 40</div>
+              <div>ユニーク: <strong>${uniqueCount}</strong></div>
+            </div>
+          </div>
+
+          <h3 class="dl-heading">文明構成</h3>
+          <div class="dl-civ-list">
+            ${civListHtml}
+          </div>
+
+          <div class="dl-side-actions">
+            <button onclick="playDesktopDeckGame()" class="dl-side-btn play">一人回しを開始</button>
+            <button onclick="openSelectedDesktopDeckOnline()" class="dl-side-btn save">このデッキでオンライン</button>
+            <button onclick="clearDesktopDeckSelection()" class="dl-side-btn back">選択を解除</button>
+          </div>
+
+          <div class="dl-card-grid-wrap">
+            <h3 class="dl-heading">カード画像プレビュー</h3>
+            <div id="desktop-card-grid" class="dl-card-grid">
+              ${gridHtml}
+            </div>
+          </div>
+        ` : `
+          <div class="dl-edit-summary">
+            <div class="dl-edit-title">デッキ管理</div>
+            <div class="dl-edit-stats">デッキを選択すると、中央にネームリスト、右下にカード画像グリッドが表示されます。</div>
+          </div>
+          <div class="dl-empty-editor">まずは左のリストから編集するデッキを選択してください。</div>
+        `}
+
+        ${cloudQuickHtml}
       </div>
     </div>
   `;
-  
-  updateDesktopDeckList();
+
+  if (_desktopSearchState.query) {
+    renderDesktopSearchResults();
+  }
 }
 
 /**
  * デッキ一覧を更新
  */
 function updateDesktopDeckList() {
-  // ローカルデッキ読み込み
-  const savedDecks = getSavedDecks();
-  const account = AuthService.getCurrentAccount();
-  
-  const deckList = document.getElementById('desktop-deck-list');
-  deckList.innerHTML = '';
-  
-  // ローカルデッキ
-  for (const [name, cards] of Object.entries(savedDecks)) {
-    const count = getDeckCardTotal(cards);
-    const civDots = renderDesktopDeckCivDots(cards);
-    const encodedName = encodeURIComponent(name);
-    const el = document.createElement('div');
-    el.className = 'dl-deck-item';
-    el.innerHTML = `
-      <div class="dl-deck-name">${escapeHtml(name)}</div>
-      <div class="dl-deck-meta">デッキ: ${count}枚</div>
-      <div class="dl-civ-dots" title="文明構成">${civDots}</div>
-      <div class="dl-item-actions">
-        <button type="button" data-dg-action="open-deck" data-deck="${encodedName}" class="dl-item-btn edit">編集</button>
-        <button type="button" data-dg-action="start-game" data-deck="${encodedName}" class="dl-item-btn play">一人回し</button>
-        <button type="button" data-dg-action="open-online" data-deck="${encodedName}" class="dl-item-btn online">オンライン</button>
-        <button type="button" data-dg-action="delete-deck" data-deck="${encodedName}" class="dl-item-btn delete">削除</button>
-      </div>
-    `;
-    deckList.appendChild(el);
-  }
-  
-  // サーバーデッキ
-  if (account && !account.isGuest && account.pin && window._serverDeckNames) {
-    for (const name of window._serverDeckNames) {
-      const encodedName = encodeURIComponent(name);
-      const el = document.createElement('div');
-      el.className = 'dl-deck-item cloud';
-      el.innerHTML = `
-        <div class="dl-deck-name">クラウド: ${escapeHtml(name)}</div>
-        <div class="dl-item-actions dl-item-actions-cloud">
-          <button type="button" data-dg-action="start-game" data-deck="${encodedName}" class="dl-item-btn play">一人回し</button>
-          <button type="button" data-dg-action="open-online" data-deck="${encodedName}" class="dl-item-btn online">オンライン</button>
-        </div>
-      `;
-      deckList.appendChild(el);
-    }
-  }
+  renderDesktopDeckList();
+}
 
-  if (!deckList.children.length) {
-    deckList.innerHTML = '<div class="dl-empty-decks">デッキがありません。まずは新規デッキを作成してください。</div>';
+function onDesktopDeckSelectChange(name) {
+  const deckName = String(name || '').trim();
+  if (!deckName) {
+    clearDesktopDeckSelection();
+    return;
   }
+  openDesktopDeck(deckName);
+}
+
+function deleteSelectedDesktopDeck() {
+  if (!window._deckEditing) {
+    showDesktopToast('先に編集するデッキを選択してください', 'warn');
+    return;
+  }
+  deleteDesktopDeck(window._deckEditing);
+}
+
+function openSelectedDesktopDeckOnline() {
+  if (!window._deckEditing) {
+    showDesktopToast('先に編集するデッキを選択してください', 'warn');
+    return;
+  }
+  openDesktopOnlineWithDeck(window._deckEditing);
+}
+
+function clearDesktopDeckSelection() {
+  if (window.GameController) {
+    window.GameController.setDeckEditingState(null, []);
+  } else {
+    window._deckEditing = null;
+    window._deckCards = [];
+  }
+  renderDesktopDeckList();
 }
 
 /**
@@ -1051,10 +1245,13 @@ function newDesktopDeck() {
   decks[name] = [];
   if (window.GameController) {
     window.GameController.saveSavedDecks(decks);
+    window.GameController.setDeckEditingState(name, []);
   } else {
     localStorage.setItem('dm_decks', JSON.stringify(decks));
+    window._deckEditing = name;
+    window._deckCards = [];
   }
-  updateDesktopDeckList();
+  renderDesktopDeckList();
 }
 
 async function deleteDesktopDeck(name) {
@@ -1065,99 +1262,25 @@ async function deleteDesktopDeck(name) {
   delete decks[name];
   if (window.GameController) {
     window.GameController.saveSavedDecks(decks);
+    if (window._deckEditing === name) {
+      window.GameController.setDeckEditingState(null, []);
+    }
   } else {
     localStorage.setItem('dm_decks', JSON.stringify(decks));
+    if (window._deckEditing === name) {
+      window._deckEditing = null;
+      window._deckCards = [];
+    }
   }
   showDesktopToast('デッキを削除しました', 'ok');
-  updateDesktopDeckList();
+  renderDesktopDeckList();
 }
 
 /**
  * PC版 デッキ編集画面
  */
 function renderDesktopDeckEdit() {
-  const container = document.getElementById('app-desktop');
-  const editingState = window.GameController
-    ? window.GameController.getDeckEditingState()
-    : { deckName: window._deckEditing, cards: window._deckCards };
-  const deckName = editingState.deckName;
-  const cards = editingState.cards;
-  const account = AuthService.getCurrentAccount();
-  const canCloudSave = !!(account && !account.isGuest && account.pin);
-  
-  // カード統計
-  const cardCount = cards.reduce((sum, c) => sum + (c.count || 1), 0);
-  const uniqueCount = cards.length;
-  
-  // 文明別集計
-  const civCounts = {};
-  cards.forEach(c => {
-    const civ = c.civilization || 'multi';
-    civCounts[civ] = (civCounts[civ] || 0) + (c.count || 1);
-  });
-  
-  container.innerHTML = `
-    <div class="dl-root">
-      
-      <!-- 左: カード検索パネル -->
-      <div class="dl-panel">
-        <h3 class="dl-heading">カード検索</h3>
-        <input type="text" id="desktop-search-input" placeholder="カード名..." 
-          class="dl-input"
-          onkeyup="onDesktopSearchInput(this.value)">
-        <div id="desktop-search-results" class="dl-stack dl-stack-tight"></div>
-      </div>
-      
-      <!-- 中央: デッキ構成 -->
-      <div class="dl-panel">
-        <div class="dl-edit-summary">
-          <div class="dl-edit-title">${escapeHtml(deckName)}</div>
-          <div class="dl-edit-stats">
-            <div>カード枚数: <strong>${cardCount}</strong> / 40</div>
-            <div>🎴 ユニーク: <strong>${uniqueCount}</strong></div>
-          </div>
-        </div>
-        
-        <div id="desktop-deck-cards" class="dl-stack dl-stack-tight">
-          ${cards.map((c, i) => `
-            <div class="dl-edit-card">
-              <div class="dl-edit-card-main">
-                <div class="dl-edit-card-name">${escapeHtml(c.name)}</div>
-                <div class="dl-edit-card-text">${escapeHtml(c.text || '')}</div>
-              </div>
-              <div class="dl-count-controls">
-                <button type="button" data-dg-action="dec-card" data-idx="${i}" class="dl-count-btn minus">−</button>
-                <span class="dl-count-num">${c.count || 1}</span>
-                <button type="button" data-dg-action="inc-card" data-idx="${i}" class="dl-count-btn plus">+</button>
-                <button type="button" data-dg-action="remove-card" data-idx="${i}" class="dl-count-btn delete">削除</button>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-      
-      <!-- 右: デッキ情報 -->
-      <div class="dl-panel">
-        <h3 class="dl-heading">文明構成</h3>
-        <div class="dl-civ-list">
-          ${Object.entries(civCounts).map(([civ, count]) => `
-            <div class="dl-civ-item">
-              <span class="dl-civ-name">${escapeHtml(getCivLabel(civ))}</span>
-              <strong class="dl-civ-count">${count}枚</strong>
-            </div>
-          `).join('')}
-        </div>
-        
-        <div class="dl-side-actions">
-          <button onclick="playDesktopDeckGame()" class="dl-side-btn play">一人回しを開始</button>
-          <button onclick="saveDesktopDeck()" class="dl-side-btn save">💾 保存</button>
-          <button onclick="saveDesktopDeckToCloud()" ${canCloudSave ? '' : 'disabled'} class="dl-side-btn cloud ${canCloudSave ? '' : 'disabled'}">☁ クラウドに保存</button>
-          <button onclick="renderDesktopDeckList()" class="dl-side-btn back">← 戻る</button>
-        </div>
-      </div>
-      
-    </div>
-  `;
+  renderDesktopDeckList();
 }
 
 /**
@@ -1168,19 +1291,25 @@ function openDesktopDeck(name) {
   const cards = savedDecks[name]
     ? JSON.parse(JSON.stringify(savedDecks[name])).map(card => NetworkService.normalizeCardData(card))
     : [];
+  const sortedCards = sortDesktopDeckCards(cards);
   if (window.GameController) {
-    window.GameController.setDeckEditingState(name, cards);
+    window.GameController.setDeckEditingState(name, sortedCards);
   } else {
     window._deckEditing = name;
-    window._deckCards = cards;
+    window._deckCards = sortedCards;
   }
-  renderDesktopDeckEdit();
+  renderDesktopDeckList();
 }
 
 /**
  * カード枚数増加
  */
 function incrementDesktopCardCount(idx) {
+  if (!window._deckEditing) {
+    showDesktopToast('先に編集するデッキを選択してください', 'warn');
+    return;
+  }
+
   if (window.GameController) {
     const next = window.GameController.changeDeckCardCount(window._deckCards, idx, 1, 1, 4);
     window._deckCards = next;
@@ -1190,13 +1319,19 @@ function incrementDesktopCardCount(idx) {
     card.count = (card.count || 1) + 1;
     if (card.count > 4) card.count = 4;
   }
-  renderDesktopDeckEdit();
+  sortCurrentDesktopDeckCards();
+  renderDesktopDeckList();
 }
 
 /**
  * カード枚数減少
  */
 function decrementDesktopCardCount(idx) {
+  if (!window._deckEditing) {
+    showDesktopToast('先に編集するデッキを選択してください', 'warn');
+    return;
+  }
+
   if (window.GameController) {
     const next = window.GameController.changeDeckCardCount(window._deckCards, idx, -1, 1, 4);
     window._deckCards = next;
@@ -1208,19 +1343,26 @@ function decrementDesktopCardCount(idx) {
       window._deckCards.splice(idx, 1);
     }
   }
-  renderDesktopDeckEdit();
+  sortCurrentDesktopDeckCards();
+  renderDesktopDeckList();
 }
 
 /**
  * カード削除
  */
 function removeDesktopCard(idx) {
+  if (!window._deckEditing) {
+    showDesktopToast('先に編集するデッキを選択してください', 'warn');
+    return;
+  }
+
   if (window.GameController) {
     window._deckCards = window.GameController.removeDeckCard(window._deckCards, idx);
   } else {
     window._deckCards.splice(idx, 1);
   }
-  renderDesktopDeckEdit();
+  sortCurrentDesktopDeckCards();
+  renderDesktopDeckList();
 }
 
 /**
@@ -1228,6 +1370,11 @@ function removeDesktopCard(idx) {
  */
 async function addToDesktopDeck(cardJson) {
   try {
+    if (!window._deckEditing) {
+      showDesktopToast('先に編集するデッキを選択してください', 'warn');
+      return;
+    }
+
     const rawCard = JSON.parse(cardJson);
     const card = await NetworkService.enrichCardImage(rawCard);
     const normalized = NetworkService.normalizeCardData(card);
@@ -1254,7 +1401,8 @@ async function addToDesktopDeck(cardJson) {
       window._deckCards.push({ ...normalized, count: 1 });
     }
 
-    renderDesktopDeckEdit();
+    sortCurrentDesktopDeckCards();
+    renderDesktopDeckList();
   } catch (e) {
     console.error('カード追加エラー:', e);
   }
@@ -1264,6 +1412,11 @@ async function addToDesktopDeck(cardJson) {
  * デッキ保存
  */
 async function saveDesktopDeck() {
+  if (!window._deckEditing) {
+    showDesktopToast('先に編集するデッキを選択してください', 'warn');
+    return;
+  }
+
   const total = window.GameController
     ? window.GameController.countDeckCards(window._deckCards)
     : getDeckCardTotal(window._deckCards);
@@ -1284,9 +1437,15 @@ async function saveDesktopDeck() {
     localStorage.setItem('dm_decks', JSON.stringify(decks));
   }
   showDesktopToast('デッキを保存しました', 'ok');
+  renderDesktopDeckList();
 }
 
 async function saveDesktopDeckToCloud() {
+  if (!window._deckEditing) {
+    showDesktopToast('先に編集するデッキを選択してください', 'warn');
+    return;
+  }
+
   const account = AuthService.getCurrentAccount();
   if (!account || account.isGuest || !account.pin) {
     showDesktopToast('クラウド保存にはPINログインが必要です', 'warn');
@@ -1310,6 +1469,7 @@ async function saveDesktopDeckToCloud() {
     window._serverDeckNames = names;
   }
   showDesktopToast('クラウドに保存しました', 'ok');
+  renderDesktopDeckList();
 }
 
 /**
