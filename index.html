@@ -2340,6 +2340,38 @@
     }
 
     /* Shared card visuals */
+    .dg-card-chip,
+    .mg-card-chip {
+      overflow: hidden;
+      position: relative;
+    }
+
+    .dg-card-chip.has-image,
+    .mg-card-chip.has-image {
+      padding: 0;
+    }
+
+    .dg-card-chip-img,
+    .mg-card-chip-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      border-radius: inherit;
+    }
+
+    .dg-card-chip-img.placeholder,
+    .mg-card-chip-img.placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.58rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      color: #5e5347;
+      background: linear-gradient(145deg, #efe7d9 0%, #ddd2bf 100%);
+    }
+
     .dg-card-chip.fire,
     .mg-card-chip.fire { border-color: #d16f44; background: linear-gradient(160deg, #fff2ea 0%, #f9d8c7 100%); }
     .dg-card-chip.water,

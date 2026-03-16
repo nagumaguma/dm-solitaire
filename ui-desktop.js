@@ -12,8 +12,6 @@ let _desktopSearchDebounceTimer = null;
 let _desktopSearchController = null;
 let _desktopDelegatedEventsBound = false;
 let _desktopDeckHydrateToken = 0;
-let _desktopSearchHydrateToken = 0;
-const _desktopSearchHydrateInFlight = new Set();
 const _desktopSearchHydrateNoImage = new Set();
 let _desktopSearchState = {
   query: '',
@@ -289,55 +287,33 @@ function getDesktopSearchHydrateKey(card) {
   return normalized;
 }
 
-async function hydrateDesktopSearchImages() {
-  const token = ++_desktopSearchHydrateToken;
-  const baseItems = Array.isArray(_desktopSearchState.items) ? _desktopSearchState.items : [];
-  if (!baseItems.length) return;
+async function hydrateDesktopSearchCards(items) {
+  const sourceItems = Array.isArray(items) ? items : [];
+  if (!sourceItems.length) return [];
 
-  const resolved = await Promise.all(baseItems.map(async (card, idx) => {
-    if (getDesktopCardImageUrl(card)) return null;
+  const hydrated = await Promise.all(sourceItems.map(async (card) => {
+    const normalizedCard = NetworkService.normalizeCardData(card);
+    if (getDesktopCardImageUrl(normalizedCard)) return normalizedCard;
 
-    const key = getDesktopSearchHydrateKey(card);
-    if (!key) return null;
-    if (_desktopSearchHydrateNoImage.has(key)) return null;
-    if (_desktopSearchHydrateInFlight.has(key)) return null;
+    const key = getDesktopSearchHydrateKey(normalizedCard);
+    if (key && _desktopSearchHydrateNoImage.has(key)) {
+      return normalizedCard;
+    }
 
-    _desktopSearchHydrateInFlight.add(key);
     try {
-      const enriched = await NetworkService.enrichCardImage(card);
+      const enriched = await NetworkService.enrichCardImage(normalizedCard);
       const normalized = NetworkService.normalizeCardData(enriched);
-      if (!getDesktopCardImageUrl(normalized)) {
+      if (!getDesktopCardImageUrl(normalized) && key) {
         _desktopSearchHydrateNoImage.add(key);
-        return null;
       }
-      return { idx, card: normalized };
+      return normalized;
     } catch {
-      return null;
-    } finally {
-      _desktopSearchHydrateInFlight.delete(key);
+      if (key) _desktopSearchHydrateNoImage.add(key);
+      return normalizedCard;
     }
   }));
 
-  if (token !== _desktopSearchHydrateToken) return;
-
-  let changed = false;
-  const next = [...(_desktopSearchState.items || [])];
-  for (const hit of resolved) {
-    if (!hit) continue;
-    if (!next[hit.idx]) continue;
-    if (getDesktopCardImageUrl(next[hit.idx])) continue;
-
-    next[hit.idx] = NetworkService.normalizeCardData({
-      ...next[hit.idx],
-      ...hit.card
-    });
-    changed = true;
-  }
-
-  if (!changed) return;
-
-  _desktopSearchState.items = next;
-  renderDesktopSearchResults();
+  return hydrated;
 }
 
 async function desktopSearchMore() {
@@ -417,6 +393,62 @@ function renderDesktopBackCards(count, palette = 'default') {
   }
 
   return `<div class="dg-back-cards">${cards}${rest}</div>`;
+}
+
+function normalizeDesktopPublicCards(cards) {
+  if (!Array.isArray(cards)) return [];
+  return cards.map((card) => NetworkService.normalizeCardData(card));
+}
+
+function normalizeDesktopPublicZone(zone) {
+  if (Array.isArray(zone)) return normalizeDesktopPublicCards(zone);
+  return Math.max(0, Number(zone) || 0);
+}
+
+function normalizeDesktopOpponentState(rawState) {
+  const src = rawState && typeof rawState === 'object' ? rawState : {};
+  return {
+    hand: Math.max(0, Number(src.hand) || 0),
+    deck: Math.max(0, Number(src.deck) || 0),
+    shields: Math.max(0, Number(src.shields) || 0),
+    battleZone: normalizeDesktopPublicZone(src.battleZone),
+    manaZone: normalizeDesktopPublicZone(src.manaZone),
+    graveyard: normalizeDesktopPublicZone(src.graveyard)
+  };
+}
+
+function serializeDesktopPublicCards(cards) {
+  if (!Array.isArray(cards)) return [];
+  return cards.map((card) => {
+    const name = String(card?.name || card?.nameEn || '').trim();
+    const cost = card?.cost ?? '';
+    const power = String(card?.power || '').trim();
+    const civilization = String(card?.civilization || card?.civ || '').trim();
+    const imageUrl = String(card?.imageUrl || card?.img || card?.thumb || '').trim();
+
+    return {
+      name,
+      cost,
+      power,
+      civilization,
+      civ: civilization,
+      imageUrl,
+      img: imageUrl,
+      thumb: imageUrl,
+      tapped: !!card?.tapped
+    };
+  });
+}
+
+function buildDesktopPublicState(state) {
+  return {
+    hand: state.hand.length,
+    deck: state.deck.length,
+    shields: state.shields.length,
+    battleZone: serializeDesktopPublicCards(state.battleZone),
+    manaZone: serializeDesktopPublicCards(state.manaZone),
+    graveyard: serializeDesktopPublicCards(state.graveyard)
+  };
 }
 
 function showDesktopTurnNotification(message) {
@@ -513,6 +545,7 @@ function initDesktopUI() {
   if (window.GameController) {
     _desktopSearchController = window.GameController.createSearchController({
       searchFn: (keyword, page) => NetworkService.searchCards(keyword, page),
+      transformPage: (items) => hydrateDesktopSearchCards(items),
       pageSize: 20
     });
   }
@@ -742,7 +775,6 @@ async function desktopSearchCards(q, append = false) {
     const keyword = String(q || '').trim();
     if (!keyword) {
       _desktopSearchState = { query: '', page: 0, items: [], hasMore: false, loading: false };
-      _desktopSearchHydrateToken += 1;
       const resultsEl = document.getElementById('desktop-search-results');
       if (resultsEl) resultsEl.innerHTML = '';
       return;
@@ -758,24 +790,25 @@ async function desktopSearchCards(q, append = false) {
     try {
       const results = await NetworkService.searchCards(keyword, nextPage);
       const pageItems = Array.isArray(results) ? results.slice(0, 20) : [];
+      const hydratedItems = await hydrateDesktopSearchCards(pageItems);
       _desktopSearchState.query = keyword;
       _desktopSearchState.page = nextPage;
       _desktopSearchState.items = append
-        ? [..._desktopSearchState.items, ...pageItems]
-        : pageItems;
+        ? [..._desktopSearchState.items, ...hydratedItems]
+        : hydratedItems;
       _desktopSearchState.hasMore = pageItems.length >= 20;
     } finally {
       _desktopSearchState.loading = false;
     }
 
     renderDesktopSearchResults();
-    hydrateDesktopSearchImages();
     return;
   }
 
   if (!_desktopSearchController) {
     _desktopSearchController = window.GameController.createSearchController({
       searchFn: (keyword, page) => NetworkService.searchCards(keyword, page),
+      transformPage: (items) => hydrateDesktopSearchCards(items),
       pageSize: 20
     });
   }
@@ -785,14 +818,12 @@ async function desktopSearchCards(q, append = false) {
     : await _desktopSearchController.search(q);
 
   if (!_desktopSearchState.query) {
-    _desktopSearchHydrateToken += 1;
     const resultsEl = document.getElementById('desktop-search-results');
     if (resultsEl) resultsEl.innerHTML = '';
     return;
   }
 
   renderDesktopSearchResults();
-  hydrateDesktopSearchImages();
 }
 
 /**
@@ -850,23 +881,47 @@ function renderDesktopGame() {
     ? 'シールド破壊'
     : `シールド破壊 (${_desktopSelectedShieldIdx + 1})`;
 
+  const getZoneCount = (zone) => Array.isArray(zone) ? zone.length : Math.max(0, Number(zone) || 0);
+
+  const renderOpponentPublicZone = (zone, zoneClass) => {
+    if (!Array.isArray(zone)) {
+      return renderDesktopBackCards(getZoneCount(zone));
+    }
+
+    if (!zone.length) {
+      return '<div class="dg-back-empty">0</div>';
+    }
+
+    const visibleLimit = zoneClass === 'grave' ? 10 : 12;
+    const visibleCards = zoneClass === 'grave' ? zone.slice(-visibleLimit) : zone.slice(0, visibleLimit);
+    const chips = visibleCards.map((card) => renderChip(card, zoneClass, -1, 'opponent')).join('');
+    const rest = zone.length > visibleCards.length
+      ? `<div class="dg-more-chip">+${zone.length - visibleCards.length}</div>`
+      : '';
+
+    return `<div class="dg-back-cards">${chips}${rest}</div>`;
+  };
+
   const renderChip = (card, zoneClass, idx = -1, extra = '') => {
     const civ = getDesktopCardCivClass(card);
     const tapped = card?.tapped ? 'tapped' : '';
     const cost = Number.isFinite(Number(card?.cost)) ? Number(card.cost) : '-';
     const power = card?.power ? String(card.power) : '';
     const shortName = getDesktopCardShortName(card?.name || '', 8);
+    const imageUrl = getDesktopCardImageUrl(card);
 
     return `
-      <div class="dg-card-chip ${zoneClass} ${civ} ${tapped} ${extra}"
+      <div class="dg-card-chip ${zoneClass} ${civ} ${tapped} ${extra} ${imageUrl ? 'has-image' : ''}"
         title="${escapeHtml(card?.name || '')}"
         onmouseenter="showDesktopCardPreview(event, -1, '${escapeAttrJs(JSON.stringify(card))}')"
         onmouseleave="hideDesktopCardPreview()"
         ${idx >= 0 && zoneClass === 'battle' ? `onclick="tapDesktopCard('battleZone', ${idx})"` : ''}
         ${idx >= 0 && zoneClass === 'mana' ? `onclick="tapDesktopCard('manaZone', ${idx})"` : ''}>
-        <div class="dg-card-cost">${escapeHtml(String(cost))}</div>
+        ${imageUrl
+          ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(card?.name || 'CARD')}" class="dg-card-chip-img" loading="lazy" decoding="async" onerror="handleDesktopCardImageError(this)">`
+          : `<div class="dg-card-cost">${escapeHtml(String(cost))}</div>
         <div class="dg-card-name">${escapeHtml(shortName)}</div>
-        <div class="dg-card-power">${escapeHtml(power)}</div>
+        <div class="dg-card-power">${escapeHtml(power)}</div>`}
       </div>
     `;
   };
@@ -905,17 +960,17 @@ function renderDesktopGame() {
                 ${renderDesktopBackCards(Number(opp.shields ?? 0), 'shield')}
               </div>
               <div class="dg-opp-panel">
-                <div class="dg-opp-label">バトル (${Number(opp.battleZone ?? 0)})</div>
-                ${renderDesktopBackCards(Number(opp.battleZone ?? 0))}
+                <div class="dg-opp-label">バトル (${getZoneCount(opp.battleZone)})</div>
+                ${renderOpponentPublicZone(opp.battleZone, 'battle')}
               </div>
               <div class="dg-opp-panel">
-                <div class="dg-opp-label">マナ (${Number(opp.manaZone ?? 0)})</div>
-                ${renderDesktopBackCards(Number(opp.manaZone ?? 0))}
+                <div class="dg-opp-label">マナ (${getZoneCount(opp.manaZone)})</div>
+                ${renderOpponentPublicZone(opp.manaZone, 'mana')}
               </div>
             </div>
             <div class="dg-opp-panel dg-opp-grave">
-              <div class="dg-opp-label">墓地 (${Number(opp.graveyard ?? 0)})</div>
-              ${renderDesktopBackCards(Number(opp.graveyard ?? 0))}
+              <div class="dg-opp-label">墓地 (${getZoneCount(opp.graveyard)})</div>
+              ${renderOpponentPublicZone(opp.graveyard, 'grave')}
             </div>
           </div>` : ''}
 
@@ -932,17 +987,20 @@ function renderDesktopGame() {
                 const civ = getDesktopCardCivClass(c);
                 const cost = Number.isFinite(Number(c?.cost)) ? Number(c.cost) : '-';
                 const power = c?.power ? String(c.power) : '';
+                const imageUrl = getDesktopCardImageUrl(c);
                 return `
-                  <div class="dg-card-chip hand ${civ}" draggable="true"
+                  <div class="dg-card-chip hand ${civ} ${imageUrl ? 'has-image' : ''}" draggable="true"
                     onclick="playDesktopCard(${i}, 'battle')"
                     onmouseenter="showDesktopCardPreview(event, ${i})"
                     onmouseleave="hideDesktopCardPreview()"
                     ondragstart="dragDesktopCard(event, ${i})"
                     ondragend="dragDesktopCardEnd()"
                     title="${escapeHtml(c.name)}">
-                    <div class="dg-card-cost">${escapeHtml(String(cost))}</div>
+                    ${imageUrl
+                      ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(c.name || 'CARD')}" class="dg-card-chip-img" loading="lazy" decoding="async" onerror="handleDesktopCardImageError(this)">`
+                      : `<div class="dg-card-cost">${escapeHtml(String(cost))}</div>
                     <div class="dg-card-name">${escapeHtml(getDesktopCardShortName(c.name, 8))}</div>
-                    <div class="dg-card-power">${escapeHtml(power)}</div>
+                    <div class="dg-card-power">${escapeHtml(power)}</div>`}
                   </div>
                 `;
               }).join('') : '<div class="dg-zone-empty">カードなし</div>'}
@@ -2252,7 +2310,7 @@ function olStartEventListenerDesktop() {
     const wasMyTurn = window._olCurrentPlayer === myNum;
 
     if (data.turn) engine.state.turn = data.turn;
-    if (other) window._olOpponent = other;
+    if (other) window._olOpponent = normalizeDesktopOpponentState(other);
     if (data.active) window._olCurrentPlayer = data.active === 'p1' ? 1 : 2;
 
     const isMyTurn = window._olCurrentPlayer === myNum;
@@ -2273,10 +2331,12 @@ function olStartEventListenerDesktop() {
     window._ol.reconnectAttempt = 0;
     const data = JSON.parse(e.data);
     if (!shouldApplyRemotePayloadDesktop(data)) return;
+    const other = window._ol.p === 'p1' ? data.p2 : data.p1;
     const myNum = window._ol.p === 'p1' ? 1 : 2;
     const wasMyTurn = window._olCurrentPlayer === myNum;
 
     if (data.turn) engine.state.turn = data.turn;
+    if (other) window._olOpponent = normalizeDesktopOpponentState(other);
     if (data.active) {
       window._olCurrentPlayer = data.active === 'p1' ? 1 : 2;
     }
@@ -2362,6 +2422,7 @@ function olSendActionDesktop(actionType) {
 
   if (!window._ol || !engine) return;
   const s = engine.state;
+  const publicState = buildDesktopPublicState(s);
   const payload = {
     room: window._ol.room,
     p: window._ol.p,
@@ -2369,8 +2430,8 @@ function olSendActionDesktop(actionType) {
     seq: nextOnlineSeqDesktop(),
     turn: s.turn,
     active: actionType === 'turn_end' ? (window._ol.p === 'p1' ? 'p2' : 'p1') : window._ol.p,
-    p1: window._ol.p === 'p1' ? { hand: s.hand.length, battleZone: s.battleZone.length, manaZone: s.manaZone.length, shields: s.shields.length, deck: s.deck.length, graveyard: s.graveyard.length } : null,
-    p2: window._ol.p === 'p2' ? { hand: s.hand.length, battleZone: s.battleZone.length, manaZone: s.manaZone.length, shields: s.shields.length, deck: s.deck.length, graveyard: s.graveyard.length } : null
+    p1: window._ol.p === 'p1' ? publicState : null,
+    p2: window._ol.p === 'p2' ? publicState : null
   };
   NetworkService.sendAction(payload);
 }

@@ -13,8 +13,6 @@ let _mobileSearchDebounceTimer = null;
 let _mobileSearchController = null;
 let _mobileDelegatedEventsBound = false;
 let _mobileDeckHydrateToken = 0;
-let _mobileSearchHydrateToken = 0;
-const _mobileSearchHydrateInFlight = new Set();
 const _mobileSearchHydrateNoImage = new Set();
 let _mobileSearchState = { query: '', page: 0, items: [], hasMore: false, loading: false };
 
@@ -310,6 +308,62 @@ function renderMobileBackCards(count, palette = 'default') {
   return `<div class="mg-back-cards">${cards}${rest}</div>`;
 }
 
+function normalizeMobilePublicCards(cards) {
+  if (!Array.isArray(cards)) return [];
+  return cards.map((card) => NetworkService.normalizeCardData(card));
+}
+
+function normalizeMobilePublicZone(zone) {
+  if (Array.isArray(zone)) return normalizeMobilePublicCards(zone);
+  return Math.max(0, Number(zone) || 0);
+}
+
+function normalizeMobileOpponentState(rawState) {
+  const src = rawState && typeof rawState === 'object' ? rawState : {};
+  return {
+    hand: Math.max(0, Number(src.hand) || 0),
+    deck: Math.max(0, Number(src.deck) || 0),
+    shields: Math.max(0, Number(src.shields) || 0),
+    battleZone: normalizeMobilePublicZone(src.battleZone),
+    manaZone: normalizeMobilePublicZone(src.manaZone),
+    graveyard: normalizeMobilePublicZone(src.graveyard)
+  };
+}
+
+function serializeMobilePublicCards(cards) {
+  if (!Array.isArray(cards)) return [];
+  return cards.map((card) => {
+    const name = String(card?.name || card?.nameEn || '').trim();
+    const cost = card?.cost ?? '';
+    const power = String(card?.power || '').trim();
+    const civilization = String(card?.civilization || card?.civ || '').trim();
+    const imageUrl = String(card?.imageUrl || card?.img || card?.thumb || '').trim();
+
+    return {
+      name,
+      cost,
+      power,
+      civilization,
+      civ: civilization,
+      imageUrl,
+      img: imageUrl,
+      thumb: imageUrl,
+      tapped: !!card?.tapped
+    };
+  });
+}
+
+function buildMobilePublicState(state) {
+  return {
+    hand: state.hand.length,
+    deck: state.deck.length,
+    shields: state.shields.length,
+    battleZone: serializeMobilePublicCards(state.battleZone),
+    manaZone: serializeMobilePublicCards(state.manaZone),
+    graveyard: serializeMobilePublicCards(state.graveyard)
+  };
+}
+
 function showMobileTurnNotification(message) {
   let el = document.getElementById('mobile-turn-toast');
   if (!el) {
@@ -419,6 +473,7 @@ function initMobileUI() {
   if (window.GameController) {
     _mobileSearchController = window.GameController.createSearchController({
       searchFn: (keyword, page) => NetworkService.searchCards(keyword, page),
+      transformPage: (items) => hydrateMobileSearchCards(items),
       pageSize: 20
     });
   }
@@ -607,7 +662,6 @@ async function mobileSearchCards(q) {
 
     if (!keyword) {
       _mobileSearchState = { query: '', page: 0, items: [], hasMore: false, loading: false };
-      _mobileSearchHydrateToken += 1;
       container.innerHTML = '';
       return;
     }
@@ -621,22 +675,23 @@ async function mobileSearchCards(q) {
     try {
       const results = await NetworkService.searchCards(keyword, 1);
       const pageItems = Array.isArray(results) ? results.slice(0, 20) : [];
+      const hydratedItems = await hydrateMobileSearchCards(pageItems);
       _mobileSearchState.query = keyword;
       _mobileSearchState.page = 1;
-      _mobileSearchState.items = pageItems;
+      _mobileSearchState.items = hydratedItems;
       _mobileSearchState.hasMore = pageItems.length >= 20;
     } finally {
       _mobileSearchState.loading = false;
     }
 
     renderMobileSearchResults();
-    hydrateMobileSearchImages();
     return;
   }
 
   if (!_mobileSearchController) {
     _mobileSearchController = window.GameController.createSearchController({
       searchFn: (keyword, page) => NetworkService.searchCards(keyword, page),
+      transformPage: (items) => hydrateMobileSearchCards(items),
       pageSize: 20
     });
   }
@@ -647,13 +702,11 @@ async function mobileSearchCards(q) {
   _mobileSearchState = await _mobileSearchController.search(q);
 
   if (!_mobileSearchState.query) {
-    _mobileSearchHydrateToken += 1;
     container.innerHTML = '';
     return;
   }
 
   renderMobileSearchResults();
-  hydrateMobileSearchImages();
 }
 
 async function mobileSearchMore() {
@@ -664,14 +717,14 @@ async function mobileSearchMore() {
     try {
       const results = await NetworkService.searchCards(_mobileSearchState.query, nextPage);
       const pageItems = Array.isArray(results) ? results.slice(0, 20) : [];
+      const hydratedItems = await hydrateMobileSearchCards(pageItems);
       _mobileSearchState.page = nextPage;
-      _mobileSearchState.items = [..._mobileSearchState.items, ...pageItems];
+      _mobileSearchState.items = [..._mobileSearchState.items, ...hydratedItems];
       _mobileSearchState.hasMore = pageItems.length >= 20;
     } finally {
       _mobileSearchState.loading = false;
     }
     renderMobileSearchResults();
-    hydrateMobileSearchImages();
     return;
   }
 
@@ -680,7 +733,6 @@ async function mobileSearchMore() {
   _mobileSearchState = await _mobileSearchController.searchMore();
 
   renderMobileSearchResults();
-  hydrateMobileSearchImages();
 }
 
 function getMobileSearchHydrateKey(card) {
@@ -691,55 +743,33 @@ function getMobileSearchHydrateKey(card) {
   return normalized;
 }
 
-async function hydrateMobileSearchImages() {
-  const token = ++_mobileSearchHydrateToken;
-  const baseItems = Array.isArray(_mobileSearchState.items) ? _mobileSearchState.items : [];
-  if (!baseItems.length) return;
+async function hydrateMobileSearchCards(items) {
+  const sourceItems = Array.isArray(items) ? items : [];
+  if (!sourceItems.length) return [];
 
-  const resolved = await Promise.all(baseItems.map(async (card, idx) => {
-    if (getMobileCardImageUrl(card)) return null;
+  const hydrated = await Promise.all(sourceItems.map(async (card) => {
+    const normalizedCard = NetworkService.normalizeCardData(card);
+    if (getMobileCardImageUrl(normalizedCard)) return normalizedCard;
 
-    const key = getMobileSearchHydrateKey(card);
-    if (!key) return null;
-    if (_mobileSearchHydrateNoImage.has(key)) return null;
-    if (_mobileSearchHydrateInFlight.has(key)) return null;
+    const key = getMobileSearchHydrateKey(normalizedCard);
+    if (key && _mobileSearchHydrateNoImage.has(key)) {
+      return normalizedCard;
+    }
 
-    _mobileSearchHydrateInFlight.add(key);
     try {
-      const enriched = await NetworkService.enrichCardImage(card);
+      const enriched = await NetworkService.enrichCardImage(normalizedCard);
       const normalized = NetworkService.normalizeCardData(enriched);
-      if (!getMobileCardImageUrl(normalized)) {
+      if (!getMobileCardImageUrl(normalized) && key) {
         _mobileSearchHydrateNoImage.add(key);
-        return null;
       }
-      return { idx, card: normalized };
+      return normalized;
     } catch {
-      return null;
-    } finally {
-      _mobileSearchHydrateInFlight.delete(key);
+      if (key) _mobileSearchHydrateNoImage.add(key);
+      return normalizedCard;
     }
   }));
 
-  if (token !== _mobileSearchHydrateToken) return;
-
-  let changed = false;
-  const next = [...(_mobileSearchState.items || [])];
-  for (const hit of resolved) {
-    if (!hit) continue;
-    if (!next[hit.idx]) continue;
-    if (getMobileCardImageUrl(next[hit.idx])) continue;
-
-    next[hit.idx] = NetworkService.normalizeCardData({
-      ...next[hit.idx],
-      ...hit.card
-    });
-    changed = true;
-  }
-
-  if (!changed) return;
-
-  _mobileSearchState.items = next;
-  renderMobileSearchResults();
+  return hydrated;
 }
 
 function renderMobileSearchResults() {
@@ -842,22 +872,46 @@ function renderMobileGame() {
   const selectedHandCard = _mobileSelectedHandIdx === null ? null : state.hand[_mobileSelectedHandIdx];
   const shieldBreakLabel = _mobileSelectedShieldIdx === null ? 'シールド破壊' : `シールド破壊 (${_mobileSelectedShieldIdx + 1})`;
 
+  const getZoneCount = (zone) => Array.isArray(zone) ? zone.length : Math.max(0, Number(zone) || 0);
+
+  const renderOpponentPublicZone = (zone, zoneClass) => {
+    if (!Array.isArray(zone)) {
+      return renderMobileBackCards(getZoneCount(zone));
+    }
+
+    if (!zone.length) {
+      return '<div class="mg-back-empty">0</div>';
+    }
+
+    const visibleLimit = 10;
+    const visibleCards = zoneClass === 'grave' ? zone.slice(-visibleLimit) : zone.slice(0, visibleLimit);
+    const chips = visibleCards.map((card) => renderChip(card, zoneClass, -1)).join('');
+    const rest = zone.length > visibleCards.length
+      ? `<div class="mg-more-chip">+${zone.length - visibleCards.length}</div>`
+      : '';
+
+    return `<div class="mg-back-cards">${chips}${rest}</div>`;
+  };
+
   const renderChip = (card, zoneClass, idx = -1) => {
     const civ = getMobileCardCivClass(card);
     const tapped = card?.tapped ? 'tapped' : '';
     const cost = Number.isFinite(Number(card?.cost)) ? Number(card.cost) : '-';
     const power = card?.power ? String(card.power) : '';
     const shortName = getMobileCardShortName(card?.name, 8);
+    const imageUrl = getMobileCardImageUrl(card);
 
     let onclick = '';
     if (idx >= 0 && zoneClass === 'battle') onclick = `onclick="tapMobileCard('battleZone', ${idx})"`;
     if (idx >= 0 && zoneClass === 'mana') onclick = `onclick="tapMobileCard('manaZone', ${idx})"`;
 
     return `
-      <div class="mg-card-chip ${zoneClass} ${civ} ${tapped}" ${onclick} title="${escapeHtmlMobile(card?.name || '')}">
-        <div class="mg-card-cost">${escapeHtmlMobile(String(cost))}</div>
+      <div class="mg-card-chip ${zoneClass} ${civ} ${tapped} ${imageUrl ? 'has-image' : ''}" ${onclick} title="${escapeHtmlMobile(card?.name || '')}">
+        ${imageUrl
+          ? `<img src="${escapeHtmlMobile(imageUrl)}" alt="${escapeHtmlMobile(card?.name || 'CARD')}" class="mg-card-chip-img" loading="lazy" decoding="async" onerror="handleMobileCardImageError(this)">`
+          : `<div class="mg-card-cost">${escapeHtmlMobile(String(cost))}</div>
         <div class="mg-card-name">${escapeHtmlMobile(shortName)}</div>
-        <div class="mg-card-power">${escapeHtmlMobile(power)}</div>
+        <div class="mg-card-power">${escapeHtmlMobile(power)}</div>`}
       </div>
     `;
   };
@@ -887,17 +941,17 @@ function renderMobileGame() {
               ${renderMobileBackCards(Number(opp.shields ?? 0), 'shield')}
             </div>
             <div class="mg-opp-panel">
-              <div class="mg-opp-label">バトル (${Number(opp.battleZone ?? 0)})</div>
-              ${renderMobileBackCards(Number(opp.battleZone ?? 0))}
+              <div class="mg-opp-label">バトル (${getZoneCount(opp.battleZone)})</div>
+              ${renderOpponentPublicZone(opp.battleZone, 'battle')}
             </div>
             <div class="mg-opp-panel">
-              <div class="mg-opp-label">マナ (${Number(opp.manaZone ?? 0)})</div>
-              ${renderMobileBackCards(Number(opp.manaZone ?? 0))}
+              <div class="mg-opp-label">マナ (${getZoneCount(opp.manaZone)})</div>
+              ${renderOpponentPublicZone(opp.manaZone, 'mana')}
             </div>
           </div>
           <div class="mg-opp-panel mg-opp-grave">
-            <div class="mg-opp-label">墓地 (${Number(opp.graveyard ?? 0)})</div>
-            ${renderMobileBackCards(Number(opp.graveyard ?? 0))}
+            <div class="mg-opp-label">墓地 (${getZoneCount(opp.graveyard)})</div>
+            ${renderOpponentPublicZone(opp.graveyard, 'grave')}
           </div>
         </div>
       ` : ''}
@@ -954,12 +1008,14 @@ function renderMobileGame() {
         <div class="mg-hand-title">手札 (${state.hand.length})</div>
         <div class="mg-hand-row">
           ${state.hand.length ? state.hand.map((c, i) => `
-            <div class="mg-card-chip hand ${getMobileCardCivClass(c)}"
+            <div class="mg-card-chip hand ${getMobileCardCivClass(c)} ${getMobileCardImageUrl(c) ? 'has-image' : ''}"
               onclick="openMobileHandActionSheet(${i})"
               title="${escapeHtmlMobile(c.name)}">
-              <div class="mg-card-cost">${escapeHtmlMobile(String(Number.isFinite(Number(c?.cost)) ? Number(c.cost) : '-'))}</div>
+              ${getMobileCardImageUrl(c)
+                ? `<img src="${escapeHtmlMobile(getMobileCardImageUrl(c))}" alt="${escapeHtmlMobile(c?.name || 'CARD')}" class="mg-card-chip-img" loading="lazy" decoding="async" onerror="handleMobileCardImageError(this)">`
+                : `<div class="mg-card-cost">${escapeHtmlMobile(String(Number.isFinite(Number(c?.cost)) ? Number(c.cost) : '-'))}</div>
               <div class="mg-card-name">${escapeHtmlMobile(getMobileCardShortName(c.name, 8))}</div>
-              <div class="mg-card-power">${escapeHtmlMobile(c?.power ? String(c.power) : '')}</div>
+              <div class="mg-card-power">${escapeHtmlMobile(c?.power ? String(c.power) : '')}</div>`}
             </div>
           `).join('') : '<div class="mg-zone-empty">カードなし</div>'}
         </div>
@@ -1868,7 +1924,7 @@ function olStartEventListenerMobile() {
     const myNum = window._ol.p === 'p1' ? 1 : 2;
     const wasMyTurn = window._olCurrentPlayer === myNum;
     if (data.turn) engineMobile.state.turn = data.turn;
-    if (other) window._olOpponent = other;
+    if (other) window._olOpponent = normalizeMobileOpponentState(other);
     if (data.active) window._olCurrentPlayer = data.active === 'p1' ? 1 : 2;
 
     const isMyTurn = window._olCurrentPlayer === myNum;
@@ -1889,10 +1945,12 @@ function olStartEventListenerMobile() {
     window._ol.reconnectAttempt = 0;
     const data = JSON.parse(e.data);
     if (!shouldApplyRemotePayloadMobile(data)) return;
+    const other = window._ol.p === 'p1' ? data.p2 : data.p1;
     const myNum = window._ol.p === 'p1' ? 1 : 2;
     const wasMyTurn = window._olCurrentPlayer === myNum;
 
     if (data.turn) engineMobile.state.turn = data.turn;
+    if (other) window._olOpponent = normalizeMobileOpponentState(other);
     if (data.active) {
       window._olCurrentPlayer = data.active === 'p1' ? 1 : 2;
     }
@@ -1972,6 +2030,7 @@ function olSendActionMobile(actionType) {
 
   if (!window._ol || !engineMobile) return;
   const s = engineMobile.state;
+  const publicState = buildMobilePublicState(s);
   const payload = {
     room: window._ol.room,
     p: window._ol.p,
@@ -1979,8 +2038,8 @@ function olSendActionMobile(actionType) {
     seq: nextOnlineSeqMobile(),
     turn: s.turn,
     active: actionType === 'turn_end' ? (window._ol.p === 'p1' ? 'p2' : 'p1') : window._ol.p,
-    p1: window._ol.p === 'p1' ? { hand: s.hand.length, battleZone: s.battleZone.length, manaZone: s.manaZone.length, shields: s.shields.length, deck: s.deck.length, graveyard: s.graveyard.length } : null,
-    p2: window._ol.p === 'p2' ? { hand: s.hand.length, battleZone: s.battleZone.length, manaZone: s.manaZone.length, shields: s.shields.length, deck: s.deck.length, graveyard: s.graveyard.length } : null
+    p1: window._ol.p === 'p1' ? publicState : null,
+    p2: window._ol.p === 'p2' ? publicState : null
   };
   NetworkService.sendAction(payload);
 }

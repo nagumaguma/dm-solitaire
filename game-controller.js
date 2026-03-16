@@ -221,9 +221,44 @@
     global._olChatLogMobile = [];
   }
 
+  function serializePublicCards(cards) {
+    if (!Array.isArray(cards)) return [];
+    return cards.map((card) => {
+      const name = String(card?.name || card?.nameEn || '').trim();
+      const cost = card?.cost ?? '';
+      const power = String(card?.power || '').trim();
+      const civilization = String(card?.civilization || card?.civ || '').trim();
+      const imageUrl = String(card?.imageUrl || card?.img || card?.thumb || '').trim();
+
+      return {
+        name,
+        cost,
+        power,
+        civilization,
+        civ: civilization,
+        imageUrl,
+        img: imageUrl,
+        thumb: imageUrl,
+        tapped: !!card?.tapped
+      };
+    });
+  }
+
+  function buildPublicState(state) {
+    return {
+      hand: state.hand.length,
+      deck: state.deck.length,
+      shields: state.shields.length,
+      battleZone: serializePublicCards(state.battleZone),
+      manaZone: serializePublicCards(state.manaZone),
+      graveyard: serializePublicCards(state.graveyard)
+    };
+  }
+
   function buildActionPayload(engineState, onlineState, actionType) {
     const s = engineState;
     const p = onlineState;
+    const publicState = buildPublicState(s);
     return {
       room: p.room,
       p: p.p,
@@ -231,22 +266,8 @@
       seq: nextOnlineSeq(p),
       turn: s.turn,
       active: actionType === 'turn_end' ? (p.p === 'p1' ? 'p2' : 'p1') : p.p,
-      p1: p.p === 'p1' ? {
-        hand: s.hand.length,
-        battleZone: s.battleZone.length,
-        manaZone: s.manaZone.length,
-        shields: s.shields.length,
-        deck: s.deck.length,
-        graveyard: s.graveyard.length
-      } : null,
-      p2: p.p === 'p2' ? {
-        hand: s.hand.length,
-        battleZone: s.battleZone.length,
-        manaZone: s.manaZone.length,
-        shields: s.shields.length,
-        deck: s.deck.length,
-        graveyard: s.graveyard.length
-      } : null
+      p1: p.p === 'p1' ? publicState : null,
+      p2: p.p === 'p2' ? publicState : null
     };
   }
 
@@ -278,6 +299,9 @@
   function createSearchController(config) {
     const pageSize = Number(config?.pageSize) || 20;
     const searchFn = config?.searchFn;
+    const transformPage = typeof config?.transformPage === 'function'
+      ? config.transformPage
+      : null;
 
     if (typeof searchFn !== 'function') {
       throw new Error('createSearchController requires searchFn');
@@ -324,12 +348,22 @@
         const results = await searchFn(keyword, nextPage);
         if (thisRequest !== requestId) return snapshot();
 
-        const pageItems = Array.isArray(results) ? results.slice(0, pageSize) : [];
+        const rawItems = Array.isArray(results) ? results.slice(0, pageSize) : [];
+        const pageItems = transformPage
+          ? await transformPage(rawItems, {
+            query: keyword,
+            page: nextPage,
+            append
+          })
+          : rawItems;
+        if (thisRequest !== requestId) return snapshot();
+        const safePageItems = Array.isArray(pageItems) ? pageItems : [];
+
         state = {
           query: keyword,
           page: nextPage,
-          items: append ? [...state.items, ...pageItems] : pageItems,
-          hasMore: pageItems.length >= pageSize,
+          items: append ? [...state.items, ...safePageItems] : safePageItems,
+          hasMore: safePageItems.length >= pageSize,
           loading: false
         };
       } catch (err) {
