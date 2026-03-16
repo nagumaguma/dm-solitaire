@@ -60,7 +60,7 @@ function renderMobileDeckList() {
           <h3 style="margin-bottom: 10px; font-size: 0.95rem; color: #3d4a44;">デッキを選択</h3>
           <button onclick="newMobileDeck()" 
             style="width: 100%; padding: 10px; background: #6b8f8a; color: #fff; border: none; border-radius: 6px; cursor: pointer; margin-bottom: 10px; font-weight: 600; font-size: 0.9rem;">
-            ➕ 新規作成
+            新規デッキ
           </button>
           <div id="mobile-deck-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
         </div>
@@ -105,12 +105,12 @@ function updateMobileDeckList() {
     el.onmouseout = () => el.style.background = '#f5f6f4';
     el.innerHTML = `
       <div style="font-weight: 600; font-size: 0.95rem; color: #3d4a44;">${escapeHtmlMobile(name)}</div>
-      <div style="font-size: 0.85rem; color: #6b7b72; margin: 6px 0;">📋 ${count}枚</div>
+      <div style="font-size: 0.85rem; color: #6b7b72; margin: 6px 0;">デッキ: ${count}枚</div>
       <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-        <button onclick="openMobileDeck('${escapeAttrJsMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #7a94a8; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">✏️ 編集</button>
-        <button onclick="startMobileGame('${escapeAttrJsMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">▶ START</button>
-        <button onclick="showMobileOnlineModal('${escapeAttrJsMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #6b8f8a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">🌐 オンライン</button>
-        <button onclick="deleteMobileDeck('${escapeAttrJsMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #a67c7c; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">🗑️</button>
+        <button onclick="openMobileDeck('${escapeAttrJsMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #7a94a8; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">編集</button>
+        <button onclick="startMobileGame('${escapeAttrJsMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">一人回し</button>
+        <button onclick="showMobileOnlineModal('${escapeAttrJsMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #6b8f8a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">オンライン</button>
+        <button onclick="deleteMobileDeck('${escapeAttrJsMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #a67c7c; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">削除</button>
       </div>
     `;
     deckList.appendChild(el);
@@ -129,10 +129,10 @@ function updateMobileDeckList() {
       el.onmouseover = () => el.style.background = '#e8efe8';
       el.onmouseout = () => el.style.background = '#f0f3f1';
       el.innerHTML = `
-        <div style="font-weight: 600; font-size: 0.95rem; color: #3d4a44;">☁️ ${escapeHtmlMobile(name)}</div>
+        <div style="font-weight: 600; font-size: 0.95rem; color: #3d4a44;">クラウド: ${escapeHtmlMobile(name)}</div>
         <div style="display: flex; gap: 6px; margin-top: 8px;">
-          <button onclick="startMobileGame('${escapeAttrJsMobile(name)}')" style="flex: 1; padding: 10px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">▶ START</button>
-          <button onclick="showMobileOnlineModal('${escapeAttrJsMobile(name)}')" style="flex: 1; padding: 10px; background: #6b8f8a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">🌐 オンライン</button>
+          <button onclick="startMobileGame('${escapeAttrJsMobile(name)}')" style="flex: 1; padding: 10px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">一人回し</button>
+          <button onclick="showMobileOnlineModal('${escapeAttrJsMobile(name)}')" style="flex: 1; padding: 10px; background: #6b8f8a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">オンライン</button>
         </div>
       `;
       deckList.appendChild(el);
@@ -219,7 +219,7 @@ function renderMobileGame() {
         ${ol ? ` | ${isMyTurn ? '自分のターン' : '相手のターン'}` : ''}
       </div>
       ${ol ? `<div style="padding: 8px 12px; background: #e8efe8; font-size: 0.8rem; color: #3d4a44;">
-        🌐 ${escapeHtmlMobile(ol.p1Name)} vs ${ol.p2Name ? escapeHtmlMobile(ol.p2Name) : '待機中'}
+        オンライン対戦: ${escapeHtmlMobile(ol.p1Name)} vs ${ol.p2Name ? escapeHtmlMobile(ol.p2Name) : '待機中'}
         ${opp.hand !== undefined ? `｜ 相手: 手札${opp.hand} バトル${opp.battleZone || 0} マナ${opp.manaZone || 0} シールド${opp.shields || 0}` : ''}
       </div>` : ''}
       
@@ -229,7 +229,7 @@ function renderMobileGame() {
         <!-- 敵フィールド -->
         <div style="background: #f5f6f4; border: 1px solid #d4c4bc; border-radius: 8px; padding: 12px; text-align: center;">
           <div style="font-size: 0.85rem; color: #6b7b72; margin-bottom: 8px;">敵フィールド</div>
-          <div style="font-size: 2rem; color: #9fb0b8;">👤</div>
+          <div style="font-size: 1.3rem; color: #9fb0b8;">ENEMY</div>
         </div>
         
         <!-- バトルゾーン -->
@@ -250,10 +250,10 @@ function renderMobileGame() {
         <div style="background: #eef2f4; border: 1px solid #b8c8d4; border-radius: 8px; padding: 12px;">
           <div style="font-size: 0.85rem; color: #3d4a44; margin-bottom: 8px;">シールド (${state.shields.length})</div>
           <div style="display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;">
-            ${state.shields.map(s => `
+            ${state.shields.map(() => `
               <div style="width: 40px; height: 40px; background: #9fb8c4; border: 1px solid #7a94a8; 
-                border-radius: 4px; display: flex; align-items: center; justify-content: center; font-weight: 600; color: #fff;">
-                🛡️
+                border-radius: 4px; display: flex; align-items: center; justify-content: center; font-weight: 600; color: #fff; font-size: 0.75rem;">
+                SH
               </div>
             `).join('')}
           </div>
@@ -384,7 +384,7 @@ function renderMobileDeckEdit() {
                     <button onclick="decrementMobileCardCount(${i})" style="width: 28px; height: 28px; background: #a67c7c; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">−</button>
                     <span style="width: 28px; text-align: center; font-weight: 600; color: #3d4a44;">${c.count || 1}</span>
                     <button onclick="incrementMobileCardCount(${i})" style="width: 28px; height: 28px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">+</button>
-                    <button onclick="removeMobileCard(${i})" style="width: 28px; height: 28px; background: #a67c7c; color: #fff; border: none; border-radius: 4px; cursor: pointer;">🗑️</button>
+                    <button onclick="removeMobileCard(${i})" style="width: 28px; height: 28px; background: #a67c7c; color: #fff; border: none; border-radius: 4px; cursor: pointer;">削除</button>
                   </div>
                 </div>
               </div>
@@ -396,7 +396,7 @@ function renderMobileDeckEdit() {
       
       <!-- ボタン -->
       <div style="background: #f5f6f4; padding: 12px; display: flex; gap: 8px; border-top: 1px solid #e0e5e0;">
-        <button onclick="playMobileDeckGame()" style="flex: 1; padding: 12px; background: #7a9a7a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">▶ ゲーム</button>
+        <button onclick="playMobileDeckGame()" style="flex: 1; padding: 12px; background: #7a9a7a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">一人回しを開始</button>
         <button onclick="saveMobileDeck()" style="flex: 1; padding: 12px; background: #6b8f8a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">💾 保存</button>
       </div>
       
@@ -507,7 +507,7 @@ function showMobileOnlineModal(deckName) {
   div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:2000;display:flex;align-items:center;justify-content:center;padding:16px;';
   div.innerHTML = `
     <div style="background:#fafbf9;border-radius:12px;padding:20px;max-width:360px;width:100%;box-shadow:0 4px 20px rgba(0,0,0,0.08);border:1px solid #e0e5e0;">
-      <h3 style="margin-bottom:12px;font-size:1.1rem;color:#3d4a44;">🌐 オンライン対戦</h3>
+      <h3 style="margin-bottom:12px;font-size:1.1rem;color:#3d4a44;">オンライン対戦</h3>
       <p style="font-size:0.9rem;color:#6b7b72;margin-bottom:10px;">デッキ: <strong id="mobile-ol-deck-name">${escapeHtmlMobile(deckName)}</strong></p>
       <label style="display:block;margin-bottom:4px;font-size:0.85rem;color:#3d4a44;">プレイヤー名</label>
       <input type="text" id="mobile-ol-player-name" placeholder="Player 1" style="width:100%;padding:12px;border:1px solid #e0e5e0;border-radius:6px;margin-bottom:12px;font-size:1rem;background:#fff;">
@@ -515,7 +515,7 @@ function showMobileOnlineModal(deckName) {
       <hr style="margin:12px 0;border:none;border-top:1px solid #e0e5e0;">
       <label style="display:block;margin-bottom:4px;font-size:0.85rem;color:#3d4a44;">ルームコード（6文字）</label>
       <input type="text" id="mobile-ol-room-code" placeholder="ABCD12" maxlength="6" style="width:100%;padding:12px;border:1px solid #e0e5e0;border-radius:6px;margin-bottom:10px;letter-spacing:4px;text-transform:uppercase;font-size:1rem;background:#fff;">
-      <button type="button" onclick="olJoinRoomMobile()" style="width:100%;padding:12px;background:#7a94a8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">参加する</button>
+      <button type="button" onclick="olJoinRoomMobile()" style="width:100%;padding:12px;background:#7a94a8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">参加</button>
       <button type="button" onclick="document.getElementById('mobile-ol-overlay').style.display='none'" style="width:100%;margin-top:10px;padding:10px;background:#eef1ef;color:#3d4a44;border:none;border-radius:6px;cursor:pointer;">キャンセル</button>
     </div>
   `;

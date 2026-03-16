@@ -63,7 +63,7 @@ function renderDesktopDeckList() {
         </div>
         <button onclick="newDesktopDeck()" 
           style="width: 100%; padding: 10px; background: #6b8f8a; color: #fff; border: none; border-radius: 6px; cursor: pointer; margin-bottom: 10px; font-weight: 600;">
-          ➕ 新規作成
+          新規デッキ
         </button>
         <div id="desktop-deck-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
       </div>
@@ -105,12 +105,12 @@ function updateDesktopDeckList() {
     el.onmouseout = () => el.style.background = '#f5f6f4';
     el.innerHTML = `
       <div style="font-weight: 600; font-size: 0.9rem; color: #3d4a44;">${escapeHtml(name)}</div>
-      <div style="font-size: 0.8rem; color: #6b7b72; margin: 4px 0;">📋 ${count}枚</div>
+      <div style="font-size: 0.8rem; color: #6b7b72; margin: 4px 0;">デッキ: ${count}枚</div>
       <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-        <button onclick="openDesktopDeck('${escapeAttrJs(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #7a94a8; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">✏️ 編集</button>
-        <button onclick="startDesktopGame('${escapeAttrJs(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">▶ START</button>
-        <button onclick="showDesktopOnlineModal('${escapeAttrJs(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #6b8f8a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🌐 オンライン</button>
-        <button onclick="deleteDesktopDeck('${escapeAttrJs(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #a67c7c; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🗑️</button>
+        <button onclick="openDesktopDeck('${escapeAttrJs(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #7a94a8; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">編集</button>
+        <button onclick="startDesktopGame('${escapeAttrJs(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">一人回し</button>
+        <button onclick="showDesktopOnlineModal('${escapeAttrJs(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #6b8f8a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">オンライン</button>
+        <button onclick="deleteDesktopDeck('${escapeAttrJs(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #a67c7c; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">削除</button>
       </div>
     `;
     deckList.appendChild(el);
@@ -127,10 +127,10 @@ function updateDesktopDeckList() {
       el.onmouseover = () => el.style.background = '#e8efe8';
       el.onmouseout = () => el.style.background = '#f0f3f1';
       el.innerHTML = `
-        <div style="font-weight: 600; font-size: 0.9rem; color: #3d4a44;">☁️ ${escapeHtml(name)}</div>
+        <div style="font-weight: 600; font-size: 0.9rem; color: #3d4a44;">クラウド: ${escapeHtml(name)}</div>
         <div style="display: flex; gap: 6px; margin-top: 6px;">
-          <button onclick="startDesktopGame('${escapeAttrJs(name)}')" style="flex: 1; padding: 6px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">▶ START</button>
-          <button onclick="showDesktopOnlineModal('${escapeAttrJs(name)}')" style="flex: 1; padding: 6px; background: #6b8f8a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🌐 オンライン</button>
+          <button onclick="startDesktopGame('${escapeAttrJs(name)}')" style="flex: 1; padding: 6px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">一人回し</button>
+          <button onclick="showDesktopOnlineModal('${escapeAttrJs(name)}')" style="flex: 1; padding: 6px; background: #6b8f8a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">オンライン</button>
         </div>
       `;
       deckList.appendChild(el);
@@ -217,7 +217,7 @@ function renderDesktopGame() {
         ${ol ? `<span style="margin-left: 8px;">${isMyTurn ? '<span style="color: #6b8f8a;">自分のターン</span>' : '<span style="color: #6b7b72;">相手のターン</span>'}</span>` : ''}
       </div>
       ${ol ? `<div style="margin-bottom: 8px; padding: 6px; background: #e8efe8; border-radius: 4px; font-size: 0.8rem; color: #3d4a44;">
-        <strong>🌐</strong> ${escapeHtml(ol.p1Name)} vs ${ol.p2Name ? escapeHtml(ol.p2Name) : '待機中'}
+        オンライン対戦: ${escapeHtml(ol.p1Name)} vs ${ol.p2Name ? escapeHtml(ol.p2Name) : '待機中'}
         ${opp.hand !== undefined ? `｜ 相手: 手札${opp.hand} バトル${opp.battleZone || 0} マナ${opp.manaZone || 0} シールド${opp.shields || 0}` : ''}
       </div>` : ''}
       
@@ -287,10 +287,10 @@ function renderDesktopGame() {
       <div style="margin-bottom: 12px;">
         <strong style="display: block; margin-bottom: 4px; color: #3d4a44;">シールド (${state.shields.length})</strong>
         <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-          ${state.shields.map(s => `
+          ${state.shields.map(() => `
             <div style="width: 40px; height: 50px; background: #9fb8c4; border: 1px solid #7a94a8; 
-              border-radius: 3px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600;">
-              <span>🛡️</span>
+              border-radius: 3px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 0.75rem;">
+              SH
             </div>
           `).join('')}
         </div>
@@ -457,7 +457,7 @@ function renderDesktopDeckEdit() {
         <div style="margin-bottom: 12px; padding: 10px; background: #eef1ef; border-radius: 6px;">
           <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; color: #3d4a44;">${escapeHtml(deckName)}</div>
           <div style="font-size: 0.8rem; color: #6b7b72;">
-            <div>📋 カード枚数: <strong>${cardCount}</strong> / 40</div>
+            <div>カード枚数: <strong>${cardCount}</strong> / 40</div>
             <div>🎴 ユニーク: <strong>${uniqueCount}</strong></div>
           </div>
         </div>
@@ -473,7 +473,7 @@ function renderDesktopDeckEdit() {
                 <button onclick="decrementDesktopCardCount(${i})" style="width: 24px; height: 24px; background: #a67c7c; color: #fff; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem; font-weight: 600;">−</button>
                 <span style="width: 24px; text-align: center; font-weight: 600; font-size: 0.9rem; color: #3d4a44;">${c.count || 1}</span>
                 <button onclick="incrementDesktopCardCount(${i})" style="width: 24px; height: 24px; background: #7a9a7a; color: #fff; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem; font-weight: 600;">+</button>
-                <button onclick="removeDesktopCard(${i})" style="width: 24px; height: 24px; background: #a67c7c; color: #fff; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem;">🗑️</button>
+                <button onclick="removeDesktopCard(${i})" style="width: 24px; height: 24px; background: #a67c7c; color: #fff; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem;">削除</button>
               </div>
             </div>
           `).join('')}
@@ -493,7 +493,7 @@ function renderDesktopDeckEdit() {
         </div>
         
         <div style="display: flex; flex-direction: column; gap: 6px;">
-          <button onclick="playDesktopDeckGame()" style="width: 100%; padding: 12px; background: #7a9a7a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">▶ ゲーム開始</button>
+          <button onclick="playDesktopDeckGame()" style="width: 100%; padding: 12px; background: #7a9a7a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">一人回しを開始</button>
           <button onclick="saveDesktopDeck()" style="width: 100%; padding: 12px; background: #6b8f8a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">💾 保存</button>
           <button onclick="renderDesktopDeckList()" style="width: 100%; padding: 12px; background: #a67c7c; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">← 戻る</button>
         </div>
@@ -623,7 +623,7 @@ function showDesktopOnlineModal(deckName) {
   div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:2000;display:flex;align-items:center;justify-content:center;';
   div.innerHTML = `
     <div style="background:#fafbf9;border-radius:12px;padding:24px;max-width:360px;width:90%;box-shadow:0 4px 20px rgba(0,0,0,0.08);border:1px solid #e0e5e0;">
-      <h3 style="margin-bottom:16px;color:#3d4a44;">🌐 オンライン対戦</h3>
+      <h3 style="margin-bottom:16px;color:#3d4a44;">オンライン対戦</h3>
       <p style="font-size:0.9rem;color:#6b7b72;margin-bottom:12px;">デッキ: <strong id="desktop-ol-deck-name">${escapeHtml(deckName)}</strong></p>
       <label style="display:block;margin-bottom:4px;font-size:0.85rem;color:#3d4a44;">プレイヤー名</label>
       <input type="text" id="desktop-ol-player-name" placeholder="Player 1" style="width:100%;padding:10px;border:1px solid #e0e5e0;border-radius:6px;margin-bottom:16px;background:#fff;">
