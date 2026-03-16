@@ -11,6 +11,8 @@ class GameEngine {
       manaZone: [],
       deck: [],
       shields: [],
+      deckRevealZone: [],
+      revealedZone: [],
       graveyard: [],
       turn: 1
     };
@@ -41,6 +43,8 @@ class GameEngine {
       manaZone: [],
       deck: shuffled,
       shields: [],
+      deckRevealZone: [],
+      revealedZone: [],
       graveyard: [],
       turn: 1
     };
@@ -104,6 +108,76 @@ class GameEngine {
   }
 
   /**
+   * 山札をシャッフル
+   */
+  shuffleDeck() {
+    if (!Array.isArray(this.state.deck) || this.state.deck.length === 0) return false;
+
+    this._saveState();
+    this.state.deck = this._shuffle(this.state.deck);
+    return true;
+  }
+
+  /**
+   * 山札トップからn枚取り出す
+   * @param {number} count
+   * @param {string|null} targetZone
+   * @param {{faceUp?: boolean}} options
+   * @returns {Array}
+   */
+  extractDeckTopCards(count = 1, targetZone = null, options = {}) {
+    const n = Math.max(1, Math.floor(Number(count) || 1));
+    if (!Array.isArray(this.state.deck) || this.state.deck.length === 0) return [];
+
+    const zoneMap = {
+      hand: 'hand',
+      battle: 'battleZone',
+      battleZone: 'battleZone',
+      mana: 'manaZone',
+      manaZone: 'manaZone',
+      deck: 'deck',
+      shield: 'shields',
+      shields: 'shields',
+      deckReveal: 'deckRevealZone',
+      deckRevealZone: 'deckRevealZone',
+      revealed: 'revealedZone',
+      revealedZone: 'revealedZone',
+      grave: 'graveyard',
+      graveyard: 'graveyard'
+    };
+
+    const targetKey = targetZone ? zoneMap[targetZone] : null;
+    if (targetZone && !targetKey) return [];
+    if (targetKey && !Array.isArray(this.state[targetKey])) return [];
+
+    const actual = Math.min(n, this.state.deck.length);
+    this._saveState();
+
+    const cards = [];
+    for (let i = 0; i < actual; i += 1) {
+      const card = this.state.deck.pop();
+      if (!card) break;
+      card.tapped = false;
+
+      if (targetKey === 'shields') {
+        card.faceUp = false;
+      } else if (targetKey === 'deckRevealZone' || targetKey === 'revealedZone') {
+        card.faceUp = options?.faceUp !== undefined ? !!options.faceUp : true;
+      } else if (card.faceUp !== undefined) {
+        delete card.faceUp;
+      }
+
+      if (targetKey) {
+        this.state[targetKey].push(card);
+      }
+
+      cards.push(card);
+    }
+
+    return cards;
+  }
+
+  /**
    * 指定ゾーンのカードをタップ/アンタップ
    * @param {string} zone - 'battleZone' | 'manaZone' | 'battle' | 'mana'
    * @param {number} cardIndex
@@ -126,12 +200,48 @@ class GameEngine {
   }
 
   /**
-   * シールドをブレイクして手札に加える
+   * マナゾーンのカードを一括アンタップ
+   */
+  untapAllMana() {
+    if (!Array.isArray(this.state.manaZone) || this.state.manaZone.length === 0) return false;
+
+    this._saveState();
+    this.state.manaZone.forEach((card) => {
+      if (card && typeof card === 'object') {
+        card.tapped = false;
+      }
+    });
+    return true;
+  }
+
+  /**
+   * シールドの表向き/裏向きを変更
+   * @param {number} shieldIndex
+   * @param {boolean} faceUp
+   */
+  setShieldFaceUp(shieldIndex, faceUp) {
+    const idx = Number(shieldIndex);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= this.state.shields.length) return false;
+
+    const shield = this.state.shields[idx];
+    if (!shield || typeof shield !== 'object') return false;
+
+    const nextFaceUp = !!faceUp;
+    if (!!shield.faceUp === nextFaceUp) return true;
+
+    this._saveState();
+    shield.faceUp = nextFaceUp;
+    return true;
+  }
+
+  /**
+   * シールドをブレイクして公開待機ゾーンへ移動
    * @param {number|null} targetShieldIndex
    * @returns {Object|null}
    */
   breakShield(targetShieldIndex = null) {
     if (this.state.shields.length === 0) return null;
+    if (!Array.isArray(this.state.revealedZone)) this.state.revealedZone = [];
 
     this._saveState();
     const idx = (targetShieldIndex !== null
@@ -139,21 +249,19 @@ class GameEngine {
       && targetShieldIndex < this.state.shields.length)
       ? targetShieldIndex
       : 0;
-    const [broken] = this.state.shields.splice(idx, 1);
+    const broken = this._takeCardFromZone('shields', idx);
     if (!broken) return null;
 
-    if (broken.faceUp !== undefined) {
-      delete broken.faceUp;
-    }
+    broken.faceUp = true;
     broken.tapped = false;
-    this.state.hand.push(broken);
+    this.state.revealedZone.push(broken);
     return broken;
   }
 
   /**
    * 指定ゾーンから墓地へ移動
    * @param {number} cardIdx - 移動するカードインデックス（-1で末尾）
-   * @param {string} fromZone - 'hand' | 'battle' | 'mana' | 'shields'
+   * @param {string} fromZone - 'hand' | 'battle' | 'mana' | 'shields' | 'revealed'
    */
   moveToGraveyard(cardIdx = -1, fromZone = 'battle') {
     const zoneMap = {
@@ -161,7 +269,11 @@ class GameEngine {
       battle: 'battleZone',
       mana: 'manaZone',
       shield: 'shields',
-      shields: 'shields'
+      shields: 'shields',
+      deckReveal: 'deckRevealZone',
+      deckRevealZone: 'deckRevealZone',
+      revealed: 'revealedZone',
+      revealedZone: 'revealedZone'
     };
     const zoneKey = zoneMap[fromZone];
     if (!zoneKey) return false;
@@ -203,7 +315,8 @@ class GameEngine {
     const card = zone[idx];
     if (!card) return null;
 
-    const isStackZone = zoneKey === 'battleZone' || zoneKey === 'manaZone';
+    const isShieldZone = zoneKey === 'shields';
+    const isStackZone = zoneKey === 'battleZone' || zoneKey === 'manaZone' || isShieldZone;
     const underCards = this._normalizeUnderCards(card);
 
     if (isStackZone && underCards.length > 0) {
@@ -211,6 +324,10 @@ class GameEngine {
       if (nextTop && typeof nextTop === 'object') {
         const nextUnder = this._normalizeUnderCards(nextTop);
         nextTop.underCards = [...nextUnder, ...underCards];
+        if (isShieldZone) {
+          nextTop.faceUp = !!card.faceUp;
+          nextTop.tapped = false;
+        }
         zone[idx] = nextTop;
       } else {
         zone.splice(idx, 1);
@@ -227,17 +344,23 @@ class GameEngine {
   /**
    * 墓地から指定ゾーンへ戻す
    * @param {number} cardIdx - 墓地インデックス（-1で末尾）
-   * @param {string} toZone - 'hand' | 'battle' | 'mana' | 'shields'
+  * @param {string} toZone - 'hand' | 'battle' | 'mana' | 'shields' | 'revealed'
    */
   returnFromGraveyard(cardIdx = -1, toZone = 'hand') {
     if (!Array.isArray(this.state.graveyard) || this.state.graveyard.length === 0) return false;
+    if (!Array.isArray(this.state.deckRevealZone)) this.state.deckRevealZone = [];
+    if (!Array.isArray(this.state.revealedZone)) this.state.revealedZone = [];
 
     const zoneMap = {
       hand: 'hand',
       battle: 'battleZone',
       mana: 'manaZone',
       shield: 'shields',
-      shields: 'shields'
+      shields: 'shields',
+      deckReveal: 'deckRevealZone',
+      deckRevealZone: 'deckRevealZone',
+      revealed: 'revealedZone',
+      revealedZone: 'revealedZone'
     };
     const zoneKey = zoneMap[toZone];
     if (!zoneKey) return false;
@@ -251,6 +374,14 @@ class GameEngine {
 
     if (zoneKey === 'shields') {
       this.state.shields.push({ ...card, faceUp: false, tapped: false });
+    } else if (zoneKey === 'deckRevealZone') {
+      card.faceUp = true;
+      card.tapped = false;
+      this.state.deckRevealZone.push(card);
+    } else if (zoneKey === 'revealedZone') {
+      card.faceUp = true;
+      card.tapped = false;
+      this.state.revealedZone.push(card);
     } else {
       card.tapped = false;
       this.state[zoneKey].push(card);
@@ -267,6 +398,9 @@ class GameEngine {
    * @param {{position?: 'top'|'bottom'}} options
    */
   moveCardBetweenZones(fromZone, fromIndex, toZone, options = {}) {
+    if (!Array.isArray(this.state.deckRevealZone)) this.state.deckRevealZone = [];
+    if (!Array.isArray(this.state.revealedZone)) this.state.revealedZone = [];
+
     const zoneMap = {
       hand: 'hand',
       battle: 'battleZone',
@@ -276,6 +410,10 @@ class GameEngine {
       deck: 'deck',
       shield: 'shields',
       shields: 'shields',
+      deckReveal: 'deckRevealZone',
+      deckRevealZone: 'deckRevealZone',
+      revealed: 'revealedZone',
+      revealedZone: 'revealedZone',
       grave: 'graveyard',
       graveyard: 'graveyard'
     };
@@ -304,6 +442,12 @@ class GameEngine {
 
     if (targetKey === 'shields') {
       card.faceUp = false;
+      card.tapped = false;
+    } else if (targetKey === 'deckRevealZone') {
+      card.faceUp = true;
+      card.tapped = false;
+    } else if (targetKey === 'revealedZone') {
+      card.faceUp = true;
       card.tapped = false;
     } else {
       if (card.faceUp !== undefined) delete card.faceUp;
@@ -341,7 +485,7 @@ class GameEngine {
    * 任意カードを盤面カードの下に重ねる
    * @param {string} fromZone
    * @param {number} fromIndex
-   * @param {string} targetZone - 'battleZone' | 'manaZone' | 'battle' | 'mana'
+  * @param {string} targetZone - 'battleZone' | 'manaZone' | 'shields' | 'battle' | 'mana' | 'shield'
    * @param {number} targetIndex
    */
   insertCardUnderCard(fromZone, fromIndex, targetZone, targetIndex) {
@@ -354,6 +498,10 @@ class GameEngine {
       deck: 'deck',
       shield: 'shields',
       shields: 'shields',
+      deckReveal: 'deckRevealZone',
+      deckRevealZone: 'deckRevealZone',
+      revealed: 'revealedZone',
+      revealedZone: 'revealedZone',
       grave: 'graveyard',
       graveyard: 'graveyard'
     };
@@ -361,7 +509,7 @@ class GameEngine {
     const sourceKey = zoneMap[fromZone];
     const targetKey = zoneMap[targetZone];
     if (!sourceKey || !targetKey) return false;
-    if (targetKey !== 'battleZone' && targetKey !== 'manaZone') return false;
+    if (targetKey !== 'battleZone' && targetKey !== 'manaZone' && targetKey !== 'shields') return false;
 
     const source = this.state[sourceKey];
     const target = this.state[targetKey];
@@ -411,6 +559,17 @@ class GameEngine {
     [...this.state.battleZone, ...this.state.manaZone].forEach(card => {
       card.tapped = false;
     });
+  }
+
+  /**
+   * リモート同期用: 履歴を汚さずターン数を合わせる
+   * @param {number} turn
+   */
+  syncTurn(turn) {
+    const n = Number(turn);
+    if (!Number.isFinite(n)) return false;
+    this.state.turn = Math.max(1, Math.floor(n));
+    return true;
   }
 
   /**

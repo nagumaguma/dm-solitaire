@@ -23,6 +23,14 @@ let _mobileSkipNextTap = false;
 let _mobileDetailCardState = null;
 let _mobileDetailRequestToken = 0;
 let _mobileDetailAllowAdd = true;
+let _mobileRibbonOtherOpen = false;
+let _mobileDeckNValue = 3;
+let _mobileDeckPeekPrivateCards = [];
+let _mobileDeckRevealModalState = {
+  mode: 'public',
+  destination: 'hand',
+  selected: {}
+};
 
 function escapeHtmlMobile(str) {
   return String(str ?? '')
@@ -124,13 +132,17 @@ function getMobileUserLabel(account) {
 }
 
 function getMobileCardCivClass(card) {
-  const c = String(card?.civilization || '').toLowerCase();
+  if (window.GameController?.getCardCivClass) {
+    return window.GameController.getCardCivClass(card);
+  }
+
+  const c = String(card?.civilization || card?.civ || '').toLowerCase();
   if (c.includes('fire') || c.includes('火')) return 'fire';
   if (c.includes('water') || c.includes('水')) return 'water';
-  if (c.includes('nature') || c.includes('自然')) return 'nature';
   if (c.includes('light') || c.includes('光')) return 'light';
-  if (c.includes('darkness') || c.includes('dark') || c.includes('闇')) return 'darkness';
-  return 'neutral';
+  if (c.includes('darkness') || c.includes('dark') || c.includes('闇')) return 'dark';
+  if (c.includes('nature') || c.includes('自然')) return 'nature';
+  return 'multi';
 }
 
 function getMobileCardShortName(name, max = 8) {
@@ -589,6 +601,8 @@ function normalizeMobileOpponentState(rawState) {
     hand: Math.max(0, Number(src.hand) || 0),
     deck: Math.max(0, Number(src.deck) || 0),
     shields: Math.max(0, Number(src.shields) || 0),
+    deckRevealZone: normalizeMobilePublicZone(src.deckRevealZone),
+    revealedZone: normalizeMobilePublicZone(src.revealedZone),
     battleZone: normalizeMobilePublicZone(src.battleZone),
     manaZone: normalizeMobilePublicZone(src.manaZone),
     graveyard: normalizeMobilePublicZone(src.graveyard)
@@ -629,6 +643,8 @@ function buildMobilePublicState(state) {
     hand: state.hand.length,
     deck: state.deck.length,
     shields: state.shields.length,
+    deckRevealZone: serializeMobilePublicCards(state.deckRevealZone),
+    revealedZone: serializeMobilePublicCards(state.revealedZone),
     battleZone: serializeMobilePublicCards(state.battleZone),
     manaZone: serializeMobilePublicCards(state.manaZone),
     graveyard: serializeMobilePublicCards(state.graveyard)
@@ -706,6 +722,19 @@ async function sendMobileChat() {
   }
 }
 
+function sendMobileOnlineActionLog(message) {
+  if (!window._ol) return;
+
+  const room = window._ol.room;
+  const player = window._ol.p;
+  const msg = String(message || '').trim();
+  if (!room || !player || !msg) return;
+
+  NetworkService.sendChat(room, player, msg).catch((err) => {
+    console.warn('send mobile online action log error', err);
+  });
+}
+
 function onMobileChatKeyDown(event) {
   if (event.key !== 'Enter') return;
   event.preventDefault();
@@ -728,39 +757,114 @@ function getMobileZoneLabel(zoneKey) {
     battleZone: 'バトル',
     manaZone: 'マナ',
     shields: 'シールド',
+    revealedZone: '公開中',
     deck: '山札',
     graveyard: '墓地'
   };
   return labels[zoneKey] || zoneKey;
 }
 
-function getMobileCardZoneActions(sourceZone, sourceCard) {
-  const actions = [
-    { kind: 'move', label: '手札へ', toZone: 'hand', position: 'top' },
-    { kind: 'move', label: 'バトルゾーンへ', toZone: 'battleZone', position: 'top' },
-    { kind: 'move', label: 'バトルゾーンの下へ', toZone: 'battleZone', position: 'bottom' },
-    { kind: 'move', label: 'シールドへ', toZone: 'shields', position: 'top' },
-    { kind: 'move', label: 'マナへ', toZone: 'manaZone', position: 'top' },
-    { kind: 'move', label: '墓地へ', toZone: 'graveyard', position: 'top' },
-    { kind: 'move', label: '山札トップへ', toZone: 'deck', position: 'top' },
-    { kind: 'move', label: '山札ボトムへ', toZone: 'deck', position: 'bottom' },
-    { kind: 'under', label: '盤面カードの下へ（対象選択）' },
-    { kind: 'detail', label: 'カード詳細' }
-  ];
+function isMobileHiddenCardInfo(sourceZone, sourceCard) {
+  if (sourceZone === 'deck') return true;
+  if (sourceZone === 'shields') return !sourceCard?.faceUp;
+  return false;
+}
 
-  if (sourceZone === 'battleZone' || sourceZone === 'manaZone') {
-    actions.unshift(
-      { kind: 'tap', label: 'タップ', tapped: true },
-      { kind: 'tap', label: 'アンタップ', tapped: false }
+function getMobileCardZoneActions(sourceZone, sourceCard) {
+  const actions = [];
+  const move = (label, toZone, position = 'top', red = false) => ({ kind: 'move', label, toZone, position, red });
+
+  if (sourceZone === 'hand') {
+    actions.push(
+      move('マナゾーンへ', 'manaZone'),
+      move('バトルゾーンへ', 'battleZone'),
+      move('シールドへ', 'shields'),
+      move('山札トップへ', 'deck', 'top'),
+      move('山札ボトムへ', 'deck', 'bottom'),
+      { kind: 'sep' },
+      move('墓地へ（呪文使用）', 'graveyard', 'top', true),
+      { kind: 'sep' },
+      { kind: 'under', label: '盤面カードの下へ（対象選択）' }
+    );
+  } else if (sourceZone === 'battleZone') {
+    actions.push(
+      { kind: 'tap', label: sourceCard?.tapped ? 'アンタップ' : 'タップ（攻撃）', tapped: !sourceCard?.tapped },
+      move('手札へ', 'hand'),
+      move('マナゾーンへ', 'manaZone'),
+      move('シールドへ', 'shields'),
+      move('山札トップへ', 'deck', 'top'),
+      move('山札ボトムへ', 'deck', 'bottom'),
+      { kind: 'under', label: '盤面カードの下へ（対象選択）' },
+      { kind: 'sep' },
+      move('墓地へ', 'graveyard', 'top', true)
+    );
+  } else if (sourceZone === 'manaZone') {
+    actions.push(
+      { kind: 'tap', label: sourceCard?.tapped ? 'アンタップ' : 'タップ（マナ使用）', tapped: !sourceCard?.tapped },
+      move('手札へ', 'hand'),
+      move('バトルゾーンへ', 'battleZone'),
+      move('シールドへ', 'shields'),
+      move('山札トップへ', 'deck', 'top'),
+      move('山札ボトムへ', 'deck', 'bottom'),
+      { kind: 'sep' },
+      move('墓地へ', 'graveyard', 'top', true)
+    );
+  } else if (sourceZone === 'shields') {
+    actions.push(
+      move('公開中へ（シールドブレイク）', 'revealedZone'),
+      move('マナゾーンへ', 'manaZone'),
+      move('バトルゾーンへ', 'battleZone'),
+      move('山札トップへ', 'deck', 'top'),
+      move('山札ボトムへ', 'deck', 'bottom'),
+      { kind: 'sep' },
+      move('墓地へ', 'graveyard', 'top', true),
+      { kind: 'sep' },
+      { kind: 'flip', label: sourceCard?.faceUp ? '裏向きにする' : '表向きにする', faceUp: !sourceCard?.faceUp },
+      { kind: 'sep' },
+      { kind: 'under', label: '盤面カードの下へ（対象選択）' }
+    );
+  } else if (sourceZone === 'revealedZone') {
+    actions.push(
+      move('手札に加える', 'hand'),
+      move('バトルゾーンへ（トリガー）', 'battleZone'),
+      move('マナゾーンへ（トリガー）', 'manaZone'),
+      { kind: 'sep' },
+      move('墓地へ（トリガー解決）', 'graveyard', 'top', true)
+    );
+  } else if (sourceZone === 'graveyard') {
+    actions.push(
+      move('手札へ', 'hand'),
+      move('バトルゾーンへ', 'battleZone'),
+      move('マナゾーンへ', 'manaZone'),
+      move('シールドへ', 'shields'),
+      move('山札トップへ', 'deck', 'top'),
+      move('山札ボトムへ', 'deck', 'bottom')
+    );
+  } else if (sourceZone === 'deck') {
+    actions.push(
+      move('手札へ', 'hand'),
+      move('バトルゾーンへ', 'battleZone'),
+      move('マナゾーンへ', 'manaZone'),
+      move('シールドへ', 'shields'),
+      move('墓地へ', 'graveyard', 'top', true),
+      move('山札ボトムへ', 'deck', 'bottom'),
+      { kind: 'sep' },
+      { kind: 'deckAll', label: '山札を全部見る' }
     );
   }
 
-  return actions.filter((action) => {
-    if (action.kind === 'move' && sourceZone === 'deck' && action.toZone === 'deck' && action.position === 'top') {
-      return false;
-    }
-    return true;
-  });
+  if (actions.length && actions[actions.length - 1].kind === 'sep') {
+    actions.pop();
+  }
+  const canShowDetail = !window._ol || !isMobileHiddenCardInfo(sourceZone, sourceCard);
+  if (actions.length && canShowDetail) {
+    actions.push({ kind: 'sep' });
+  }
+  if (canShowDetail) {
+    actions.push({ kind: 'detail', label: 'カード詳細' });
+  }
+
+  return actions;
 }
 
 function ensureMobileCardZoneMenu() {
@@ -812,6 +916,55 @@ function moveMobileCardBetweenZones(fromZone, fromIndex, toZone, position = 'top
   renderMobileGame();
 }
 
+function resolveMobileRevealedToHand(index) {
+  moveMobileCardBetweenZones('revealedZone', Number(index), 'hand', 'top');
+}
+
+function useMobileRevealedAsTrigger(index) {
+  moveMobileCardBetweenZones('revealedZone', Number(index), 'graveyard', 'top');
+}
+
+function setMobileShieldFaceUp(index, faceUp) {
+  closeMobileCardZoneMenu();
+
+  if (window._ol && !canActMobileOnline()) {
+    showMobileToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const idx = Number(index);
+  if (!Number.isInteger(idx)) return;
+
+  const ok = window.GameController?.setShieldFaceUp
+    ? window.GameController.setShieldFaceUp(engineMobile, idx, !!faceUp)
+    : (typeof engineMobile.setShieldFaceUp === 'function' ? engineMobile.setShieldFaceUp(idx, !!faceUp) : false);
+  if (!ok) {
+    showMobileToast('シールドの向きを変更できませんでした', 'warn');
+    return;
+  }
+
+  if (window._ol) olSendActionMobile('state');
+  renderMobileGame();
+}
+
+function untapAllMobileMana() {
+  if (window._ol && !canActMobileOnline()) {
+    showMobileToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const ok = window.GameController?.untapAllMana
+    ? window.GameController.untapAllMana(engineMobile)
+    : (typeof engineMobile.untapAllMana === 'function' ? engineMobile.untapAllMana() : false);
+  if (!ok) {
+    showMobileToast('マナゾーンにアンタップ対象がありません', 'info');
+    return;
+  }
+
+  if (window._ol) olSendActionMobile('state');
+  renderMobileGame();
+}
+
 function setMobileCardTapped(zone, idx, tapped) {
   closeMobileCardZoneMenu();
 
@@ -837,7 +990,7 @@ function setMobileCardTapped(zone, idx, tapped) {
   renderMobileGame();
 }
 
-function openMobileCardDetailFromZone(sourceZone, sourceIndex) {
+async function openMobileCardDetailFromZone(sourceZone, sourceIndex) {
   const source = engineMobile?.state?.[sourceZone];
   const idx = Number(sourceIndex);
   if (!Array.isArray(source) || !Number.isInteger(idx) || !source[idx]) {
@@ -845,8 +998,22 @@ function openMobileCardDetailFromZone(sourceZone, sourceIndex) {
     return;
   }
 
+  const card = source[idx];
+  const hiddenCardInfo = isMobileHiddenCardInfo(sourceZone, card);
   closeMobileCardZoneMenu();
-  showMobileCardDetail(source[idx], { allowAdd: false });
+
+  if (hiddenCardInfo && window._ol) {
+    showMobileToast('オンライン対戦では非公開カードの詳細は確認できません', 'warn');
+    return;
+  }
+
+  if (hiddenCardInfo && !window._ol) {
+    const zoneLabel = getMobileZoneLabel(sourceZone);
+    const ok = await askMobileConfirm(`${zoneLabel}の非公開カードを確認しますか？`, '見る', 'キャンセル');
+    if (!ok) return;
+  }
+
+  showMobileCardDetail(card, { allowAdd: false });
 }
 
 function prepareMobileInsertUnder(fromZone, fromIndex) {
@@ -865,14 +1032,14 @@ function prepareMobileInsertUnder(fromZone, fromIndex) {
   }
 
   _mobileUnderInsertState = { fromZone, fromIndex: idx };
-  showMobileToast('重ね先のバトル/マナをタップしてください', 'info', 2600);
+  showMobileToast('重ね先のバトル/マナ/シールドをタップしてください', 'info', 2800);
   renderMobileGame();
 }
 
 function insertMobileCardUnderTarget(targetZone, targetIndex) {
   if (!_mobileUnderInsertState) return;
-  if (targetZone !== 'battleZone' && targetZone !== 'manaZone') {
-    showMobileToast('重ね先はバトル/マナのみです', 'warn');
+  if (targetZone !== 'battleZone' && targetZone !== 'manaZone' && targetZone !== 'shields') {
+    showMobileToast('重ね先はバトル/マナ/シールドのみです', 'warn');
     return;
   }
 
@@ -924,6 +1091,29 @@ function onMobileBoardCardTap(zone, idx) {
   tapMobileCard(zone, idx);
 }
 
+function onMobileShieldCardTap(idx) {
+  if (_mobileSkipNextTap) {
+    _mobileSkipNextTap = false;
+    return;
+  }
+
+  if (_mobileUnderInsertState) {
+    const sameSource = _mobileUnderInsertState.fromZone === 'shields'
+      && _mobileUnderInsertState.fromIndex === idx;
+    if (sameSource) {
+      _mobileUnderInsertState = null;
+      showMobileToast('重ね配置をキャンセルしました', 'info');
+      renderMobileGame();
+      return;
+    }
+
+    insertMobileCardUnderTarget('shields', idx);
+    return;
+  }
+
+  selectMobileShield(idx);
+}
+
 function openMobileCardZoneMenu(event, sourceZone, sourceIndex) {
   cancelMobileZoneLongPress();
 
@@ -958,11 +1148,21 @@ function openMobileCardZoneMenu(event, sourceZone, sourceIndex) {
   _mobileZoneMenuState = { sourceZone, sourceIndex: idx };
 
   list.innerHTML = actions.map((action) => {
+    if (action.kind === 'sep') {
+      return '<div class="mg-zone-menu-sep" aria-hidden="true"></div>';
+    }
+
+    const className = [
+      'mg-zone-menu-btn',
+      action.kind === 'detail' ? 'detail' : '',
+      action.red ? 'red' : ''
+    ].filter(Boolean).join(' ');
+
     if (action.kind === 'tap') {
       return `
         <button
           type="button"
-          class="mg-zone-menu-btn"
+          class="${className}"
           onclick="setMobileCardTapped('${sourceZone}', ${idx}, ${action.tapped ? 'true' : 'false'})">
           ${escapeHtmlMobile(action.label)}
         </button>
@@ -973,8 +1173,19 @@ function openMobileCardZoneMenu(event, sourceZone, sourceIndex) {
       return `
         <button
           type="button"
-          class="mg-zone-menu-btn"
+          class="${className}"
           onclick="prepareMobileInsertUnder('${sourceZone}', ${idx})">
+          ${escapeHtmlMobile(action.label)}
+        </button>
+      `;
+    }
+
+    if (action.kind === 'flip') {
+      return `
+        <button
+          type="button"
+          class="${className}"
+          onclick="setMobileShieldFaceUp(${idx}, ${action.faceUp ? 'true' : 'false'})">
           ${escapeHtmlMobile(action.label)}
         </button>
       `;
@@ -984,8 +1195,19 @@ function openMobileCardZoneMenu(event, sourceZone, sourceIndex) {
       return `
         <button
           type="button"
-          class="mg-zone-menu-btn detail"
+          class="${className}"
           onclick="openMobileCardDetailFromZone('${sourceZone}', ${idx})">
+          ${escapeHtmlMobile(action.label)}
+        </button>
+      `;
+    }
+
+    if (action.kind === 'deckAll') {
+      return `
+        <button
+          type="button"
+          class="${className}"
+          onclick="openMobileDeckAllModal()">
           ${escapeHtmlMobile(action.label)}
         </button>
       `;
@@ -994,7 +1216,7 @@ function openMobileCardZoneMenu(event, sourceZone, sourceIndex) {
     return `
       <button
         type="button"
-        class="mg-zone-menu-btn"
+        class="${className}"
         onclick="moveMobileCardBetweenZones('${sourceZone}', ${idx}, '${action.toZone}', '${action.position || 'top'}')">
         ${escapeHtmlMobile(action.label)}
       </button>
@@ -1067,7 +1289,16 @@ function initMobileUI() {
  */
 function renderMobileDeckList() {
   closeMobileCardZoneMenu();
+  closeMobileDeckRevealModal();
+  closeMobileDeckAllModal();
   _mobileUnderInsertState = null;
+  _mobileRibbonOtherOpen = false;
+  _mobileDeckPeekPrivateCards = [];
+  _mobileDeckRevealModalState = {
+    mode: 'public',
+    destination: _mobileDeckRevealModalState.destination || 'hand',
+    selected: {}
+  };
 
   const container = document.getElementById('app-mobile');
   const savedDecks = getSavedDecksMobile();
@@ -1435,7 +1666,16 @@ async function startMobileGame(deckName) {
   _mobileSelectedHandIdx = null;
   _mobileUnderInsertState = null;
   _mobileNeedDrawGuide = true;
+  _mobileRibbonOtherOpen = false;
+  _mobileDeckPeekPrivateCards = [];
+  _mobileDeckRevealModalState = {
+    mode: 'public',
+    destination: _mobileDeckRevealModalState.destination || 'hand',
+    selected: {}
+  };
   closeMobileCardZoneMenu();
+  closeMobileDeckRevealModal();
+  closeMobileDeckAllModal();
   renderMobileGame();
 }
 
@@ -1444,6 +1684,7 @@ async function startMobileGame(deckName) {
  */
 function renderMobileGame() {
   const state = engineMobile.getState();
+  const revealedZoneCards = Array.isArray(state.revealedZone) ? state.revealedZone : [];
 
   if (_mobileUnderInsertState) {
     const sourceCards = state[_mobileUnderInsertState.fromZone];
@@ -1510,7 +1751,9 @@ function renderMobileGame() {
       ? 'battleZone'
       : (zoneClass === 'mana'
         ? 'manaZone'
-        : (zoneClass === 'grave' ? 'graveyard' : ''));
+        : (zoneClass === 'grave'
+          ? 'graveyard'
+          : (zoneClass === 'revealed' ? 'revealedZone' : '')));
     const canMenu = idx >= 0 && !!sourceZone;
     const isOwnBoardCard = idx >= 0 && (sourceZone === 'battleZone' || sourceZone === 'manaZone');
     const isUnderSource = !!_mobileUnderInsertState
@@ -1582,6 +1825,10 @@ function renderMobileGame() {
               ${renderMobileBackCards(Number(opp.shields ?? 0), 'shield')}
             </div>
             <div class="mg-opp-panel">
+              <div class="mg-opp-label">公開中 (${getZoneCount(opp.revealedZone)})</div>
+              ${renderOpponentPublicZone(opp.revealedZone, 'revealed')}
+            </div>
+            <div class="mg-opp-panel">
               <div class="mg-opp-label">バトル (${getZoneCount(opp.battleZone)})</div>
               ${renderOpponentPublicZone(opp.battleZone, 'battle')}
             </div>
@@ -1602,24 +1849,51 @@ function renderMobileGame() {
 
         <div class="mg-me-wrap">
           <div class="mg-me-title">自分エリア: ${escapeHtmlMobile(myName)}</div>
-          ${_mobileUnderInsertState ? '<div class="mg-zone-hint">重ね先を選択中: バトル/マナをタップ</div>' : ''}
+          ${_mobileUnderInsertState ? '<div class="mg-zone-hint">重ね先を選択中: バトル/マナ/シールドをタップ</div>' : ''}
         </div>
 
         <!-- シールド -->
         <div class="mg-zone-section shield">
           <div class="mg-zone-title">シールド (${state.shields.length})</div>
           <div class="mg-card-grid center">
-            ${state.shields.length ? state.shields.map((s, i) => `
-              <div class="mg-card-chip shield ${_mobileSelectedShieldIdx === i ? 'selected' : ''}" onclick="selectMobileShield(${i})"
-                oncontextmenu="openMobileCardZoneMenu(event, 'shields', ${i})"
-                ontouchstart="startMobileZoneLongPress(event, 'shields', ${i})"
-                ontouchend="cancelMobileZoneLongPress()"
-                ontouchmove="cancelMobileZoneLongPress()"
-                ontouchcancel="cancelMobileZoneLongPress()"
-                title="${escapeHtmlMobile(s.name || 'シールド')}">
-                SH
+            ${state.shields.length ? state.shields.map((s, i) => {
+              const civ = getMobileCardCivClass(s);
+              const imageUrl = getMobileCardImageUrl(s);
+              const shortName = getMobileCardShortName(s?.name || '', 8);
+              const underCount = getMobileUnderCardCount(s);
+              return `
+                <div class="mg-card-chip shield ${civ} ${s?.faceUp ? 'faceup' : ''} ${imageUrl && s?.faceUp ? 'has-image' : ''} ${underCount > 0 ? 'has-under' : ''} ${_mobileSelectedShieldIdx === i ? 'selected' : ''} ${_mobileUnderInsertState ? 'stack-target' : ''}"
+                  onclick="onMobileShieldCardTap(${i})"
+                  oncontextmenu="openMobileCardZoneMenu(event, 'shields', ${i})"
+                  ontouchstart="startMobileZoneLongPress(event, 'shields', ${i})"
+                  ontouchend="cancelMobileZoneLongPress()"
+                  ontouchmove="cancelMobileZoneLongPress()"
+                  ontouchcancel="cancelMobileZoneLongPress()"
+                  title="${escapeHtmlMobile(s?.faceUp ? (s.name || 'シールド') : 'シールド')}">
+                  ${underCount > 0 ? `<div class="mg-under-stack" aria-hidden="true">${renderMobileUnderLayers(underCount)}</div><div class="mg-under-count">+${underCount}</div>` : ''}
+                  ${s?.faceUp
+                    ? (imageUrl
+                      ? `<img src="${escapeHtmlMobile(imageUrl)}" alt="${escapeHtmlMobile(s.name || 'SHIELD')}" class="mg-card-chip-img" loading="lazy" decoding="async" onerror="handleMobileCardImageError(this)">`
+                      : `<div class="mg-card-name">${escapeHtmlMobile(shortName || 'SH')}</div>`)
+                    : 'SH'}
+                </div>
+              `;
+            }).join('') : '<div class="mg-zone-empty">カードなし</div>'}
+          </div>
+        </div>
+
+        <div class="mg-zone-section revealed">
+          <div class="mg-zone-title">公開中 (S・トリガー判定) (${revealedZoneCards.length})</div>
+          <div class="mg-revealed-grid">
+            ${revealedZoneCards.length ? revealedZoneCards.map((c, i) => `
+              <div class="mg-revealed-item">
+                ${renderChip(c, 'revealed', i)}
+                <div class="mg-revealed-actions">
+                  <button type="button" class="mg-revealed-btn hand" onclick="resolveMobileRevealedToHand(${i})">手札に加える</button>
+                  <button type="button" class="mg-revealed-btn trigger" onclick="useMobileRevealedAsTrigger(${i})">トリガー使用</button>
+                </div>
               </div>
-            `).join('') : '<div class="mg-zone-empty">カードなし</div>'}
+            `).join('') : '<div class="mg-zone-empty">公開カードなし</div>'}
           </div>
         </div>
         
@@ -1706,16 +1980,41 @@ function renderMobileGame() {
         </div>
       ` : ''}
       
-      <!-- ボタン -->
-      <div class="mg-action-row">
-        <button onclick="drawMobileCard()" class="mg-btn draw ${_mobileNeedDrawGuide ? 'guide' : ''}">ドロー</button>
-        <button onclick="turnMobileEnd()" class="mg-btn end">ターン終</button>
-        <button onclick="moveMobileToGraveyard('battle')" class="mg-btn battle-grave">戦→墓</button>
-        <button onclick="moveMobileToGraveyard('mana')" class="mg-btn mana-grave">マナ→墓</button>
-        <button onclick="returnMobileFromGraveyard('hand')" class="mg-btn grave-return">墓→手</button>
-        <button onclick="breakMobileShield()" class="mg-btn shield-break">${shieldBreakLabel}</button>
-        ${!window._ol ? '<button onclick="undoMobileGame()" class="mg-btn undo">やり直し</button>' : ''}
-        <button onclick="renderMobileDeckList()" class="mg-btn back">戻る</button>
+      <!-- 折りたたみリボン -->
+      <div class="mg-ribbon">
+        <div class="mg-ribbon-main">
+          <button onclick="drawMobileCard()" class="mg-btn mg-ribbon-btn draw ${_mobileNeedDrawGuide ? 'guide' : ''}">ドロー</button>
+          <button onclick="turnMobileEnd()" class="mg-btn mg-ribbon-btn end">ターンエンド</button>
+          <button onclick="toggleMobileRibbonOther()" class="mg-btn mg-ribbon-btn other">その他 ${_mobileRibbonOtherOpen ? '▲' : '▼'}</button>
+        </div>
+        <div class="mg-ribbon-extra ${_mobileRibbonOtherOpen ? 'open' : ''}">
+          <div class="mg-ribbon-extra-grid">
+            <button onclick="moveMobileDeckTopTo('manaZone')" class="mg-btn mg-ribbon-btn deck-mana">トップ→マナ</button>
+            <button onclick="moveMobileDeckTopTo('graveyard')" class="mg-btn mg-ribbon-btn deck-grave">トップ→墓地</button>
+            <button onclick="moveMobileDeckTopTo('shields')" class="mg-btn mg-ribbon-btn deck-shield">トップ→シールド</button>
+            <button onclick="untapAllMobileMana()" class="mg-btn mg-ribbon-btn mana-untap">マナ全アンタップ</button>
+          </div>
+          <div class="mg-ribbon-n-control">
+            <span class="mg-ribbon-n-label">n</span>
+            <input
+              type="number"
+              id="mobile-deck-n-input"
+              class="mg-ribbon-n-input"
+              min="1"
+              max="40"
+              value="${_mobileDeckNValue}"
+              oninput="setMobileDeckNValue(this.value)">
+          </div>
+          <div class="mg-ribbon-extra-grid">
+            <button onclick="drawMobileDeckCardsToPublic()" class="mg-btn mg-ribbon-btn deck-reveal">山札からn枚表向き</button>
+            <button onclick="drawMobileDeckCardsToPrivate()" class="mg-btn mg-ribbon-btn deck-peek">山札からn枚見る</button>
+            <button onclick="openMobileDeckAllModal()" class="mg-btn mg-ribbon-btn deck-all">山札を全部見る</button>
+            <button onclick="breakMobileShield()" class="mg-btn mg-ribbon-btn shield-break">${shieldBreakLabel}</button>
+            <button onclick="returnMobileFromGraveyard('hand')" class="mg-btn mg-ribbon-btn grave-return">墓地→手札</button>
+            ${!window._ol ? '<button onclick="undoMobileGame()" class="mg-btn mg-ribbon-btn undo">やり直し</button>' : ''}
+            <button onclick="renderMobileDeckList()" class="mg-btn mg-ribbon-btn back">戻る</button>
+          </div>
+        </div>
       </div>
       
     </div>
@@ -1724,6 +2023,8 @@ function renderMobileGame() {
   if (ol) {
     renderMobileChatMessages();
   }
+  renderMobileDeckRevealModal();
+  renderMobileDeckAllModal();
 }
 
 function playMobileCard(idx) {
@@ -1803,6 +2104,636 @@ function closeMobileGraveyardModal() {
   if (modal) modal.classList.remove('open');
 }
 
+function toggleMobileRibbonOther() {
+  _mobileRibbonOtherOpen = !_mobileRibbonOtherOpen;
+  renderMobileGame();
+}
+
+function moveMobileDeckTopTo(toZone) {
+  const deck = engineMobile?.state?.deck;
+  if (!Array.isArray(deck) || deck.length === 0) {
+    showMobileToast('山札がありません', 'warn');
+    return;
+  }
+
+  moveMobileCardBetweenZones('deck', deck.length - 1, toZone, 'top');
+}
+
+function setMobileDeckNValue(rawValue) {
+  const parsed = Math.floor(Number(rawValue));
+  const next = Number.isFinite(parsed) ? parsed : _mobileDeckNValue;
+  _mobileDeckNValue = Math.max(1, Math.min(40, next));
+
+  const input = document.getElementById('mobile-deck-n-input');
+  if (input && Number(input.value) !== _mobileDeckNValue) {
+    input.value = String(_mobileDeckNValue);
+  }
+}
+
+function getMobileDeckN() {
+  const input = document.getElementById('mobile-deck-n-input');
+  if (input) {
+    setMobileDeckNValue(input.value);
+  }
+  return _mobileDeckNValue;
+}
+
+function getMobileDeckRevealCards(mode = 'public') {
+  if (mode === 'peek') return _mobileDeckPeekPrivateCards;
+  if (!engineMobile?.state) return [];
+  if (!Array.isArray(engineMobile.state.deckRevealZone)) {
+    engineMobile.state.deckRevealZone = [];
+  }
+  return engineMobile.state.deckRevealZone;
+}
+
+function getMobileDeckRevealDestinationOptions() {
+  return [
+    { value: 'hand', label: '手札' },
+    { value: 'battleZone', label: 'バトルゾーン' },
+    { value: 'manaZone', label: 'マナゾーン' },
+    { value: 'shields', label: 'シールド' },
+    { value: 'graveyard', label: '墓地' },
+    { value: 'deck:top', label: '山札トップ' },
+    { value: 'deck:bottom', label: '山札ボトム' }
+  ];
+}
+
+function ensureMobileDeckRevealModal() {
+  let modal = document.getElementById('mobile-deck-reveal-modal');
+  if (modal) return modal;
+
+  modal = document.createElement('div');
+  modal.id = 'mobile-deck-reveal-modal';
+  modal.className = 'dm-reveal-modal';
+  modal.innerHTML = `
+    <div class="dm-reveal-backdrop" onclick="closeMobileDeckRevealModal()"></div>
+    <div class="dm-reveal-body">
+      <div class="dm-reveal-head">
+        <div id="mobile-deck-reveal-title" class="dm-reveal-title">表向き公開 0枚</div>
+        <button type="button" class="dm-reveal-close" onclick="closeMobileDeckRevealModal()">閉じる</button>
+      </div>
+      <div id="mobile-deck-reveal-list" class="dm-reveal-list"></div>
+      <div id="mobile-deck-reveal-controls" class="dm-reveal-controls">
+        <label id="mobile-deck-reveal-check-wrap" class="dm-reveal-check-all">
+          <input type="checkbox" id="mobile-deck-reveal-all" onchange="toggleMobileDeckRevealSelectAll(this.checked)">
+          全選択
+        </label>
+        <select id="mobile-deck-reveal-dest" class="dm-reveal-select" onchange="setMobileDeckRevealDestination(this.value)"></select>
+        <button type="button" id="mobile-deck-reveal-move" class="dm-reveal-move" onclick="moveSelectedMobileDeckRevealCards()">移動</button>
+        <button type="button" id="mobile-deck-reveal-return" class="dm-reveal-return" onclick="returnAllMobileDeckRevealCards()">全部デッキに戻す</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function openMobileDeckRevealModal(mode = 'public') {
+  const cards = getMobileDeckRevealCards(mode);
+  if (!Array.isArray(cards) || !cards.length) {
+    showMobileToast('処理中のカードがありません', 'info');
+    return;
+  }
+
+  if (_mobileDeckRevealModalState.mode !== mode) {
+    _mobileDeckRevealModalState = {
+      mode,
+      destination: _mobileDeckRevealModalState.destination || 'hand',
+      selected: {}
+    };
+  }
+
+  closeMobileDeckAllModal();
+  const modal = ensureMobileDeckRevealModal();
+  modal.classList.add('open');
+  renderMobileDeckRevealModal();
+}
+
+function closeMobileDeckRevealModal() {
+  const modal = document.getElementById('mobile-deck-reveal-modal');
+  if (modal) {
+    modal.classList.remove('open');
+  }
+}
+
+function setMobileDeckRevealDestination(value) {
+  const options = getMobileDeckRevealDestinationOptions();
+  const safe = options.find((opt) => opt.value === value)?.value || 'hand';
+  _mobileDeckRevealModalState.destination = safe;
+}
+
+function setMobileDeckRevealCardSelected(index, checked) {
+  const idx = Number(index);
+  if (!Number.isInteger(idx) || idx < 0) return;
+
+  if (checked) {
+    _mobileDeckRevealModalState.selected[idx] = true;
+  } else {
+    delete _mobileDeckRevealModalState.selected[idx];
+  }
+}
+
+function toggleMobileDeckRevealCard(index) {
+  const idx = Number(index);
+  if (!Number.isInteger(idx) || idx < 0) return;
+  const currently = !!_mobileDeckRevealModalState.selected[idx];
+  setMobileDeckRevealCardSelected(idx, !currently);
+  renderMobileDeckRevealModal();
+}
+
+function toggleMobileDeckRevealSelectAll(checked) {
+  const cards = getMobileDeckRevealCards(_mobileDeckRevealModalState.mode);
+  const next = {};
+  if (checked) {
+    cards.forEach((_, idx) => {
+      next[idx] = true;
+    });
+  }
+  _mobileDeckRevealModalState.selected = next;
+  renderMobileDeckRevealModal();
+}
+
+function parseMobileDeckRevealDestination(value) {
+  const normalized = String(value || 'hand');
+  if (normalized === 'deck:bottom') {
+    return { toZone: 'deck', position: 'bottom' };
+  }
+  if (normalized === 'deck:top') {
+    return { toZone: 'deck', position: 'top' };
+  }
+  return { toZone: normalized, position: 'top' };
+}
+
+function moveMobilePublicDeckRevealCard(index, toZone, position = 'top') {
+  if (!Number.isInteger(index) || index < 0) return false;
+  if (!engineMobile) return false;
+
+  return window.GameController?.moveCardBetweenZones
+    ? window.GameController.moveCardBetweenZones(engineMobile, 'deckRevealZone', index, toZone, { position })
+    : engineMobile.moveCardBetweenZones('deckRevealZone', index, toZone, { position });
+}
+
+function applyMobileDetachedCardToZone(card, toZone, position = 'top') {
+  if (!card || !engineMobile?.state) return false;
+
+  if (toZone === 'deck') {
+    if (!Array.isArray(engineMobile.state.deck)) return false;
+    if (card.faceUp !== undefined) delete card.faceUp;
+    if (position === 'bottom') {
+      engineMobile.state.deck.unshift(card);
+    } else {
+      engineMobile.state.deck.push(card);
+    }
+    return true;
+  }
+
+  const target = engineMobile.state[toZone];
+  if (!Array.isArray(target)) return false;
+
+  if (toZone === 'shields') {
+    card.faceUp = false;
+    card.tapped = false;
+  } else {
+    if (card.faceUp !== undefined) delete card.faceUp;
+    if (toZone === 'hand' || toZone === 'battleZone' || toZone === 'manaZone' || toZone === 'deckRevealZone' || toZone === 'revealedZone') {
+      card.tapped = false;
+    }
+  }
+
+  target.push(card);
+  return true;
+}
+
+function renderMobileDeckRevealModal() {
+  const modal = document.getElementById('mobile-deck-reveal-modal');
+  if (!modal || !modal.classList.contains('open')) return;
+
+  const mode = _mobileDeckRevealModalState.mode === 'peek' ? 'peek' : 'public';
+  const cards = getMobileDeckRevealCards(mode);
+  if (!cards.length) {
+    closeMobileDeckRevealModal();
+    return;
+  }
+
+  const titleEl = document.getElementById('mobile-deck-reveal-title');
+  const listEl = document.getElementById('mobile-deck-reveal-list');
+  const controlsEl = document.getElementById('mobile-deck-reveal-controls');
+  const checkWrapEl = document.getElementById('mobile-deck-reveal-check-wrap');
+  const destinationEl = document.getElementById('mobile-deck-reveal-dest');
+  const moveBtnEl = document.getElementById('mobile-deck-reveal-move');
+  const returnBtnEl = document.getElementById('mobile-deck-reveal-return');
+  const allEl = document.getElementById('mobile-deck-reveal-all');
+  if (!titleEl || !listEl || !controlsEl || !checkWrapEl || !destinationEl || !moveBtnEl || !returnBtnEl || !allEl) return;
+
+  const modeLabel = mode === 'peek' ? '確認中' : '表向き公開';
+  titleEl.textContent = `${modeLabel} ${cards.length}枚（自分デッキから）`;
+  controlsEl.style.display = 'flex';
+
+  const options = getMobileDeckRevealDestinationOptions();
+  destinationEl.innerHTML = options.map((option) => `
+    <option value="${option.value}" ${_mobileDeckRevealModalState.destination === option.value ? 'selected' : ''}>${option.label}</option>
+  `).join('');
+
+  const selected = _mobileDeckRevealModalState.selected;
+  const quickButtons = [
+    { value: 'hand', label: '手札', className: 'hand' },
+    { value: 'battleZone', label: 'BZ', className: 'battle' },
+    { value: 'manaZone', label: 'マナ', className: 'mana' },
+    { value: 'shields', label: '盾', className: 'shield' },
+    { value: 'graveyard', label: '墓地', className: 'grave' },
+    { value: 'deck:top', label: '上', className: 'deck' },
+    { value: 'deck:bottom', label: '下', className: 'deck' }
+  ];
+
+  listEl.innerHTML = cards.map((card, index) => {
+    const thumb = renderMobileCardThumb(card, 'dm-reveal-thumb');
+    const positionLabel = index === 0 ? 'トップ' : `${index + 1}枚目`;
+    const payload = escapeHtmlMobile(getMobileCardDisplayName(card));
+    const checked = !!selected[index];
+    const quickHtml = quickButtons.map((btn) => `
+      <button
+        type="button"
+        class="dm-reveal-quick-btn ${btn.className}"
+        onclick="event.stopPropagation(); moveSingleMobileDeckRevealCard(${index}, '${btn.value}')">
+        ${btn.label}
+      </button>
+    `).join('');
+
+    return `
+      <div class="dm-reveal-card ${checked ? 'selected' : ''}" onclick="toggleMobileDeckRevealCard(${index})" title="${payload}">
+        <input
+          type="checkbox"
+          class="dm-reveal-cb"
+          ${checked ? 'checked' : ''}
+          onclick="event.stopPropagation()"
+          onchange="setMobileDeckRevealCardSelected(${index}, this.checked); renderMobileDeckRevealModal();">
+        <div class="dm-reveal-art">${thumb}</div>
+        <div class="dm-reveal-pos">${positionLabel}</div>
+        <div class="dm-reveal-name">${payload}</div>
+        <div class="dm-reveal-quick">${quickHtml}</div>
+      </div>
+    `;
+  }).join('');
+
+  const selectedCount = cards.reduce((count, _, idx) => count + (selected[idx] ? 1 : 0), 0);
+  allEl.checked = cards.length > 0 && selectedCount === cards.length;
+}
+
+function moveSingleMobileDeckRevealCard(index, destinationValue) {
+  if (window._ol && !canActMobileOnline()) {
+    showMobileToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const mode = _mobileDeckRevealModalState.mode === 'peek' ? 'peek' : 'public';
+  const cards = getMobileDeckRevealCards(mode);
+  const idx = Number(index);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= cards.length) return;
+
+  const destination = parseMobileDeckRevealDestination(destinationValue);
+  let ok = false;
+
+  if (mode === 'public') {
+    ok = moveMobilePublicDeckRevealCard(idx, destination.toZone, destination.position);
+    if (ok && window._ol) {
+      olSendActionMobile('state');
+    }
+  } else {
+    const card = _mobileDeckPeekPrivateCards[idx];
+    if (!card) return;
+    if (typeof engineMobile?._saveState === 'function') {
+      engineMobile._saveState();
+    }
+    _mobileDeckPeekPrivateCards.splice(idx, 1);
+    ok = applyMobileDetachedCardToZone(card, destination.toZone, destination.position);
+  }
+
+  if (!ok) {
+    showMobileToast('カード移動に失敗しました', 'warn');
+    return;
+  }
+
+  _mobileDeckRevealModalState.selected = {};
+  renderMobileGame();
+  renderMobileDeckRevealModal();
+
+  if (!getMobileDeckRevealCards(mode).length) {
+    closeMobileDeckRevealModal();
+  }
+}
+
+function drawMobileDeckCardsToPublic() {
+  if (window._ol && !canActMobileOnline()) {
+    showMobileToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const publicCards = getMobileDeckRevealCards('public');
+  if (publicCards.length) {
+    openMobileDeckRevealModal('public');
+    return;
+  }
+
+  if (_mobileDeckPeekPrivateCards.length) {
+    showMobileToast('確認中のカードを先に処理してください', 'warn');
+    openMobileDeckRevealModal('peek');
+    return;
+  }
+
+  const n = getMobileDeckN();
+  const moved = typeof engineMobile?.extractDeckTopCards === 'function'
+    ? engineMobile.extractDeckTopCards(n, 'deckRevealZone', { faceUp: true })
+    : [];
+  if (!moved.length) {
+    showMobileToast('山札がありません', 'warn');
+    return;
+  }
+
+  _mobileDeckRevealModalState = {
+    mode: 'public',
+    destination: _mobileDeckRevealModalState.destination || 'hand',
+    selected: {}
+  };
+
+  if (window._ol) olSendActionMobile('state');
+  renderMobileGame();
+  openMobileDeckRevealModal('public');
+}
+
+function drawMobileDeckCardsToPrivate() {
+  if (window._ol && !canActMobileOnline()) {
+    showMobileToast('相手のターンです', 'warn');
+    return;
+  }
+
+  if (_mobileDeckPeekPrivateCards.length) {
+    openMobileDeckRevealModal('peek');
+    return;
+  }
+
+  const publicCards = getMobileDeckRevealCards('public');
+  if (publicCards.length) {
+    showMobileToast('表向き公開中のカードを先に処理してください', 'warn');
+    openMobileDeckRevealModal('public');
+    return;
+  }
+
+  const n = getMobileDeckN();
+  const moved = typeof engineMobile?.extractDeckTopCards === 'function'
+    ? engineMobile.extractDeckTopCards(n)
+    : [];
+  if (!moved.length) {
+    showMobileToast('山札がありません', 'warn');
+    return;
+  }
+
+  _mobileDeckPeekPrivateCards = moved;
+  _mobileDeckRevealModalState = {
+    mode: 'peek',
+    destination: _mobileDeckRevealModalState.destination || 'hand',
+    selected: {}
+  };
+
+  if (window._ol) {
+    sendMobileOnlineActionLog(`【操作ログ】山札から${moved.length}枚を確認しました`);
+  }
+
+  renderMobileGame();
+  openMobileDeckRevealModal('peek');
+}
+
+function moveSelectedMobileDeckRevealCards() {
+  if (window._ol && !canActMobileOnline()) {
+    showMobileToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const mode = _mobileDeckRevealModalState.mode === 'peek' ? 'peek' : 'public';
+  const cards = getMobileDeckRevealCards(mode);
+  if (!cards.length) {
+    closeMobileDeckRevealModal();
+    return;
+  }
+
+  const selectedIndices = Object.keys(_mobileDeckRevealModalState.selected)
+    .map((key) => Number(key))
+    .filter((idx) => Number.isInteger(idx) && idx >= 0 && idx < cards.length)
+    .sort((a, b) => b - a);
+
+  if (!selectedIndices.length) {
+    showMobileToast('カードを選択してください', 'warn');
+    return;
+  }
+
+  const destination = parseMobileDeckRevealDestination(_mobileDeckRevealModalState.destination);
+  let movedCount = 0;
+
+  if (mode === 'public') {
+    selectedIndices.forEach((idx) => {
+      const ok = moveMobilePublicDeckRevealCard(idx, destination.toZone, destination.position);
+      if (ok) movedCount += 1;
+    });
+    if (movedCount && window._ol) {
+      olSendActionMobile('state');
+    }
+  } else {
+    if (typeof engineMobile?._saveState === 'function') {
+      engineMobile._saveState();
+    }
+
+    selectedIndices.forEach((idx) => {
+      const card = _mobileDeckPeekPrivateCards[idx];
+      if (!card) return;
+      _mobileDeckPeekPrivateCards.splice(idx, 1);
+      if (applyMobileDetachedCardToZone(card, destination.toZone, destination.position)) {
+        movedCount += 1;
+      }
+    });
+  }
+
+  _mobileDeckRevealModalState.selected = {};
+  renderMobileGame();
+  renderMobileDeckRevealModal();
+
+  if (!movedCount) {
+    showMobileToast('カード移動に失敗しました', 'warn');
+    return;
+  }
+
+  const rest = getMobileDeckRevealCards(mode).length;
+  if (!rest) {
+    closeMobileDeckRevealModal();
+  }
+}
+
+function returnAllMobileDeckRevealCards() {
+  if (window._ol && !canActMobileOnline()) {
+    showMobileToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const mode = _mobileDeckRevealModalState.mode === 'peek' ? 'peek' : 'public';
+  const cards = getMobileDeckRevealCards(mode);
+  if (!cards.length) {
+    closeMobileDeckRevealModal();
+    return;
+  }
+
+  let movedCount = 0;
+  if (mode === 'public') {
+    for (let idx = cards.length - 1; idx >= 0; idx -= 1) {
+      const ok = moveMobilePublicDeckRevealCard(idx, 'deck', 'top');
+      if (ok) movedCount += 1;
+    }
+    if (movedCount && window._ol) {
+      olSendActionMobile('state');
+    }
+  } else {
+    if (typeof engineMobile?._saveState === 'function') {
+      engineMobile._saveState();
+    }
+
+    for (let idx = _mobileDeckPeekPrivateCards.length - 1; idx >= 0; idx -= 1) {
+      const card = _mobileDeckPeekPrivateCards[idx];
+      if (!card) continue;
+      _mobileDeckPeekPrivateCards.splice(idx, 1);
+      if (applyMobileDetachedCardToZone(card, 'deck', 'top')) {
+        movedCount += 1;
+      }
+    }
+  }
+
+  _mobileDeckRevealModalState.selected = {};
+  renderMobileGame();
+  closeMobileDeckRevealModal();
+
+  if (!movedCount) {
+    showMobileToast('デッキに戻せるカードがありません', 'warn');
+  }
+}
+
+function getMobileDeckAllCardsForView() {
+  const deck = Array.isArray(engineMobile?.state?.deck) ? engineMobile.state.deck : [];
+  // 山札トップ（末尾）を左上に表示するため反転する
+  return deck.slice().reverse();
+}
+
+function ensureMobileDeckAllModal() {
+  let modal = document.getElementById('mobile-deckall-modal');
+  if (modal) return modal;
+
+  modal = document.createElement('div');
+  modal.id = 'mobile-deckall-modal';
+  modal.className = 'dm-deckall-modal';
+  modal.innerHTML = `
+    <div class="dm-deckall-backdrop" onclick="closeMobileDeckAllModal()"></div>
+    <div class="dm-deckall-body">
+      <div class="dm-deckall-head">
+        <div class="dm-deckall-head-left">
+          <button type="button" class="dm-deckall-shuffle" onclick="shuffleMobileDeckAndClose()">シャッフルして閉じる</button>
+          <div id="mobile-deckall-title" class="dm-deckall-title">山札一覧</div>
+        </div>
+        <button type="button" class="dm-deckall-close" onclick="closeMobileDeckAllModal()">閉じる</button>
+      </div>
+      <div id="mobile-deckall-list" class="dm-deckall-list"></div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function openMobileDeckAllModal() {
+  if (window._ol && !canActMobileOnline()) {
+    showMobileToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const deck = engineMobile?.state?.deck;
+  if (!Array.isArray(deck) || deck.length === 0) {
+    showMobileToast('山札がありません', 'warn');
+    return;
+  }
+
+  closeMobileCardZoneMenu();
+  closeMobileDeckRevealModal();
+  _mobileSelectedHandIdx = null;
+
+  const modal = ensureMobileDeckAllModal();
+  modal.classList.add('open');
+  renderMobileDeckAllModal();
+
+  if (window._ol) {
+    sendMobileOnlineActionLog(`【操作ログ】山札を全部確認しました（${deck.length}枚）`);
+  }
+}
+
+function closeMobileDeckAllModal() {
+  const modal = document.getElementById('mobile-deckall-modal');
+  if (modal) modal.classList.remove('open');
+}
+
+function renderMobileDeckAllModal() {
+  const modal = document.getElementById('mobile-deckall-modal');
+  if (!modal || !modal.classList.contains('open')) return;
+
+  const titleEl = document.getElementById('mobile-deckall-title');
+  const listEl = document.getElementById('mobile-deckall-list');
+  if (!titleEl || !listEl) return;
+
+  const cards = getMobileDeckAllCardsForView();
+  titleEl.textContent = `山札一覧 ${cards.length}枚（左上がトップ）`;
+
+  if (!cards.length) {
+    listEl.innerHTML = '<div class="dm-deckall-empty">山札がありません</div>';
+    return;
+  }
+
+  listEl.innerHTML = cards.map((card, index) => {
+    const thumb = renderMobileCardThumb(card, 'dm-deckall-thumb');
+    const name = escapeHtmlMobile(getMobileCardDisplayName(card));
+    return `
+      <div class="dm-deckall-card" title="${name}">
+        <div class="dm-deckall-no">${index + 1}</div>
+        <div class="dm-deckall-art">${thumb}</div>
+        <div class="dm-deckall-name">${name}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function shuffleMobileDeckAndClose() {
+  if (window._ol && !canActMobileOnline()) {
+    showMobileToast('相手のターンです', 'warn');
+    return;
+  }
+
+  const deck = engineMobile?.state?.deck;
+  if (!Array.isArray(deck) || deck.length === 0) {
+    showMobileToast('山札がありません', 'warn');
+    closeMobileDeckAllModal();
+    return;
+  }
+
+  const ok = window.GameController?.shuffleDeck
+    ? window.GameController.shuffleDeck(engineMobile)
+    : (typeof engineMobile?.shuffleDeck === 'function' ? engineMobile.shuffleDeck() : false);
+  if (!ok) {
+    showMobileToast('山札をシャッフルできませんでした', 'warn');
+    return;
+  }
+
+  closeMobileDeckAllModal();
+  if (window._ol) {
+    olSendActionMobile('state');
+    sendMobileOnlineActionLog('【操作ログ】山札をシャッフルして非公開に戻しました');
+  }
+  showMobileToast('山札をシャッフルしました', 'ok');
+  renderMobileGame();
+}
+
 function playMobileSelectedCard(zone) {
   const idx = _mobileSelectedHandIdx;
   if (idx === null) return;
@@ -1866,6 +2797,7 @@ function breakMobileShield() {
   }
 
   _mobileSelectedShieldIdx = null;
+  showMobileToast('公開中に移動しました。手札に加えるか、トリガー使用を選んでください', 'info', 2800);
   if (window._ol) olSendActionMobile('state');
   renderMobileGame();
 }
@@ -1936,6 +2868,13 @@ function returnMobileFromGraveyard(toZone) {
 
 function undoMobileGame() {
   if (window._ol) return;
+
+  const publicPending = getMobileDeckRevealCards('public').length > 0;
+  if (_mobileDeckPeekPrivateCards.length || publicPending) {
+    showMobileToast('公開/確認中のカードを先に処理してください', 'warn');
+    return;
+  }
+
   const ok = window.GameController
     ? window.GameController.undo(engineMobile)
     : engineMobile.undo();
@@ -2278,6 +3217,10 @@ async function saveMobileDeckToCloud() {
     return;
   }
 
+  if (typeof NetworkService.clearDeckCache === 'function') {
+    NetworkService.clearDeckCache(deckName);
+  }
+
   const decks = getSavedDecksMobile();
   decks[deckName] = deckData;
   if (window.GameController) {
@@ -2567,7 +3510,7 @@ function startMobileOnlineGame() {
   if (window.GameController) {
     window.GameController.startOnlineMatch(window._ol.p);
   } else {
-    window._olOpponent = { hand: 5, battleZone: 0, manaZone: 0, shields: 5, deck: 30, graveyard: 0 };
+    window._olOpponent = { hand: 5, battleZone: 0, manaZone: 0, shields: 5, deckRevealZone: 0, revealedZone: 0, deck: 30, graveyard: 0 };
     window._olCurrentPlayer = window._ol.p === 'p1' ? 1 : 2;
     window._olChatLogMobile = [];
   }
@@ -2575,8 +3518,17 @@ function startMobileOnlineGame() {
   _mobileSelectedHandIdx = null;
   _mobileUnderInsertState = null;
   _mobileNeedDrawGuide = true;
+  _mobileRibbonOtherOpen = false;
+  _mobileDeckPeekPrivateCards = [];
+  _mobileDeckRevealModalState = {
+    mode: 'public',
+    destination: _mobileDeckRevealModalState.destination || 'hand',
+    selected: {}
+  };
   _mobileChatOpen = false;
   closeMobileCardZoneMenu();
+  closeMobileDeckRevealModal();
+  closeMobileDeckAllModal();
   appendMobileChatMessage('SYSTEM', 'オンライン対戦を開始しました。', 'sys');
 
   engineMobile.initGame(deckData);
@@ -2605,7 +3557,11 @@ function olStartEventListenerMobile() {
     const other = window._ol.p === 'p1' ? data.p2 : data.p1;
     const myNum = window._ol.p === 'p1' ? 1 : 2;
     const wasMyTurn = window._olCurrentPlayer === myNum;
-    if (data.turn) engineMobile.state.turn = data.turn;
+    if (data.turn !== undefined && data.turn !== null) {
+      if (typeof engineMobile.syncTurn === 'function') {
+        engineMobile.syncTurn(data.turn);
+      }
+    }
     if (other) window._olOpponent = normalizeMobileOpponentState(other);
     if (data.active) window._olCurrentPlayer = data.active === 'p1' ? 1 : 2;
 
@@ -2631,7 +3587,11 @@ function olStartEventListenerMobile() {
     const myNum = window._ol.p === 'p1' ? 1 : 2;
     const wasMyTurn = window._olCurrentPlayer === myNum;
 
-    if (data.turn) engineMobile.state.turn = data.turn;
+    if (data.turn !== undefined && data.turn !== null) {
+      if (typeof engineMobile.syncTurn === 'function') {
+        engineMobile.syncTurn(data.turn);
+      }
+    }
     if (other) window._olOpponent = normalizeMobileOpponentState(other);
     if (data.active) {
       window._olCurrentPlayer = data.active === 'p1' ? 1 : 2;

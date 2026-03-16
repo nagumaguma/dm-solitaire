@@ -108,6 +108,16 @@
     return cards.reduce((sum, card) => sum + (Number(card?.count) || 1), 0);
   }
 
+  function getCardCivClass(card) {
+    const raw = String(card?.civilization || card?.civ || '').toLowerCase();
+    if (raw.includes('fire') || raw.includes('火')) return 'fire';
+    if (raw.includes('water') || raw.includes('水')) return 'water';
+    if (raw.includes('light') || raw.includes('光')) return 'light';
+    if (raw.includes('darkness') || raw.includes('dark') || raw.includes('闇')) return 'dark';
+    if (raw.includes('nature') || raw.includes('自然')) return 'nature';
+    return 'multi';
+  }
+
   function canActOnline(onlineState, currentPlayer) {
     if (!onlineState) return true;
     if (!currentPlayer) return false;
@@ -174,6 +184,16 @@
     return !!engine.tapCard(zone, idx);
   }
 
+  function untapAllMana(engine) {
+    if (!engine || typeof engine.untapAllMana !== 'function') return false;
+    return !!engine.untapAllMana();
+  }
+
+  function setShieldFaceUp(engine, shieldIndex, faceUp) {
+    if (!engine || typeof engine.setShieldFaceUp !== 'function') return false;
+    return !!engine.setShieldFaceUp(shieldIndex, faceUp);
+  }
+
   function breakShield(engine, selectedIndex) {
     if (!engine) return { ok: false, card: null };
     const card = engine.breakShield(selectedIndex);
@@ -183,6 +203,11 @@
   function drawCard(engine) {
     if (!engine) return false;
     return !!engine.drawCard();
+  }
+
+  function shuffleDeck(engine) {
+    if (!engine || typeof engine.shuffleDeck !== 'function') return false;
+    return !!engine.shuffleDeck();
   }
 
   function turnEnd(engine, onlineState) {
@@ -229,6 +254,8 @@
       battleZone: 0,
       manaZone: 0,
       shields: 5,
+      deckRevealZone: 0,
+      revealedZone: 0,
       deck: 30,
       graveyard: 0
     };
@@ -270,6 +297,7 @@
       img: imageUrl,
       thumb: imageUrl,
       tapped: !!card?.tapped,
+      faceUp: !!card?.faceUp,
       underCards
     };
   }
@@ -284,6 +312,8 @@
       hand: state.hand.length,
       deck: state.deck.length,
       shields: state.shields.length,
+      deckRevealZone: serializePublicCards(state.deckRevealZone),
+      revealedZone: serializePublicCards(state.revealedZone),
       battleZone: serializePublicCards(state.battleZone),
       manaZone: serializePublicCards(state.manaZone),
       graveyard: serializePublicCards(state.graveyard)
@@ -431,14 +461,18 @@
     changeDeckCardCount,
     removeDeckCard,
     countDeckCards,
+    getCardCivClass,
     canActOnline,
     clearOnlineSession,
     initSoloGame,
     playCardByHandIndex,
     tapCard,
     setCardTapped,
+    untapAllMana,
+    setShieldFaceUp,
     breakShield,
     drawCard,
+    shuffleDeck,
     turnEnd,
     moveToGraveyard,
     returnFromGraveyard,

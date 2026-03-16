@@ -6,8 +6,10 @@
 const NetworkService = {
   _cardDetailCache: new Map(),
   _searchCache: new Map(),
+  _deckCache: new Map(),
   _searchCacheMaxEntries: 120,
   _searchCacheTtlMs: 5 * 60 * 1000,
+  _deckCacheTtlMs: 3 * 60 * 1000,
 
   _wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -40,9 +42,15 @@ const NetworkService = {
     return `${String(q || '').trim()}::${Number(page) || 1}`;
   },
 
-  _setSearchCache(key, cards) {
+  _deckCacheKey(username, deckName) {
+    return `${String(username || '').trim()}::${String(deckName || '').trim()}`;
+  },
+
+  _setSearchCache(key, cards, total = null) {
+    const totalNumber = Number(total);
     this._searchCache.set(key, {
       items: cards,
+      total: Number.isFinite(totalNumber) ? totalNumber : null,
       at: Date.now()
     });
 
@@ -55,6 +63,26 @@ const NetworkService = {
 
   clearSearchCache() {
     this._searchCache.clear();
+  },
+
+  clearDeckCache(deckName, username = '') {
+    const targetDeck = String(deckName || '').trim();
+    const targetUser = String(username || '').trim();
+
+    if (!targetDeck && !targetUser) {
+      this._deckCache.clear();
+      return;
+    }
+
+    for (const key of Array.from(this._deckCache.keys())) {
+      const sep = key.indexOf('::');
+      const keyUser = sep >= 0 ? key.slice(0, sep) : '';
+      const keyDeck = sep >= 0 ? key.slice(sep + 2) : key;
+
+      if (targetDeck && keyDeck !== targetDeck) continue;
+      if (targetUser && keyUser !== targetUser) continue;
+      this._deckCache.delete(key);
+    }
   },
 
   _stripSourcePrefix(value) {
@@ -230,6 +258,12 @@ const NetworkService = {
    * @returns {Promise<Array|null>} カード配列 or null
    */
   async fetchServerDeck(username, pin, deckName) {
+    const cacheKey = this._deckCacheKey(username, deckName);
+    const cached = this._deckCache.get(cacheKey);
+    if (cached && (Date.now() - cached.at) < this._deckCacheTtlMs) {
+      return cached.items.map((card) => this.normalizeCardData(card));
+    }
+
     try {
       const base = this.getApiBase();
       const res = await fetch(`${base}/deck/get`, {
@@ -246,9 +280,15 @@ const NetworkService = {
 
       const data = await res.json();
       const deck = data.deck_data;
-      return Array.isArray(deck)
-        ? deck.map(card => this.normalizeCardData(card))
-        : null;
+      if (!Array.isArray(deck)) return null;
+
+      const normalized = deck.map(card => this.normalizeCardData(card));
+      this._deckCache.set(cacheKey, {
+        items: normalized.map((card) => this.normalizeCardData(card)),
+        at: Date.now()
+      });
+
+      return normalized;
     } catch (error) {
       console.error('デッキ取得エラー:', error);
       return null;
@@ -284,6 +324,7 @@ const NetworkService = {
       if (!res.ok) {
         return { error: data.error || 'クラウド保存に失敗しました' };
       }
+      this.clearDeckCache(deckName, username);
       return { ok: true };
     } catch (error) {
       console.error('デッキ保存エラー:', error);
@@ -319,6 +360,7 @@ const NetworkService = {
       if (!res.ok) {
         return { error: data.error || `デッキ削除に失敗しました (${res.status})` };
       }
+      this.clearDeckCache(deckName, username);
       return { ok: true };
     } catch (error) {
       console.error('デッキ削除エラー:', error);
@@ -327,21 +369,28 @@ const NetworkService = {
   },
 
   /**
-   * カード検索
+   * カード検索（メタ情報付き）
    * @param {string} q - 検索クエリ
    * @param {number} page - ページ番号
-   * @returns {Promise<Array>} 検索結果
+   * @returns {Promise<{cards:Array,total:number,page:number}>}
    */
-  async searchCards(q, page = 1) {
+  async searchCardsWithMeta(q, page = 1) {
     try {
       const keyword = String(q || '').trim();
-      if (!keyword) return [];
-
       const pageNumber = Number(page) || 1;
+      if (!keyword) {
+        return { cards: [], total: 0, page: pageNumber };
+      }
+
       const cacheKey = this._searchCacheKey(keyword, pageNumber);
       const cached = this._searchCache.get(cacheKey);
       if (cached && (Date.now() - cached.at) < this._searchCacheTtlMs) {
-        return cached.items;
+        const cachedTotal = Number(cached.total);
+        return {
+          cards: Array.isArray(cached.items) ? cached.items : [],
+          total: Number.isFinite(cachedTotal) ? cachedTotal : 0,
+          page: pageNumber
+        };
       }
 
       const base = this.getApiBase();
@@ -352,18 +401,31 @@ const NetworkService = {
 
       if (!res.ok) {
         console.warn('検索失敗:', res.status);
-        return [];
+        return { cards: [], total: 0, page: pageNumber };
       }
 
       const data = await res.json();
       const cards = Array.isArray(data.cards) ? data.cards : [];
       const normalized = cards.map(card => this.normalizeCardData(card));
-      this._setSearchCache(cacheKey, normalized);
-      return normalized;
+      const total = Number(data.total);
+      const safeTotal = Number.isFinite(total) ? total : normalized.length;
+      this._setSearchCache(cacheKey, normalized, safeTotal);
+      return { cards: normalized, total: safeTotal, page: pageNumber };
     } catch (error) {
       console.error('検索エラー:', error);
-      return [];
+      return { cards: [], total: 0, page: Number(page) || 1 };
     }
+  },
+
+  /**
+   * カード検索
+   * @param {string} q - 検索クエリ
+   * @param {number} page - ページ番号
+   * @returns {Promise<Array>} 検索結果
+   */
+  async searchCards(q, page = 1) {
+    const result = await this.searchCardsWithMeta(q, page);
+    return Array.isArray(result.cards) ? result.cards : [];
   },
 
   // ─── オンライン対戦 ─────────────────────────────────────────────────────
