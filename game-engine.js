@@ -11,6 +11,7 @@ class GameEngine {
       manaZone: [],
       deck: [],
       shields: [],
+      graveyard: [],
       turn: 1
     };
     this.history = [];
@@ -34,6 +35,7 @@ class GameEngine {
       manaZone: [],
       deck: shuffled,
       shields: [],
+      graveyard: [],
       turn: 1
     };
 
@@ -90,6 +92,74 @@ class GameEngine {
   }
 
   /**
+   * 指定ゾーンから墓地へ移動
+   * @param {number} cardIdx - 移動するカードインデックス（-1で末尾）
+   * @param {string} fromZone - 'hand' | 'battle' | 'mana' | 'shields'
+   */
+  moveToGraveyard(cardIdx = -1, fromZone = 'battle') {
+    const zoneMap = {
+      hand: 'hand',
+      battle: 'battleZone',
+      mana: 'manaZone',
+      shield: 'shields',
+      shields: 'shields'
+    };
+    const zoneKey = zoneMap[fromZone];
+    if (!zoneKey) return false;
+
+    const zone = this.state[zoneKey];
+    if (!Array.isArray(zone) || zone.length === 0) return false;
+
+    const idx = cardIdx < 0 ? zone.length - 1 : cardIdx;
+    if (idx < 0 || idx >= zone.length) return false;
+
+    this._saveState();
+    const card = zone.splice(idx, 1)[0];
+    if (!card) return false;
+
+    if (zoneKey === 'shields' && card.faceUp !== undefined) {
+      delete card.faceUp;
+    }
+
+    this.state.graveyard.push(card);
+    return true;
+  }
+
+  /**
+   * 墓地から指定ゾーンへ戻す
+   * @param {number} cardIdx - 墓地インデックス（-1で末尾）
+   * @param {string} toZone - 'hand' | 'battle' | 'mana' | 'shields'
+   */
+  returnFromGraveyard(cardIdx = -1, toZone = 'hand') {
+    if (!Array.isArray(this.state.graveyard) || this.state.graveyard.length === 0) return false;
+
+    const zoneMap = {
+      hand: 'hand',
+      battle: 'battleZone',
+      mana: 'manaZone',
+      shield: 'shields',
+      shields: 'shields'
+    };
+    const zoneKey = zoneMap[toZone];
+    if (!zoneKey) return false;
+
+    const idx = cardIdx < 0 ? this.state.graveyard.length - 1 : cardIdx;
+    if (idx < 0 || idx >= this.state.graveyard.length) return false;
+
+    this._saveState();
+    const card = this.state.graveyard.splice(idx, 1)[0];
+    if (!card) return false;
+
+    if (zoneKey === 'shields') {
+      this.state.shields.push({ ...card, faceUp: false });
+    } else {
+      this.state[zoneKey].push(card);
+    }
+
+    return true;
+  }
+
+  /**
    * ターン終了
    */
   turnEnd() {
@@ -128,12 +198,19 @@ class GameEngine {
   _expandFrom(deckCards) {
     const result = [];
     for (const cardRef of deckCards) {
+      const clone = typeof structuredClone === 'function'
+        ? structuredClone(cardRef)
+        : JSON.parse(JSON.stringify(cardRef));
+
       if (cardRef.count && cardRef.count > 1) {
         for (let i = 0; i < cardRef.count; i++) {
-          result.push({ ...cardRef });
+          const loopClone = typeof structuredClone === 'function'
+            ? structuredClone(cardRef)
+            : JSON.parse(JSON.stringify(cardRef));
+          result.push(loopClone);
         }
       } else {
-        result.push({ ...cardRef });
+        result.push(clone);
       }
     }
     return result;

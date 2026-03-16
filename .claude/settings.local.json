@@ -32,7 +32,8 @@
       "Bash(cd C:\\\\Users\\\\user\\\\OneDrive\\\\デスクトップ\\\\VM:*)",
       "Bash(cd:*)",
       "Bash(node:*)",
-      "Bash(comm:*)"
+      "Bash(comm:*)",
+      "Bash(ls -la \"/c/Users/user/OneDrive/デスクトップ/VM/\" && wc -l \"/c/Users/user/OneDrive/デスクトップ/VM/\"*.html \"/c/Users/user/OneDrive/デスクトップ/VM/\"*.py 2>/dev/null)"
     ]
   }
 }

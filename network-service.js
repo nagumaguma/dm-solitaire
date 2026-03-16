@@ -34,8 +34,10 @@ const NetworkService = {
   async loadServerDecks(username, pin) {
     try {
       const base = this.getApiBase();
-      const query = `username=${encodeURIComponent(username)}&pin=${encodeURIComponent(pin)}`;
-      const res = await fetch(`${base}/deck/list?${query}`, {
+      const res = await fetch(`${base}/deck/list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, pin }),
         signal: this._abortSignal(10000)
       });
 
@@ -62,8 +64,10 @@ const NetworkService = {
   async fetchServerDeck(username, pin, deckName) {
     try {
       const base = this.getApiBase();
-      const query = `username=${encodeURIComponent(username)}&pin=${encodeURIComponent(pin)}&deck_name=${encodeURIComponent(deckName)}`;
-      const res = await fetch(`${base}/deck/get?${query}`, {
+      const res = await fetch(`${base}/deck/get`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, pin, deck_name: deckName }),
         signal: this._abortSignal(10000)
       });
 
@@ -78,6 +82,40 @@ const NetworkService = {
     } catch (error) {
       console.error('デッキ取得エラー:', error);
       return null;
+    }
+  },
+
+  /**
+   * サーバーへデッキ保存
+   * @param {string} username
+   * @param {string} pin
+   * @param {string} deckName
+   * @param {Array} deckData
+   * @returns {Promise<{ok: true}|{error: string}>}
+   */
+  async saveDeck(username, pin, deckName, deckData) {
+    try {
+      const base = this.getApiBase();
+      const res = await fetch(`${base}/deck/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username,
+          pin,
+          deck_name: deckName,
+          deck_data: deckData
+        }),
+        signal: this._abortSignal(10000)
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        return { error: data.error || 'クラウド保存に失敗しました' };
+      }
+      return { ok: true };
+    } catch (error) {
+      console.error('デッキ保存エラー:', error);
+      return { error: 'ネットワークエラーで保存できませんでした' };
     }
   },
 

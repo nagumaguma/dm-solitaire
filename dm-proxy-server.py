@@ -1200,47 +1200,47 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[deck] saved {username}/{deck_name}", flush=True)
             self._json({"ok": True})
 
-        # GET /deck/list?username=X&pin=Y
+        # POST /deck/list  { username, pin }
         elif parsed.path == "/deck/list":
-            username = qs.get("username", [""])[0].strip()
-            pin = str(qs.get("pin", [""])[0]).strip()
-            
+            username = data.get("username", "").strip()
+            pin = str(data.get("pin", "")).strip()
+
             if not username or not pin:
                 return self._json({"error": "username and pin required"}, 400)
-            
+
             with _profiles_lock:
                 profile = _profiles.get(username)
-            
+
             if not profile or not verify_pin(pin, profile["pin_hash"], profile["pin_salt"]):
                 return self._json({"error": "invalid username or pin"}, 401)
-            
+
             with _decks_lock:
                 deck_list = list(_decks.get(username, {}).keys())
-            
+
             print(f"[deck] list {username} ({len(deck_list)} decks)", flush=True)
             self._json({"ok": True, "decks": deck_list})
 
-        # GET /deck/get?username=X&pin=Y&deck_name=Z
+        # POST /deck/get  { username, pin, deck_name }
         elif parsed.path == "/deck/get":
-            username = qs.get("username", [""])[0].strip()
-            pin = str(qs.get("pin", [""])[0]).strip()
-            deck_name = qs.get("deck_name", [""])[0].strip()
-            
+            username = data.get("username", "").strip()
+            pin = str(data.get("pin", "")).strip()
+            deck_name = data.get("deck_name", "").strip()
+
             if not username or not pin or not deck_name:
                 return self._json({"error": "username, pin, deck_name required"}, 400)
-            
+
             with _profiles_lock:
                 profile = _profiles.get(username)
-            
+
             if not profile or not verify_pin(pin, profile["pin_hash"], profile["pin_salt"]):
                 return self._json({"error": "invalid username or pin"}, 401)
-            
+
             with _decks_lock:
                 deck_data = _decks.get(username, {}).get(deck_name)
-            
+
             if not deck_data:
                 return self._json({"error": "deck not found"}, 404)
-            
+
             print(f"[deck] get {username}/{deck_name}", flush=True)
             self._json({"ok": True, "deck_data": deck_data})
 
@@ -1331,6 +1331,10 @@ class Handler(BaseHTTPRequestHandler):
             if not room or player not in ("p1", "p2"):
                 return self._json({"error": "room not found"}, 404)
             self._sse_stream(room, player)
+
+        # /deck/list, /deck/get are POST-only to keep PIN out of URL
+        elif parsed.path in ("/deck/list", "/deck/get"):
+            self._json({"error": "use POST for this endpoint"}, 405)
 
         # /search?q=...&page=1
         elif parsed.path == "/search":
