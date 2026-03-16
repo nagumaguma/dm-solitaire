@@ -6,6 +6,20 @@
 const NetworkService = {
   _cardDetailCache: new Map(),
 
+  makeCardId(card) {
+    if (!card || typeof card !== 'object') return '';
+
+    const sourceId = String(card?.sourceId || card?.id || '').trim();
+    if (sourceId) return `src:${sourceId}`;
+
+    const name = String(card?.name || card?.nameEn || '').trim();
+    const cost = String(card?.cost ?? '').trim();
+    const civ = String(card?.civilization || card?.civ || '').trim().toLowerCase();
+    const type = String(card?.type || '').trim().toLowerCase();
+
+    return `${name}|${cost}|${civ}|${type}`;
+  },
+
   normalizeCardData(card) {
     if (!card || typeof card !== 'object') return card;
 
@@ -15,12 +29,19 @@ const NetworkService = {
       || (typeof card?.thumb === 'string' && card.thumb.trim())
       || '';
 
-    const civ = card?.civilization || card?.civ || '';
+    const civilization = card?.civilization || card?.civ || '';
+    const sourceId = String(card?.sourceId || card?.id || '').trim();
+    const cardId = String(card?.cardId || '').trim()
+      || this.makeCardId({ ...card, sourceId, civilization });
+    const id = sourceId || String(card?.id || cardId || '').trim();
 
     return {
       ...card,
-      civilization: civ,
-      civ,
+      id,
+      sourceId,
+      cardId,
+      civilization,
+      civ: civilization,
       imageUrl,
       thumb: imageUrl,
       img: imageUrl
@@ -61,7 +82,8 @@ const NetworkService = {
     if (!normalized) return normalized;
     if (normalized.imageUrl) return normalized;
 
-    const detail = await this.fetchCardDetail(normalized.id);
+    const detailId = normalized.sourceId || normalized.id;
+    const detail = await this.fetchCardDetail(detailId);
     if (!detail) return normalized;
 
     return this.normalizeCardData({

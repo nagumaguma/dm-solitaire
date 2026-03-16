@@ -15,6 +15,7 @@ class GameEngine {
       turn: 1
     };
     this.history = [];
+    this._instanceCounter = 0;
   }
 
   /**
@@ -25,6 +26,8 @@ class GameEngine {
     if (!deckData || !Array.isArray(deckData)) {
       throw new Error('Invalid deck data');
     }
+
+    this._instanceCounter = 0;
 
     const expanded = this._expandFrom(deckData).map(card => ({
       ...card,
@@ -250,6 +253,13 @@ class GameEngine {
     this.history.push(JSON.stringify(this.state));
   }
 
+  _makeInstanceId(cardId) {
+    this._instanceCounter += 1;
+    const seq = String(this._instanceCounter).padStart(6, '0');
+    const rand = Math.random().toString(36).slice(2, 8);
+    return `${cardId || 'card'}#${seq}_${rand}`;
+  }
+
   /**
    * 内部: デッキ展開（複数枚指定対応）
    * @param {Array} deckCards - {id, count} 形式のカード配列
@@ -258,19 +268,21 @@ class GameEngine {
   _expandFrom(deckCards) {
     const result = [];
     for (const cardRef of deckCards) {
-      const clone = typeof structuredClone === 'function'
+      const base = typeof structuredClone === 'function'
         ? structuredClone(cardRef)
         : JSON.parse(JSON.stringify(cardRef));
 
-      if (cardRef.count && cardRef.count > 1) {
-        for (let i = 0; i < cardRef.count; i++) {
-          const loopClone = typeof structuredClone === 'function'
-            ? structuredClone(cardRef)
-            : JSON.parse(JSON.stringify(cardRef));
-          result.push(loopClone);
-        }
-      } else {
-        result.push(clone);
+      const copies = Number(cardRef?.count) > 1 ? Number(cardRef.count) : 1;
+      for (let i = 0; i < copies; i++) {
+        const copy = typeof structuredClone === 'function'
+          ? structuredClone(base)
+          : JSON.parse(JSON.stringify(base));
+
+        const cardId = String(copy?.cardId || copy?.id || copy?.name || 'card');
+        copy.cardId = cardId;
+        copy.instanceId = this._makeInstanceId(cardId);
+        delete copy.count;
+        result.push(copy);
       }
     }
     return result;

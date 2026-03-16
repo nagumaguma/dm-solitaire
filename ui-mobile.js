@@ -1204,11 +1204,19 @@ async function addToMobileDeck(cardJson) {
     const rawCard = JSON.parse(cardJson);
     const card = await NetworkService.enrichCardImage(rawCard);
     const normalized = NetworkService.normalizeCardData(card);
+    const normalizedKey = String(normalized.cardId || normalized.id || '');
 
-    const existing = window._deckCards.find(c => c.id === normalized.id);
+    const existing = window._deckCards.find(c => String(c.cardId || c.id || '') === normalizedKey);
     if (existing) {
       existing.count = (existing.count || 1) + 1;
       if (existing.count > 4) existing.count = 4;
+
+      if (!existing.cardId && normalized.cardId) {
+        existing.cardId = normalized.cardId;
+      }
+      if (!existing.sourceId && normalized.sourceId) {
+        existing.sourceId = normalized.sourceId;
+      }
 
       if (!existing.imageUrl && normalized.imageUrl) {
         existing.imageUrl = normalized.imageUrl;
@@ -1351,7 +1359,16 @@ async function olCreateRoomMobile() {
     return;
   }
   const room = result.room;
-  window._ol = { room, p: 'p1', p1Name: name, p2Name: null, eventSource: null, reconnectAttempt: 0 };
+  window._ol = {
+    room,
+    p: 'p1',
+    p1Name: name,
+    p2Name: null,
+    eventSource: null,
+    reconnectAttempt: 0,
+    localSeq: 0,
+    remoteSeq: 0
+  };
   window._olDeckName = deckName;
   window._olDeckData = deckData;
   const modal = document.getElementById('mobile-ol-overlay')?.querySelector('.ml-ol-modal');
@@ -1492,7 +1509,16 @@ async function olJoinRoomMobile() {
     return;
   }
   hideMobileOnlineModal();
-  window._ol = { room: code, p: 'p2', p1Name: result.p1_name || 'Player 1', p2Name: name, eventSource: null, reconnectAttempt: 0 };
+  window._ol = {
+    room: code,
+    p: 'p2',
+    p1Name: result.p1_name || 'Player 1',
+    p2Name: name,
+    eventSource: null,
+    reconnectAttempt: 0,
+    localSeq: 0,
+    remoteSeq: 0
+  };
   window._olDeckName = deckName;
   window._olDeckData = deckData;
   showMobileToast(`ルーム ${code} に参加しました`, 'ok');
@@ -1554,9 +1580,11 @@ function olStartEventListenerMobile() {
 
     window._ol.reconnectAttempt = 0;
     const data = JSON.parse(e.data);
+    if (!shouldApplyRemotePayloadMobile(data)) return;
     const other = window._ol.p === 'p1' ? data.p2 : data.p1;
     const myNum = window._ol.p === 'p1' ? 1 : 2;
     const wasMyTurn = window._olCurrentPlayer === myNum;
+    if (data.turn) engineMobile.state.turn = data.turn;
     if (other) window._olOpponent = other;
     if (data.active) window._olCurrentPlayer = data.active === 'p1' ? 1 : 2;
 
@@ -1577,6 +1605,7 @@ function olStartEventListenerMobile() {
 
     window._ol.reconnectAttempt = 0;
     const data = JSON.parse(e.data);
+    if (!shouldApplyRemotePayloadMobile(data)) return;
     const myNum = window._ol.p === 'p1' ? 1 : 2;
     const wasMyTurn = window._olCurrentPlayer === myNum;
 
@@ -1626,6 +1655,32 @@ function olStartEventListenerMobile() {
   };
 }
 
+function nextOnlineSeqMobile() {
+  if (!window._ol) return 0;
+
+  if (window.GameController?.nextOnlineSeq) {
+    return window.GameController.nextOnlineSeq(window._ol);
+  }
+
+  window._ol.localSeq = (Number(window._ol.localSeq) || 0) + 1;
+  return window._ol.localSeq;
+}
+
+function shouldApplyRemotePayloadMobile(payload) {
+  if (!window._ol) return false;
+
+  if (window.GameController?.shouldApplyRemotePayload) {
+    return window.GameController.shouldApplyRemotePayload(window._ol, payload);
+  }
+
+  const seq = Number(payload?.seq || 0);
+  const last = Number(window._ol.remoteSeq || 0);
+  if (seq <= last) return false;
+
+  window._ol.remoteSeq = seq;
+  return true;
+}
+
 function olSendActionMobile(actionType) {
   if (window.GameController) {
     window.GameController.sendOnlineAction(engineMobile, actionType);
@@ -1638,6 +1693,7 @@ function olSendActionMobile(actionType) {
     room: window._ol.room,
     p: window._ol.p,
     type: actionType,
+    seq: nextOnlineSeqMobile(),
     turn: s.turn,
     active: actionType === 'turn_end' ? (window._ol.p === 'p1' ? 'p2' : 'p1') : window._ol.p,
     p1: window._ol.p === 'p1' ? { hand: s.hand.length, battleZone: s.battleZone.length, manaZone: s.manaZone.length, shields: s.shields.length, deck: s.deck.length, graveyard: s.graveyard.length } : null,

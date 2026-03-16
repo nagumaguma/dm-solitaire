@@ -67,10 +67,10 @@
     const next = cloneCards(cards);
     if (!card || typeof card !== 'object') return next;
 
-    const cardKey = String(card.id || card.name || '');
+    const cardKey = String(card.cardId || card.id || card.name || '');
     if (!cardKey) return next;
 
-    const existing = next.find((item) => String(item.id || item.name || '') === cardKey);
+    const existing = next.find((item) => String(item.cardId || item.id || item.name || '') === cardKey);
     if (existing) {
       existing.count = Math.min(maxCopies, (existing.count || 1) + 1);
       return next;
@@ -228,6 +228,7 @@
       room: p.room,
       p: p.p,
       type: actionType,
+      seq: nextOnlineSeq(p),
       turn: s.turn,
       active: actionType === 'turn_end' ? (p.p === 'p1' ? 'p2' : 'p1') : p.p,
       p1: p.p === 'p1' ? {
@@ -247,6 +248,23 @@
         graveyard: s.graveyard.length
       } : null
     };
+  }
+
+  function nextOnlineSeq(onlineState) {
+    if (!onlineState || typeof onlineState !== 'object') return 0;
+    onlineState.localSeq = (Number(onlineState.localSeq) || 0) + 1;
+    return onlineState.localSeq;
+  }
+
+  function shouldApplyRemotePayload(onlineState, payload) {
+    if (!onlineState || typeof onlineState !== 'object') return false;
+
+    const seq = Number(payload?.seq || 0);
+    const last = Number(onlineState.remoteSeq || 0);
+    if (seq <= last) return false;
+
+    onlineState.remoteSeq = seq;
+    return true;
   }
 
   function sendOnlineAction(engine, actionType) {
@@ -357,6 +375,8 @@
     undo,
     startOnlineMatch,
     sendOnlineAction,
+    nextOnlineSeq,
+    shouldApplyRemotePayload,
     createSearchController
   };
 })(window);
