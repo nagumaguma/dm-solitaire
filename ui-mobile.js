@@ -13,6 +13,22 @@ function escapeHtmlMobile(str) {
     .replace(/"/g, '&quot;');
 }
 
+/** onclick 等のシングルクォート文字列用（デッキ名に ' が含まれると壊れるのを防ぐ） */
+function escapeAttrJsMobile(str) {
+  return String(str ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+/** localStorage dm_decks を安全に取得（破損時は {}） */
+function getSavedDecksMobile() {
+  try {
+    const raw = localStorage.getItem('dm_decks');
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    console.warn('dm_decks parse error', e);
+    return {};
+  }
+}
+
 /**
  * SP版UI初期化
  */
@@ -28,31 +44,32 @@ function renderMobileDeckList() {
   const container = document.getElementById('app-mobile');
   
   container.innerHTML = `
-    <div style="display: flex; flex-direction: column; height: 100vh; background: #f0f2f5;">
+    <div style="display: flex; flex-direction: column; height: 100vh; background: #f2f4f1;">
       
       <!-- ヘッダー -->
-      <div style="background: #dc2626; color: white; padding: 12px; font-weight: 600; text-align: center;">
-        DM Solitaire
+      <div style="background: #6b8f8a; color: #fff; padding: 12px; font-weight: 600; text-align: center; display: flex; justify-content: space-between; align-items: center;">
+        <span>DM Solitaire</span>
+        <button type="button" onclick="logout()" style="padding: 4px 10px; font-size: 0.8rem; background: rgba(255,255,255,0.2); color: #fff; border: 1px solid rgba(255,255,255,0.5); border-radius: 4px; cursor: pointer;">ログアウト</button>
       </div>
       
       <!-- メインコンテンツ -->
       <div style="flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px;">
         
         <!-- デッキ一覧 -->
-        <div style="background: white; border-radius: 10px; padding: 12px;">
-          <h3 style="margin-bottom: 10px; font-size: 0.95rem;">デッキを選択</h3>
+        <div style="background: #fafbf9; border-radius: 10px; padding: 12px; border: 1px solid #e0e5e0;">
+          <h3 style="margin-bottom: 10px; font-size: 0.95rem; color: #3d4a44;">デッキを選択</h3>
           <button onclick="newMobileDeck()" 
-            style="width: 100%; padding: 10px; background: #dc2626; color: white; border: none; border-radius: 6px; cursor: pointer; margin-bottom: 10px; font-weight: 600; font-size: 0.9rem;">
+            style="width: 100%; padding: 10px; background: #6b8f8a; color: #fff; border: none; border-radius: 6px; cursor: pointer; margin-bottom: 10px; font-weight: 600; font-size: 0.9rem;">
             ➕ 新規作成
           </button>
           <div id="mobile-deck-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
         </div>
         
         <!-- カード検索 -->
-        <div style="background: white; border-radius: 10px; padding: 12px;">
-          <h3 style="margin-bottom: 10px; font-size: 0.95rem;">カード検索</h3>
+        <div style="background: #fafbf9; border-radius: 10px; padding: 12px; border: 1px solid #e0e5e0;">
+          <h3 style="margin-bottom: 10px; font-size: 0.95rem; color: #3d4a44;">カード検索</h3>
           <input type="text" id="mobile-search-input" placeholder="カード名..." 
-            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 10px; font-size: 1rem;"
+            style="width: 100%; padding: 10px; border: 1px solid #e0e5e0; border-radius: 6px; margin-bottom: 10px; font-size: 1rem; background: #fff;"
             onkeyup="mobileSearchCards(this.value)">
           <div id="mobile-search-results" style="display: flex; flex-direction: column; gap: 6px;"></div>
         </div>
@@ -68,7 +85,7 @@ function renderMobileDeckList() {
  * デッキ一覧を更新
  */
 function updateMobileDeckList() {
-  const savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const savedDecks = getSavedDecksMobile();
   const account = AuthService.getCurrentAccount();
   
   const deckList = document.getElementById('mobile-deck-list');
@@ -79,21 +96,21 @@ function updateMobileDeckList() {
     const count = cards?.length || 0;
     const el = document.createElement('div');
     el.style.cssText = `
-      padding: 12px; background: #f9fafb; border: 1px solid #e5e7eb; 
+      padding: 12px; background: #f5f6f4; border: 1px solid #e0e5e0; 
       border-radius: 6px; cursor: pointer; transition: all 0.15s;
     `;
-    el.ontouchstart = () => el.style.background = '#eff6ff';
-    el.ontouchend = () => el.style.background = '#f9fafb';
-    el.onmouseover = () => el.style.background = '#eff6ff';
-    el.onmouseout = () => el.style.background = '#f9fafb';
+    el.ontouchstart = () => el.style.background = '#eef1ef';
+    el.ontouchend = () => el.style.background = '#f5f6f4';
+    el.onmouseover = () => el.style.background = '#eef1ef';
+    el.onmouseout = () => el.style.background = '#f5f6f4';
     el.innerHTML = `
-      <div style="font-weight: 600; font-size: 0.95rem;">${escapeHtmlMobile(name)}</div>
-      <div style="font-size: 0.85rem; color: #6b7280; margin: 6px 0;">📋 ${count}枚</div>
+      <div style="font-weight: 600; font-size: 0.95rem; color: #3d4a44;">${escapeHtmlMobile(name)}</div>
+      <div style="font-size: 0.85rem; color: #6b7b72; margin: 6px 0;">📋 ${count}枚</div>
       <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-        <button onclick="openMobileDeck('${escapeHtmlMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">✏️ 編集</button>
-        <button onclick="startMobileGame('${escapeHtmlMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">▶ START</button>
-        <button onclick="showMobileOnlineModal('${escapeHtmlMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">🌐 オンライン</button>
-        <button onclick="deleteMobileDeck('${escapeHtmlMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">🗑️</button>
+        <button onclick="openMobileDeck('${escapeAttrJsMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #7a94a8; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">✏️ 編集</button>
+        <button onclick="startMobileGame('${escapeAttrJsMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">▶ START</button>
+        <button onclick="showMobileOnlineModal('${escapeAttrJsMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #6b8f8a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">🌐 オンライン</button>
+        <button onclick="deleteMobileDeck('${escapeAttrJsMobile(name)}')" style="flex: 1; min-width: 70px; padding: 10px; background: #a67c7c; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">🗑️</button>
       </div>
     `;
     deckList.appendChild(el);
@@ -104,18 +121,18 @@ function updateMobileDeckList() {
     for (const name of window._serverDeckNames) {
       const el = document.createElement('div');
       el.style.cssText = `
-        padding: 12px; background: #fef3c7; border: 1px solid #fcd34d; 
+        padding: 12px; background: #f0f3f1; border: 1px solid #c5d4ce; 
         border-radius: 6px; cursor: pointer; transition: all 0.15s;
       `;
-      el.ontouchstart = () => el.style.background = '#fef9e7';
-      el.ontouchend = () => el.style.background = '#fef3c7';
-      el.onmouseover = () => el.style.background = '#fef9e7';
-      el.onmouseout = () => el.style.background = '#fef3c7';
+      el.ontouchstart = () => el.style.background = '#e8efe8';
+      el.ontouchend = () => el.style.background = '#f0f3f1';
+      el.onmouseover = () => el.style.background = '#e8efe8';
+      el.onmouseout = () => el.style.background = '#f0f3f1';
       el.innerHTML = `
-        <div style="font-weight: 600; font-size: 0.95rem;">☁️ ${escapeHtmlMobile(name)}</div>
+        <div style="font-weight: 600; font-size: 0.95rem; color: #3d4a44;">☁️ ${escapeHtmlMobile(name)}</div>
         <div style="display: flex; gap: 6px; margin-top: 8px;">
-          <button onclick="startMobileGame('${escapeHtmlMobile(name)}')" style="flex: 1; padding: 10px; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">▶ START</button>
-          <button onclick="showMobileOnlineModal('${escapeHtmlMobile(name)}')" style="flex: 1; padding: 10px; background: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">🌐 オンライン</button>
+          <button onclick="startMobileGame('${escapeAttrJsMobile(name)}')" style="flex: 1; padding: 10px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">▶ START</button>
+          <button onclick="showMobileOnlineModal('${escapeAttrJsMobile(name)}')" style="flex: 1; padding: 10px; background: #6b8f8a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">🌐 オンライン</button>
         </div>
       `;
       deckList.appendChild(el);
@@ -139,18 +156,18 @@ async function mobileSearchCards(q) {
   results.slice(0, 10).forEach(card => {
     const el = document.createElement('div');
     el.style.cssText = `
-      padding: 12px; background: #f3f4f6; border: 1px solid #e5e7eb; 
+      padding: 12px; background: #f5f6f4; border: 1px solid #e0e5e0; 
       border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: all 0.15s;
     `;
-    el.ontouchstart = () => el.style.background = '#e5e7eb';
-    el.ontouchend = () => el.style.background = '#f3f4f6';
-    el.onmouseover = () => el.style.background = '#e5e7eb';
-    el.onmouseout = () => el.style.background = '#f3f4f6';
+    el.ontouchstart = () => el.style.background = '#eef1ef';
+    el.ontouchend = () => el.style.background = '#f5f6f4';
+    el.onmouseover = () => el.style.background = '#eef1ef';
+    el.onmouseout = () => el.style.background = '#f5f6f4';
     el.innerHTML = `
-      <div style="font-weight: 600;">${escapeHtmlMobile(card.name)}</div>
-      <div style="color: #6b7280; font-size: 0.8rem; margin: 4px 0;">${escapeHtmlMobile(card.text || '')}</div>
+      <div style="font-weight: 600; color: #3d4a44;">${escapeHtmlMobile(card.name)}</div>
+      <div style="color: #6b7b72; font-size: 0.8rem; margin: 4px 0;">${escapeHtmlMobile(card.text || '')}</div>
       <button onclick="addToMobileDeck('${escapeHtmlMobile(JSON.stringify(card).replace(/'/g, "\\'"))}')" 
-        style="width: 100%; margin-top: 6px; padding: 8px; background: #3b82f6; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem; font-weight: 600;">+追加</button>
+        style="width: 100%; margin-top: 6px; padding: 8px; background: #7a94a8; color: #fff; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem; font-weight: 600;">+追加</button>
     `;
     container.appendChild(el);
   });
@@ -160,7 +177,7 @@ async function mobileSearchCards(q) {
  * ゲーム開始（SP版）
  */
 async function startMobileGame(deckName) {
-  const savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const savedDecks = getSavedDecksMobile();
   let deckData = null;
   
   if (savedDecks[deckName]) {
@@ -194,14 +211,14 @@ function renderMobileGame() {
   const isMyTurn = ol && window._olCurrentPlayer && ((ol.p === 'p1' && window._olCurrentPlayer === 1) || (ol.p === 'p2' && window._olCurrentPlayer === 2));
   
   container.innerHTML = `
-    <div style="display: flex; flex-direction: column; height: 100vh; background: #0f172a; color: white;">
+    <div style="display: flex; flex-direction: column; height: 100vh; background: #f2f4f1; color: #3d4a44;">
       
       <!-- ヘッダー -->
-      <div style="background: #dc2626; padding: 12px; font-weight: 600; text-align: center; font-size: 0.95rem;">
+      <div style="background: #6b8f8a; color: #fff; padding: 12px; font-weight: 600; text-align: center; font-size: 0.95rem;">
         ターン ${state.turn} | デッキ: ${state.deck.length}
         ${ol ? ` | ${isMyTurn ? '自分のターン' : '相手のターン'}` : ''}
       </div>
-      ${ol ? `<div style="padding: 8px 12px; background: #1e293b; font-size: 0.8rem; color: #cbd5e1;">
+      ${ol ? `<div style="padding: 8px 12px; background: #e8efe8; font-size: 0.8rem; color: #3d4a44;">
         🌐 ${escapeHtmlMobile(ol.p1Name)} vs ${ol.p2Name ? escapeHtmlMobile(ol.p2Name) : '待機中'}
         ${opp.hand !== undefined ? `｜ 相手: 手札${opp.hand} バトル${opp.battleZone || 0} マナ${opp.manaZone || 0} シールド${opp.shields || 0}` : ''}
       </div>` : ''}
@@ -210,18 +227,18 @@ function renderMobileGame() {
       <div style="flex: 1; display: flex; flex-direction: column; overflow-y: auto; padding: 12px; gap: 12px;">
         
         <!-- 敵フィールド -->
-        <div style="background: #1e293b; border: 2px solid #e02424; border-radius: 8px; padding: 12px; text-align: center;">
-          <div style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 8px;">敵フィールド</div>
-          <div style="font-size: 2rem; color: #fca5a5;">👤</div>
+        <div style="background: #f5f6f4; border: 1px solid #d4c4bc; border-radius: 8px; padding: 12px; text-align: center;">
+          <div style="font-size: 0.85rem; color: #6b7b72; margin-bottom: 8px;">敵フィールド</div>
+          <div style="font-size: 2rem; color: #9fb0b8;">👤</div>
         </div>
         
         <!-- バトルゾーン -->
-        <div style="background: #1e293b; border: 2px solid #f59e0b; border-radius: 8px; padding: 12px;">
-          <div style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 8px;">バトルゾーン (${state.battleZone.length})</div>
+        <div style="background: #f3ebe8; border: 1px solid #d4c4bc; border-radius: 8px; padding: 12px;">
+          <div style="font-size: 0.85rem; color: #3d4a44; margin-bottom: 8px;">バトルゾーン (${state.battleZone.length})</div>
           <div style="display: flex; flex-wrap: wrap; gap: 6px;">
             ${state.battleZone.map(c => `
-              <div style="width: 50px; height: 70px; background: #334155; border: 1px solid #cbd5e1; 
-                border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; text-align: center; padding: 4px;"
+              <div style="width: 50px; height: 70px; background: #ebe0dc; border: 1px solid #c4b4ac; 
+                border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; text-align: center; padding: 4px; color: #3d4a44;"
                 title="${escapeHtmlMobile(c.name)}">
                 ${escapeHtmlMobile(c.name).substring(0, 4)}
               </div>
@@ -230,12 +247,12 @@ function renderMobileGame() {
         </div>
         
         <!-- シールド -->
-        <div style="background: #1e293b; border: 2px solid #3b82f6; border-radius: 8px; padding: 12px;">
-          <div style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 8px;">シールド (${state.shields.length})</div>
+        <div style="background: #eef2f4; border: 1px solid #b8c8d4; border-radius: 8px; padding: 12px;">
+          <div style="font-size: 0.85rem; color: #3d4a44; margin-bottom: 8px;">シールド (${state.shields.length})</div>
           <div style="display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;">
             ${state.shields.map(s => `
-              <div style="width: 40px; height: 40px; background: #60a5fa; border: 1px solid #3b82f6; 
-                border-radius: 4px; display: flex; align-items: center; justify-content: center; font-weight: 600;">
+              <div style="width: 40px; height: 40px; background: #9fb8c4; border: 1px solid #7a94a8; 
+                border-radius: 4px; display: flex; align-items: center; justify-content: center; font-weight: 600; color: #fff;">
                 🛡️
               </div>
             `).join('')}
@@ -245,16 +262,16 @@ function renderMobileGame() {
       </div>
       
       <!-- 手札（固定下部） -->
-      <div style="background: #1e293b; border-top: 2px solid #475569; padding: 12px; max-height: 150px; overflow-x: auto;">
-        <div style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 8px;">手札 (${state.hand.length})</div>
+      <div style="background: #fafbf9; border-top: 1px solid #e0e5e0; padding: 12px; max-height: 150px; overflow-x: auto;">
+        <div style="font-size: 0.85rem; color: #6b7b72; margin-bottom: 8px;">手札 (${state.hand.length})</div>
         <div style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px;">
           ${state.hand.map((c, i) => `
-            <div style="min-width: 60px; height: 85px; background: #334155; border: 1px solid #64748b; 
+            <div style="min-width: 60px; height: 85px; background: linear-gradient(145deg, #c8d4dc 0%, #dce4e8 100%); border: 1px solid #9fb0b8; 
               border-radius: 6px; display: flex; align-items: center; justify-content: center; 
-              font-size: 0.65rem; text-align: center; padding: 6px; cursor: pointer; transition: all 0.15s;"
-              ontouchstart="this.style.background='#475569'; playMobileCard(${i})"
-              onmouseover="this.style.background='#475569'"
-              onmouseout="this.style.background='#334155'"
+              font-size: 0.65rem; text-align: center; padding: 6px; cursor: pointer; transition: all 0.15s; color: #3d4a44;"
+              ontouchstart="this.style.background='#b8c8d0'; playMobileCard(${i})"
+              onmouseover="this.style.background='#b8c8d0'"
+              onmouseout="this.style.background='linear-gradient(145deg, #c8d4dc 0%, #dce4e8 100%)'"
               title="${escapeHtmlMobile(c.name)}">
               ${escapeHtmlMobile(c.name).substring(0, 5)}
             </div>
@@ -263,10 +280,11 @@ function renderMobileGame() {
       </div>
       
       <!-- ボタン -->
-      <div style="background: #0f172a; padding: 12px; display: flex; gap: 8px;">
-        <button onclick="drawMobileCard()" style="flex: 1; padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">ドロー</button>
-        <button onclick="turnMobileEnd()" style="flex: 1; padding: 12px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">ターン終</button>
-        <button onclick="renderMobileDeckList()" style="flex: 1; padding: 12px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">戻る</button>
+      <div style="background: #f5f6f4; padding: 12px; display: flex; flex-wrap: wrap; gap: 8px; border-top: 1px solid #e0e5e0;">
+        <button onclick="drawMobileCard()" style="flex: 1; min-width: 70px; padding: 12px; background: #7a94a8; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">ドロー</button>
+        <button onclick="turnMobileEnd()" style="flex: 1; min-width: 70px; padding: 12px; background: #7a9a7a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">ターン終</button>
+        ${!window._ol ? '<button onclick="undoMobileGame()" style="flex: 1; min-width: 70px; padding: 12px; background: #8a8a8a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">やり直し</button>' : ''}
+        <button onclick="renderMobileDeckList()" style="flex: 1; min-width: 70px; padding: 12px; background: #a67c7c; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">戻る</button>
       </div>
       
     </div>
@@ -292,11 +310,16 @@ function turnMobileEnd() {
   renderMobileGame();
 }
 
+function undoMobileGame() {
+  if (window._ol) return;
+  if (engineMobile.undo()) renderMobileGame();
+}
+
 function newMobileDeck() {
   const name = prompt('デッキ名を入力:');
   if (!name) return;
   
-  const decks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const decks = getSavedDecksMobile();
   if (decks[name]) {
     alert('このデッキは既に存在します');
     return;
@@ -310,7 +333,7 @@ function newMobileDeck() {
 function deleteMobileDeck(name) {
   if (!confirm('削除してよろしいですか？')) return;
   
-  const decks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const decks = getSavedDecksMobile();
   delete decks[name];
   localStorage.setItem('dm_decks', JSON.stringify(decks));
   updateMobileDeckList();
@@ -327,10 +350,10 @@ function renderMobileDeckEdit() {
   const cardCount = cards.reduce((sum, c) => sum + (c.count || 1), 0);
   
   container.innerHTML = `
-    <div style="display: flex; flex-direction: column; height: 100vh; background: #f0f2f5;">
+    <div style="display: flex; flex-direction: column; height: 100vh; background: #f2f4f1;">
       
       <!-- ヘッダー -->
-      <div style="background: #dc2626; color: white; padding: 12px; font-weight: 600; text-align: center; display: flex; justify-content: space-between; align-items: center;">
+      <div style="background: #6b8f8a; color: #fff; padding: 12px; font-weight: 600; text-align: center; display: flex; justify-content: space-between; align-items: center;">
         <span onclick="renderMobileDeckList()" style="cursor: pointer; font-size: 1.2rem;">←</span>
         <span>${escapeHtmlMobile(deckName)}</span>
         <span style="font-size: 0.85rem;">${cardCount}/40</span>
@@ -340,28 +363,28 @@ function renderMobileDeckEdit() {
       <div style="flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px;">
         
         <!-- カード検索 -->
-        <div style="background: white; border-radius: 10px; padding: 12px;">
-          <h3 style="margin-bottom: 10px; font-size: 0.95rem;">カード追加</h3>
+        <div style="background: #fafbf9; border-radius: 10px; padding: 12px; border: 1px solid #e0e5e0;">
+          <h3 style="margin-bottom: 10px; font-size: 0.95rem; color: #3d4a44;">カード追加</h3>
           <input type="text" id="mobile-search-input" placeholder="カード名..." 
-            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 10px; font-size: 1rem;"
+            style="width: 100%; padding: 10px; border: 1px solid #e0e5e0; border-radius: 6px; margin-bottom: 10px; font-size: 1rem; background: #fff;"
             onkeyup="mobileSearchCards(this.value)">
           <div id="mobile-search-results" style="display: flex; flex-direction: column; gap: 6px;"></div>
         </div>
         
         <!-- デッキリスト -->
-        <div style="background: white; border-radius: 10px; padding: 12px;">
-          <h3 style="margin-bottom: 10px; font-size: 0.95rem;">デッキカード</h3>
+        <div style="background: #fafbf9; border-radius: 10px; padding: 12px; border: 1px solid #e0e5e0;">
+          <h3 style="margin-bottom: 10px; font-size: 0.95rem; color: #3d4a44;">デッキカード</h3>
           <div id="mobile-deck-cards" style="display: flex; flex-direction: column; gap: 8px;">
             ${cards.map((c, i) => `
-              <div style="padding: 10px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;">
-                <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 6px;">${escapeHtmlMobile(c.name)}</div>
+              <div style="padding: 10px; background: #f5f6f4; border: 1px solid #e0e5e0; border-radius: 6px;">
+                <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; color: #3d4a44;">${escapeHtmlMobile(c.name)}</div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                  <span style="font-size: 0.8rem; color: #6b7280;">${escapeHtmlMobile(c.text || '')}</span>
+                  <span style="font-size: 0.8rem; color: #6b7b72;">${escapeHtmlMobile(c.text || '')}</span>
                   <div style="display: flex; gap: 4px;">
-                    <button onclick="decrementMobileCardCount(${i})" style="width: 28px; height: 28px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">−</button>
-                    <span style="width: 28px; text-align: center; font-weight: 600;">${c.count || 1}</span>
-                    <button onclick="incrementMobileCardCount(${i})" style="width: 28px; height: 28px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">+</button>
-                    <button onclick="removeMobileCard(${i})" style="width: 28px; height: 28px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer;">🗑️</button>
+                    <button onclick="decrementMobileCardCount(${i})" style="width: 28px; height: 28px; background: #a67c7c; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">−</button>
+                    <span style="width: 28px; text-align: center; font-weight: 600; color: #3d4a44;">${c.count || 1}</span>
+                    <button onclick="incrementMobileCardCount(${i})" style="width: 28px; height: 28px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">+</button>
+                    <button onclick="removeMobileCard(${i})" style="width: 28px; height: 28px; background: #a67c7c; color: #fff; border: none; border-radius: 4px; cursor: pointer;">🗑️</button>
                   </div>
                 </div>
               </div>
@@ -372,9 +395,9 @@ function renderMobileDeckEdit() {
       </div>
       
       <!-- ボタン -->
-      <div style="background: white; padding: 12px; display: flex; gap: 8px; border-top: 1px solid #e5e7eb;">
-        <button onclick="playMobileDeckGame()" style="flex: 1; padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">▶ ゲーム</button>
-        <button onclick="saveMobileDeck()" style="flex: 1; padding: 12px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">💾 保存</button>
+      <div style="background: #f5f6f4; padding: 12px; display: flex; gap: 8px; border-top: 1px solid #e0e5e0;">
+        <button onclick="playMobileDeckGame()" style="flex: 1; padding: 12px; background: #7a9a7a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">▶ ゲーム</button>
+        <button onclick="saveMobileDeck()" style="flex: 1; padding: 12px; background: #6b8f8a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">💾 保存</button>
       </div>
       
     </div>
@@ -385,7 +408,7 @@ function renderMobileDeckEdit() {
  * デッキ編集を開く（SP版）
  */
 function openMobileDeck(name) {
-  const savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const savedDecks = getSavedDecksMobile();
   window._deckEditing = name;
   window._deckCards = savedDecks[name] ? JSON.parse(JSON.stringify(savedDecks[name])) : [];
   renderMobileDeckEdit();
@@ -448,7 +471,7 @@ function addToMobileDeck(cardJson) {
  * デッキ保存（SP版）
  */
 function saveMobileDeck() {
-  const decks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const decks = getSavedDecksMobile();
   decks[window._deckEditing] = window._deckCards;
   localStorage.setItem('dm_decks', JSON.stringify(decks));
   alert('デッキを保存しました');
@@ -481,19 +504,19 @@ function showMobileOnlineModal(deckName) {
   }
   const div = document.createElement('div');
   div.id = 'mobile-ol-overlay';
-  div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:2000;display:flex;align-items:center;justify-content:center;padding:16px;';
+  div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:2000;display:flex;align-items:center;justify-content:center;padding:16px;';
   div.innerHTML = `
-    <div style="background:white;border-radius:12px;padding:20px;max-width:360px;width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.3);">
-      <h3 style="margin-bottom:12px;font-size:1.1rem;">🌐 オンライン対戦</h3>
-      <p style="font-size:0.9rem;color:#6b7280;margin-bottom:10px;">デッキ: <strong id="mobile-ol-deck-name">${escapeHtmlMobile(deckName)}</strong></p>
-      <label style="display:block;margin-bottom:4px;font-size:0.85rem;">プレイヤー名</label>
-      <input type="text" id="mobile-ol-player-name" placeholder="Player 1" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:6px;margin-bottom:12px;font-size:1rem;">
-      <button type="button" onclick="olCreateRoomMobile()" style="width:100%;padding:12px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;margin-bottom:16px;">ルームを作成</button>
-      <hr style="margin:12px 0;border:none;border-top:1px solid #e5e7eb;">
-      <label style="display:block;margin-bottom:4px;font-size:0.85rem;">ルームコード（6文字）</label>
-      <input type="text" id="mobile-ol-room-code" placeholder="ABCD12" maxlength="6" style="width:100%;padding:12px;border:1px solid #ddd;border-radius:6px;margin-bottom:10px;letter-spacing:4px;text-transform:uppercase;font-size:1rem;">
-      <button type="button" onclick="olJoinRoomMobile()" style="width:100%;padding:12px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">参加する</button>
-      <button type="button" onclick="document.getElementById('mobile-ol-overlay').style.display='none'" style="width:100%;margin-top:10px;padding:10px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;cursor:pointer;">キャンセル</button>
+    <div style="background:#fafbf9;border-radius:12px;padding:20px;max-width:360px;width:100%;box-shadow:0 4px 20px rgba(0,0,0,0.08);border:1px solid #e0e5e0;">
+      <h3 style="margin-bottom:12px;font-size:1.1rem;color:#3d4a44;">🌐 オンライン対戦</h3>
+      <p style="font-size:0.9rem;color:#6b7b72;margin-bottom:10px;">デッキ: <strong id="mobile-ol-deck-name">${escapeHtmlMobile(deckName)}</strong></p>
+      <label style="display:block;margin-bottom:4px;font-size:0.85rem;color:#3d4a44;">プレイヤー名</label>
+      <input type="text" id="mobile-ol-player-name" placeholder="Player 1" style="width:100%;padding:12px;border:1px solid #e0e5e0;border-radius:6px;margin-bottom:12px;font-size:1rem;background:#fff;">
+      <button type="button" onclick="olCreateRoomMobile()" style="width:100%;padding:12px;background:#6b8f8a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;margin-bottom:16px;">ルームを作成</button>
+      <hr style="margin:12px 0;border:none;border-top:1px solid #e0e5e0;">
+      <label style="display:block;margin-bottom:4px;font-size:0.85rem;color:#3d4a44;">ルームコード（6文字）</label>
+      <input type="text" id="mobile-ol-room-code" placeholder="ABCD12" maxlength="6" style="width:100%;padding:12px;border:1px solid #e0e5e0;border-radius:6px;margin-bottom:10px;letter-spacing:4px;text-transform:uppercase;font-size:1rem;background:#fff;">
+      <button type="button" onclick="olJoinRoomMobile()" style="width:100%;padding:12px;background:#7a94a8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">参加する</button>
+      <button type="button" onclick="document.getElementById('mobile-ol-overlay').style.display='none'" style="width:100%;margin-top:10px;padding:10px;background:#eef1ef;color:#3d4a44;border:none;border-radius:6px;cursor:pointer;">キャンセル</button>
     </div>
   `;
   document.body.appendChild(div);
@@ -518,10 +541,10 @@ async function olCreateRoomMobile() {
   window._olDeckName = deckName;
   window._olDeckData = deckData;
   document.getElementById('mobile-ol-overlay').querySelector('div').innerHTML = `
-    <h3 style="margin-bottom:12px;">ルーム作成完了</h3>
-    <p style="font-size:1.4rem;font-weight:700;letter-spacing:8px;color:#059669;margin:12px 0;">${room}</p>
-    <p style="font-size:0.9rem;color:#6b7280;">相手にこのコードを伝えてください。</p>
-    <button type="button" onclick="olCancelMobileWait()" style="width:100%;margin-top:16px;padding:12px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">キャンセル</button>
+    <h3 style="margin-bottom:12px;color:#3d4a44;">ルーム作成完了</h3>
+    <p style="font-size:1.4rem;font-weight:700;letter-spacing:8px;color:#6b8f8a;margin:12px 0;">${room}</p>
+    <p style="font-size:0.9rem;color:#6b7b72;">相手にこのコードを伝えてください。</p>
+    <button type="button" onclick="olCancelMobileWait()" style="width:100%;margin-top:16px;padding:12px;background:#a67c7c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">キャンセル</button>
   `;
   const es = NetworkService.createEventSource(room, 'p1');
   window._ol.eventSource = es;
@@ -593,7 +616,7 @@ async function olJoinRoomMobile() {
 }
 
 async function getMobileDeckDataForOnline(deckName) {
-  const savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const savedDecks = getSavedDecksMobile();
   if (savedDecks[deckName]) return Array.isArray(savedDecks[deckName]) ? savedDecks[deckName] : null;
   const account = AuthService.getCurrentAccount();
   if (account) return await NetworkService.fetchServerDeck(account.username, account.pin, deckName);

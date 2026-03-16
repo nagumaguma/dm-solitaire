@@ -13,6 +13,22 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+/** onclick 等のシングルクォート文字列用（デッキ名に ' が含まれると壊れるのを防ぐ） */
+function escapeAttrJs(str) {
+  return String(str ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+/** localStorage dm_decks を安全に取得（破損時は {}） */
+function getSavedDecks() {
+  try {
+    const raw = localStorage.getItem('dm_decks');
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    console.warn('dm_decks parse error', e);
+    return {};
+  }
+}
+
 /**
  * PC版UI初期化
  */
@@ -28,32 +44,35 @@ function renderDesktopDeckList() {
   const container = document.getElementById('app-desktop');
   
   container.innerHTML = `
-    <div style="display: grid; grid-template-columns: 250px 1fr 300px; gap: 10px; height: 100vh; padding: 10px; background: #f0f2f5;">
+    <div style="display: grid; grid-template-columns: 250px 1fr 300px; gap: 10px; height: 100vh; padding: 10px; background: #f2f4f1;">
       
       <!-- 左: カード検索パネル -->
-      <div style="background: white; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-        <h3 style="margin-bottom: 10px; font-size: 0.95rem;">カード検索</h3>
+      <div style="background: #fafbf9; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 2px rgba(0,0,0,0.04); border: 1px solid #e0e5e0;">
+        <h3 style="margin-bottom: 10px; font-size: 0.95rem; color: #3d4a44;">カード検索</h3>
         <input type="text" id="desktop-search-input" placeholder="カード名..." 
-          style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 10px;"
+          style="width: 100%; padding: 8px; border: 1px solid #e0e5e0; border-radius: 6px; margin-bottom: 10px; background: #fff;"
           onkeyup="desktopSearchCards(this.value)">
         <div id="desktop-search-results" style="display: flex; flex-direction: column; gap: 6px;"></div>
       </div>
       
       <!-- 中央: デッキ一覧 -->
-      <div style="background: white; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-        <h3 style="margin-bottom: 10px; font-size: 0.95rem;">デッキ一覧</h3>
+      <div style="background: #fafbf9; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 2px rgba(0,0,0,0.04); border: 1px solid #e0e5e0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <h3 style="font-size: 0.95rem; color: #3d4a44; margin: 0;">デッキ一覧</h3>
+          <button type="button" onclick="logout()" style="padding: 4px 8px; font-size: 0.75rem; background: transparent; color: #6b7b72; border: 1px solid #e0e5e0; border-radius: 4px; cursor: pointer;">ログアウト</button>
+        </div>
         <button onclick="newDesktopDeck()" 
-          style="width: 100%; padding: 10px; background: #dc2626; color: white; border: none; border-radius: 6px; cursor: pointer; margin-bottom: 10px; font-weight: 600;">
+          style="width: 100%; padding: 10px; background: #6b8f8a; color: #fff; border: none; border-radius: 6px; cursor: pointer; margin-bottom: 10px; font-weight: 600;">
           ➕ 新規作成
         </button>
         <div id="desktop-deck-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
       </div>
       
       <!-- 右: ゲームボード -->
-      <div style="background: white; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-        <h3 style="margin-bottom: 10px; font-size: 0.95rem;" id="desktop-game-title">ゲーム情報</h3>
+      <div style="background: #fafbf9; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 2px rgba(0,0,0,0.04); border: 1px solid #e0e5e0;">
+        <h3 style="margin-bottom: 10px; font-size: 0.95rem; color: #3d4a44;" id="desktop-game-title">ゲーム情報</h3>
         <div id="desktop-game-board" style="font-size: 0.85rem;">
-          <p style="color: #999;">デッキを選択してゲーム開始</p>
+          <p style="color: #6b7b72;">デッキを選択してゲーム開始</p>
         </div>
       </div>
       
@@ -68,7 +87,7 @@ function renderDesktopDeckList() {
  */
 function updateDesktopDeckList() {
   // ローカルデッキ読み込み
-  const savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const savedDecks = getSavedDecks();
   const account = AuthService.getCurrentAccount();
   
   const deckList = document.getElementById('desktop-deck-list');
@@ -79,19 +98,19 @@ function updateDesktopDeckList() {
     const count = cards?.length || 0;
     const el = document.createElement('div');
     el.style.cssText = `
-      padding: 10px; background: #f9fafb; border: 1px solid #e5e7eb; 
+      padding: 10px; background: #f5f6f4; border: 1px solid #e0e5e0; 
       border-radius: 6px; cursor: pointer; transition: all 0.15s;
     `;
-    el.onmouseover = () => el.style.background = '#eff6ff';
-    el.onmouseout = () => el.style.background = '#f9fafb';
+    el.onmouseover = () => el.style.background = '#eef1ef';
+    el.onmouseout = () => el.style.background = '#f5f6f4';
     el.innerHTML = `
-      <div style="font-weight: 600; font-size: 0.9rem;">${escapeHtml(name)}</div>
-      <div style="font-size: 0.8rem; color: #6b7280; margin: 4px 0;">📋 ${count}枚</div>
+      <div style="font-weight: 600; font-size: 0.9rem; color: #3d4a44;">${escapeHtml(name)}</div>
+      <div style="font-size: 0.8rem; color: #6b7b72; margin: 4px 0;">📋 ${count}枚</div>
       <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-        <button onclick="openDesktopDeck('${escapeHtml(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">✏️ 編集</button>
-        <button onclick="startDesktopGame('${escapeHtml(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">▶ START</button>
-        <button onclick="showDesktopOnlineModal('${escapeHtml(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🌐 オンライン</button>
-        <button onclick="deleteDesktopDeck('${escapeHtml(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🗑️</button>
+        <button onclick="openDesktopDeck('${escapeAttrJs(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #7a94a8; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">✏️ 編集</button>
+        <button onclick="startDesktopGame('${escapeAttrJs(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">▶ START</button>
+        <button onclick="showDesktopOnlineModal('${escapeAttrJs(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #6b8f8a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🌐 オンライン</button>
+        <button onclick="deleteDesktopDeck('${escapeAttrJs(name)}')" style="flex: 1; min-width: 60px; padding: 6px; background: #a67c7c; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🗑️</button>
       </div>
     `;
     deckList.appendChild(el);
@@ -102,16 +121,16 @@ function updateDesktopDeckList() {
     for (const name of window._serverDeckNames) {
       const el = document.createElement('div');
       el.style.cssText = `
-        padding: 10px; background: #fef3c7; border: 1px solid #fcd34d; 
+        padding: 10px; background: #f0f3f1; border: 1px solid #c5d4ce; 
         border-radius: 6px; cursor: pointer; transition: all 0.15s;
       `;
-      el.onmouseover = () => el.style.background = '#fef9e7';
-      el.onmouseout = () => el.style.background = '#fef3c7';
+      el.onmouseover = () => el.style.background = '#e8efe8';
+      el.onmouseout = () => el.style.background = '#f0f3f1';
       el.innerHTML = `
-        <div style="font-weight: 600; font-size: 0.9rem;">☁️ ${escapeHtml(name)}</div>
+        <div style="font-weight: 600; font-size: 0.9rem; color: #3d4a44;">☁️ ${escapeHtml(name)}</div>
         <div style="display: flex; gap: 6px; margin-top: 6px;">
-          <button onclick="startDesktopGame('${escapeHtml(name)}')" style="flex: 1; padding: 6px; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">▶ START</button>
-          <button onclick="showDesktopOnlineModal('${escapeHtml(name)}')" style="flex: 1; padding: 6px; background: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🌐 オンライン</button>
+          <button onclick="startDesktopGame('${escapeAttrJs(name)}')" style="flex: 1; padding: 6px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">▶ START</button>
+          <button onclick="showDesktopOnlineModal('${escapeAttrJs(name)}')" style="flex: 1; padding: 6px; background: #6b8f8a; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">🌐 オンライン</button>
         </div>
       `;
       deckList.appendChild(el);
@@ -135,16 +154,16 @@ async function desktopSearchCards(q) {
   results.slice(0, 10).forEach(card => {
     const el = document.createElement('div');
     el.style.cssText = `
-      padding: 8px; background: #f3f4f6; border: 1px solid #e5e7eb; 
+      padding: 8px; background: #f5f6f4; border: 1px solid #e0e5e0; 
       border-radius: 4px; cursor: pointer; font-size: 0.8rem; transition: all 0.15s;
     `;
-    el.onmouseover = () => el.style.background = '#e5e7eb';
-    el.onmouseout = () => el.style.background = '#f3f4f6';
+    el.onmouseover = () => el.style.background = '#eef1ef';
+    el.onmouseout = () => el.style.background = '#f5f6f4';
     el.innerHTML = `
-      <div style="font-weight: 600;">${escapeHtml(card.name)}</div>
-      <div style="color: #6b7280; font-size: 0.75rem;">${escapeHtml(card.text || '')}</div>
+      <div style="font-weight: 600; color: #3d4a44;">${escapeHtml(card.name)}</div>
+      <div style="color: #6b7b72; font-size: 0.75rem;">${escapeHtml(card.text || '')}</div>
       <button onclick="addToDesktopDeck('${escapeHtml(JSON.stringify(card).replace(/'/g, "\\'"))}')" 
-        style="width: 100%; margin-top: 4px; padding: 4px; background: #3b82f6; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.75rem;">+追加</button>
+        style="width: 100%; margin-top: 4px; padding: 4px; background: #7a94a8; color: #fff; border: none; border-radius: 3px; cursor: pointer; font-size: 0.75rem;">+追加</button>
     `;
     container.appendChild(el);
   });
@@ -154,7 +173,7 @@ async function desktopSearchCards(q) {
  * ゲーム開始（PC版）
  */
 async function startDesktopGame(deckName) {
-  const savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const savedDecks = getSavedDecks();
   let deckData = null;
   
   // ローカルから探す
@@ -193,23 +212,23 @@ function renderDesktopGame() {
   
   gameBoard.innerHTML = `
     <div style="font-size: 0.85rem;">
-      <div style="margin-bottom: 12px; padding: 8px; background: #f3f4f6; border-radius: 4px;">
+      <div style="margin-bottom: 12px; padding: 8px; background: #eef1ef; border-radius: 4px; color: #3d4a44;">
         <strong>ターン:</strong> ${state.turn}
-        ${ol ? `<span style="margin-left: 8px;">${isMyTurn ? '<span style="color: #059669;">自分のターン</span>' : '<span style="color: #6b7280;">相手のターン</span>'}</span>` : ''}
+        ${ol ? `<span style="margin-left: 8px;">${isMyTurn ? '<span style="color: #6b8f8a;">自分のターン</span>' : '<span style="color: #6b7b72;">相手のターン</span>'}</span>` : ''}
       </div>
-      ${ol ? `<div style="margin-bottom: 8px; padding: 6px; background: #fef3c7; border-radius: 4px; font-size: 0.8rem;">
+      ${ol ? `<div style="margin-bottom: 8px; padding: 6px; background: #e8efe8; border-radius: 4px; font-size: 0.8rem; color: #3d4a44;">
         <strong>🌐</strong> ${escapeHtml(ol.p1Name)} vs ${ol.p2Name ? escapeHtml(ol.p2Name) : '待機中'}
         ${opp.hand !== undefined ? `｜ 相手: 手札${opp.hand} バトル${opp.battleZone || 0} マナ${opp.manaZone || 0} シールド${opp.shields || 0}` : ''}
       </div>` : ''}
       
       <div style="margin-bottom: 10px;">
-        <strong style="display: block; margin-bottom: 4px;">デッキ残枚数</strong>
-        <div style="font-size: 1.2rem; color: #dc2626;">${state.deck.length}</div>
+        <strong style="display: block; margin-bottom: 4px; color: #3d4a44;">デッキ残枚数</strong>
+        <div style="font-size: 1.2rem; color: #6b8f8a;">${state.deck.length}</div>
       </div>
       
       <div style="margin-bottom: 10px;">
-        <strong style="display: block; margin-bottom: 4px;">手札 (${state.hand.length})</strong>
-        <div id="desktop-hand-zone" style="display: flex; flex-wrap: wrap; gap: 4px; min-height: 70px; padding: 8px; background: #f9fafb; border-radius: 4px; position: relative;">
+        <strong style="display: block; margin-bottom: 4px; color: #3d4a44;">手札 (${state.hand.length})</strong>
+        <div id="desktop-hand-zone" style="display: flex; flex-wrap: wrap; gap: 4px; min-height: 70px; padding: 8px; background: #f5f6f4; border-radius: 4px; border: 1px solid #e0e5e0; position: relative;">
           ${state.hand.map((c, i) => `
             <div class="card-in-hand" draggable="true" 
               onclick="playDesktopCard(${i}, 'battle')" 
@@ -219,10 +238,10 @@ function renderDesktopGame() {
               ondragend="dragDesktopCardEnd()"
               style="
                 width: 45px; height: 65px; 
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                border: 1px solid #4f46e5; border-radius: 3px; position: relative;
+                background: linear-gradient(145deg, #b8c8d0 0%, #c8d4dc 100%);
+                border: 1px solid #9fb0b8; border-radius: 3px; position: relative;
                 cursor: grab; display: flex; align-items: center; justify-content: center;
-                font-size: 0.6rem; padding: 2px; text-align: center; color: white;
+                font-size: 0.6rem; padding: 2px; text-align: center; color: #3d4a44;
                 flex-shrink: 0; transition: transform 0.1s;
               "
               title="${escapeHtml(c.name)}">
@@ -230,18 +249,18 @@ function renderDesktopGame() {
             </div>
           `).join('')}
         </div>
-        <div id="desktop-card-preview" style="position: fixed; display: none; z-index: 1000; background: white; border: 2px solid #333; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); padding: 8px; max-width: 200px;">
+        <div id="desktop-card-preview" style="position: fixed; display: none; z-index: 1000; background: #fafbf9; border: 1px solid #e0e5e0; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); padding: 8px; max-width: 200px;">
           <div id="desktop-preview-content"></div>
         </div>
       </div>
       
       <div style="margin-bottom: 10px;">
-        <strong style="display: block; margin-bottom: 4px;">バトル (${state.battleZone.length})</strong>
+        <strong style="display: block; margin-bottom: 4px; color: #3d4a44;">バトル (${state.battleZone.length})</strong>
         <div id="desktop-battle-zone" ondrop="dropDesktopCard(event, 'battle')" ondragover="dragDesktopOver(event)"
-          style="display: flex; flex-wrap: wrap; gap: 4px; min-height: 70px; padding: 8px; background: #fee2e2; border: 2px dashed #fca5a5; border-radius: 4px;">
+          style="display: flex; flex-wrap: wrap; gap: 4px; min-height: 70px; padding: 8px; background: #f3ebe8; border: 2px dashed #d4c4bc; border-radius: 4px;">
           ${state.battleZone.map(c => `
-            <div style="width: 45px; height: 65px; background: #fecaca; border: 2px solid #ef4444; 
-              border-radius: 4px; font-size: 0.6rem; padding: 2px; text-align: center; cursor: pointer;"
+            <div style="width: 45px; height: 65px; background: #ebe0dc; border: 1px solid #c4b4ac; 
+              border-radius: 4px; font-size: 0.6rem; padding: 2px; text-align: center; cursor: pointer; color: #3d4a44;"
               title="${escapeHtml(c.name)}" onmouseenter="showDesktopCardPreview(event, -1, c)"
               onmouseleave="hideDesktopCardPreview()">
               ${escapeHtml(c.name).substring(0, 3)}
@@ -251,12 +270,12 @@ function renderDesktopGame() {
       </div>
       
       <div style="margin-bottom: 10px;">
-        <strong style="display: block; margin-bottom: 4px;">マナ (${state.manaZone.length})</strong>
+        <strong style="display: block; margin-bottom: 4px; color: #3d4a44;">マナ (${state.manaZone.length})</strong>
         <div id="desktop-mana-zone" ondrop="dropDesktopCard(event, 'mana')" ondragover="dragDesktopOver(event)"
-          style="display: flex; flex-wrap: wrap; gap: 4px; min-height: 70px; padding: 8px; background: #dbeafe; border: 2px dashed #60a5fa; border-radius: 4px;">
+          style="display: flex; flex-wrap: wrap; gap: 4px; min-height: 70px; padding: 8px; background: #eef2f4; border: 2px dashed #b8c8d4; border-radius: 4px;">
           ${state.manaZone.map(c => `
-            <div style="width: 45px; height: 65px; background: #bfdbfe; border: 2px solid #3b82f6; 
-              border-radius: 4px; font-size: 0.6rem; padding: 2px; text-align: center; cursor: pointer;"
+            <div style="width: 45px; height: 65px; background: #dce4e8; border: 1px solid #9fb0b8; 
+              border-radius: 4px; font-size: 0.6rem; padding: 2px; text-align: center; cursor: pointer; color: #3d4a44;"
               title="${escapeHtml(c.name)}" onmouseenter="showDesktopCardPreview(event, -1, c)"
               onmouseleave="hideDesktopCardPreview()">
               ${escapeHtml(c.name).substring(0, 3)}
@@ -266,21 +285,22 @@ function renderDesktopGame() {
       </div>
       
       <div style="margin-bottom: 12px;">
-        <strong style="display: block; margin-bottom: 4px;">シールド (${state.shields.length})</strong>
+        <strong style="display: block; margin-bottom: 4px; color: #3d4a44;">シールド (${state.shields.length})</strong>
         <div style="display: flex; flex-wrap: wrap; gap: 4px;">
           ${state.shields.map(s => `
-            <div style="width: 40px; height: 50px; background: #60a5fa; border: 1px solid #3b82f6; 
-              border-radius: 3px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600;">
+            <div style="width: 40px; height: 50px; background: #9fb8c4; border: 1px solid #7a94a8; 
+              border-radius: 3px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600;">
               <span>🛡️</span>
             </div>
           `).join('')}
         </div>
       </div>
       
-      <div style="display: flex; gap: 6px;">
-        <button onclick="drawDesktopCard()" style="flex: 1; padding: 8px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">ドロー</button>
-        <button onclick="turnDesktopEnd()" style="flex: 1; padding: 8px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer;">ターン終了</button>
-        <button onclick="renderDesktopDeckList()" style="flex: 1; padding: 8px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer;">戻る</button>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        <button onclick="drawDesktopCard()" style="flex: 1; min-width: 60px; padding: 8px; background: #7a94a8; color: #fff; border: none; border-radius: 4px; cursor: pointer;">ドロー</button>
+        <button onclick="turnDesktopEnd()" style="flex: 1; min-width: 60px; padding: 8px; background: #7a9a7a; color: #fff; border: none; border-radius: 4px; cursor: pointer;">ターン終了</button>
+        ${!window._ol ? `<button onclick="undoDesktopGame()" style="flex: 1; min-width: 60px; padding: 8px; background: #8a8a8a; color: #fff; border: none; border-radius: 4px; cursor: pointer;">やり直し</button>` : ''}
+        <button onclick="renderDesktopDeckList()" style="flex: 1; min-width: 60px; padding: 8px; background: #a67c7c; color: #fff; border: none; border-radius: 4px; cursor: pointer;">戻る</button>
       </div>
     </div>
   `;
@@ -310,8 +330,8 @@ function showDesktopCardPreview(event, idx, card) {
   if (!preview || !content) return;
   
   content.innerHTML = `
-    <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 4px;">${escapeHtml(card.name)}</div>
-    <div style="font-size: 0.75rem; color: #666; line-height: 1.3;">
+    <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 4px; color: #3d4a44;">${escapeHtml(card.name)}</div>
+    <div style="font-size: 0.75rem; color: #6b7b72; line-height: 1.3;">
       ${escapeHtml(card.text || '説明文なし')}
     </div>
   `;
@@ -372,11 +392,16 @@ function turnDesktopEnd() {
   renderDesktopGame();
 }
 
+function undoDesktopGame() {
+  if (window._ol) return;
+  if (engine.undo()) renderDesktopGame();
+}
+
 function newDesktopDeck() {
   const name = prompt('デッキ名を入力:');
   if (!name) return;
   
-  const decks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const decks = getSavedDecks();
   if (decks[name]) {
     alert('このデッキは既に存在します');
     return;
@@ -390,7 +415,7 @@ function newDesktopDeck() {
 function deleteDesktopDeck(name) {
   if (!confirm('削除してよろしいですか？')) return;
   
-  const decks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const decks = getSavedDecks();
   delete decks[name];
   localStorage.setItem('dm_decks', JSON.stringify(decks));
   updateDesktopDeckList();
@@ -416,22 +441,22 @@ function renderDesktopDeckEdit() {
   });
   
   container.innerHTML = `
-    <div style="display: grid; grid-template-columns: 250px 1fr 300px; gap: 10px; height: 100vh; padding: 10px; background: #f0f2f5;">
+    <div style="display: grid; grid-template-columns: 250px 1fr 300px; gap: 10px; height: 100vh; padding: 10px; background: #f2f4f1;">
       
       <!-- 左: カード検索パネル -->
-      <div style="background: white; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-        <h3 style="margin-bottom: 10px; font-size: 0.95rem;">カード検索</h3>
+      <div style="background: #fafbf9; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 2px rgba(0,0,0,0.04); border: 1px solid #e0e5e0;">
+        <h3 style="margin-bottom: 10px; font-size: 0.95rem; color: #3d4a44;">カード検索</h3>
         <input type="text" id="desktop-search-input" placeholder="カード名..." 
-          style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 10px;"
+          style="width: 100%; padding: 8px; border: 1px solid #e0e5e0; border-radius: 6px; margin-bottom: 10px; background: #fff;"
           onkeyup="desktopSearchCards(this.value)">
         <div id="desktop-search-results" style="display: flex; flex-direction: column; gap: 6px;"></div>
       </div>
       
       <!-- 中央: デッキ構成 -->
-      <div style="background: white; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-        <div style="margin-bottom: 12px; padding: 10px; background: #f3f4f6; border-radius: 6px;">
-          <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 6px;">${escapeHtml(deckName)}</div>
-          <div style="font-size: 0.8rem; color: #6b7280;">
+      <div style="background: #fafbf9; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 2px rgba(0,0,0,0.04); border: 1px solid #e0e5e0;">
+        <div style="margin-bottom: 12px; padding: 10px; background: #eef1ef; border-radius: 6px;">
+          <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; color: #3d4a44;">${escapeHtml(deckName)}</div>
+          <div style="font-size: 0.8rem; color: #6b7b72;">
             <div>📋 カード枚数: <strong>${cardCount}</strong> / 40</div>
             <div>🎴 ユニーク: <strong>${uniqueCount}</strong></div>
           </div>
@@ -439,16 +464,16 @@ function renderDesktopDeckEdit() {
         
         <div id="desktop-deck-cards" style="display: flex; flex-direction: column; gap: 6px;">
           ${cards.map((c, i) => `
-            <div style="padding: 8px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="padding: 8px; background: #f5f6f4; border: 1px solid #e0e5e0; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
               <div style="flex: 1;">
-                <div style="font-weight: 600; font-size: 0.85rem;">${escapeHtml(c.name)}</div>
-                <div style="font-size: 0.7rem; color: #6b7280;">${escapeHtml(c.text || '')}</div>
+                <div style="font-weight: 600; font-size: 0.85rem; color: #3d4a44;">${escapeHtml(c.name)}</div>
+                <div style="font-size: 0.7rem; color: #6b7b72;">${escapeHtml(c.text || '')}</div>
               </div>
               <div style="display: flex; gap: 4px; align-items: center;">
-                <button onclick="decrementDesktopCardCount(${i})" style="width: 24px; height: 24px; background: #ef4444; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem; font-weight: 600;">−</button>
-                <span style="width: 24px; text-align: center; font-weight: 600; font-size: 0.9rem;">${c.count || 1}</span>
-                <button onclick="incrementDesktopCardCount(${i})" style="width: 24px; height: 24px; background: #10b981; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem; font-weight: 600;">+</button>
-                <button onclick="removeDesktopCard(${i})" style="width: 24px; height: 24px; background: #dc2626; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem;">🗑️</button>
+                <button onclick="decrementDesktopCardCount(${i})" style="width: 24px; height: 24px; background: #a67c7c; color: #fff; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem; font-weight: 600;">−</button>
+                <span style="width: 24px; text-align: center; font-weight: 600; font-size: 0.9rem; color: #3d4a44;">${c.count || 1}</span>
+                <button onclick="incrementDesktopCardCount(${i})" style="width: 24px; height: 24px; background: #7a9a7a; color: #fff; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem; font-weight: 600;">+</button>
+                <button onclick="removeDesktopCard(${i})" style="width: 24px; height: 24px; background: #a67c7c; color: #fff; border: none; border-radius: 3px; cursor: pointer; font-size: 0.8rem;">🗑️</button>
               </div>
             </div>
           `).join('')}
@@ -456,11 +481,11 @@ function renderDesktopDeckEdit() {
       </div>
       
       <!-- 右: デッキ情報 -->
-      <div style="background: white; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-        <h3 style="margin-bottom: 10px; font-size: 0.95rem;">文明構成</h3>
+      <div style="background: #fafbf9; border-radius: 10px; padding: 12px; overflow-y: auto; box-shadow: 0 1px 2px rgba(0,0,0,0.04); border: 1px solid #e0e5e0;">
+        <h3 style="margin-bottom: 10px; font-size: 0.95rem; color: #3d4a44;">文明構成</h3>
         <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px;">
           ${Object.entries(civCounts).map(([civ, count]) => `
-            <div style="padding: 8px; background: #f3f4f6; border-radius: 4px; display: flex; justify-content: space-between;">
+            <div style="padding: 8px; background: #eef1ef; border-radius: 4px; display: flex; justify-content: space-between; color: #3d4a44;">
               <span style="font-size: 0.85rem;">${escapeHtml(getCivLabel(civ))}</span>
               <strong style="font-size: 0.85rem;">${count}枚</strong>
             </div>
@@ -468,9 +493,9 @@ function renderDesktopDeckEdit() {
         </div>
         
         <div style="display: flex; flex-direction: column; gap: 6px;">
-          <button onclick="playDesktopDeckGame()" style="width: 100%; padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">▶ ゲーム開始</button>
-          <button onclick="saveDesktopDeck()" style="width: 100%; padding: 12px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">💾 保存</button>
-          <button onclick="renderDesktopDeckList()" style="width: 100%; padding: 12px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">← 戻る</button>
+          <button onclick="playDesktopDeckGame()" style="width: 100%; padding: 12px; background: #7a9a7a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">▶ ゲーム開始</button>
+          <button onclick="saveDesktopDeck()" style="width: 100%; padding: 12px; background: #6b8f8a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">💾 保存</button>
+          <button onclick="renderDesktopDeckList()" style="width: 100%; padding: 12px; background: #a67c7c; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">← 戻る</button>
         </div>
       </div>
       
@@ -482,7 +507,7 @@ function renderDesktopDeckEdit() {
  * デッキ編集を開く
  */
 function openDesktopDeck(name) {
-  const savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const savedDecks = getSavedDecks();
   window._deckEditing = name;
   window._deckCards = savedDecks[name] ? JSON.parse(JSON.stringify(savedDecks[name])) : [];
   renderDesktopDeckEdit();
@@ -546,7 +571,7 @@ function addToDesktopDeck(cardJson) {
  * デッキ保存
  */
 function saveDesktopDeck() {
-  const decks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const decks = getSavedDecks();
   decks[window._deckEditing] = window._deckCards;
   localStorage.setItem('dm_decks', JSON.stringify(decks));
   alert('デッキを保存しました');
@@ -595,21 +620,21 @@ function showDesktopOnlineModal(deckName) {
   }
   const div = document.createElement('div');
   div.id = 'desktop-ol-overlay';
-  div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;display:flex;align-items:center;justify-content:center;';
+  div.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.25);z-index:2000;display:flex;align-items:center;justify-content:center;';
   div.innerHTML = `
-    <div style="background:white;border-radius:12px;padding:24px;max-width:360px;width:90%;box-shadow:0 10px 25px rgba(0,0,0,0.2);">
-      <h3 style="margin-bottom:16px;">🌐 オンライン対戦</h3>
-      <p style="font-size:0.9rem;color:#6b7280;margin-bottom:12px;">デッキ: <strong id="desktop-ol-deck-name">${escapeHtml(deckName)}</strong></p>
-      <label style="display:block;margin-bottom:4px;font-size:0.85rem;">プレイヤー名</label>
-      <input type="text" id="desktop-ol-player-name" placeholder="Player 1" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;margin-bottom:16px;">
+    <div style="background:#fafbf9;border-radius:12px;padding:24px;max-width:360px;width:90%;box-shadow:0 4px 20px rgba(0,0,0,0.08);border:1px solid #e0e5e0;">
+      <h3 style="margin-bottom:16px;color:#3d4a44;">🌐 オンライン対戦</h3>
+      <p style="font-size:0.9rem;color:#6b7b72;margin-bottom:12px;">デッキ: <strong id="desktop-ol-deck-name">${escapeHtml(deckName)}</strong></p>
+      <label style="display:block;margin-bottom:4px;font-size:0.85rem;color:#3d4a44;">プレイヤー名</label>
+      <input type="text" id="desktop-ol-player-name" placeholder="Player 1" style="width:100%;padding:10px;border:1px solid #e0e5e0;border-radius:6px;margin-bottom:16px;background:#fff;">
       <div style="margin-bottom:12px;">
-        <button type="button" onclick="olCreateRoomDesktop()" style="width:100%;padding:12px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">ルームを作成</button>
+        <button type="button" onclick="olCreateRoomDesktop()" style="width:100%;padding:12px;background:#6b8f8a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">ルームを作成</button>
       </div>
-      <hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb;">
-      <label style="display:block;margin-bottom:4px;font-size:0.85rem;">ルームコード（6文字）</label>
-      <input type="text" id="desktop-ol-room-code" placeholder="ABCD12" maxlength="6" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;margin-bottom:12px;letter-spacing:4px;text-transform:uppercase;">
-      <button type="button" onclick="olJoinRoomDesktop()" style="width:100%;padding:12px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">参加する</button>
-      <button type="button" onclick="document.getElementById('desktop-ol-overlay').style.display='none'" style="width:100%;margin-top:10px;padding:10px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;cursor:pointer;">キャンセル</button>
+      <hr style="margin:16px 0;border:none;border-top:1px solid #e0e5e0;">
+      <label style="display:block;margin-bottom:4px;font-size:0.85rem;color:#3d4a44;">ルームコード（6文字）</label>
+      <input type="text" id="desktop-ol-room-code" placeholder="ABCD12" maxlength="6" style="width:100%;padding:10px;border:1px solid #e0e5e0;border-radius:6px;margin-bottom:12px;letter-spacing:4px;text-transform:uppercase;background:#fff;">
+      <button type="button" onclick="olJoinRoomDesktop()" style="width:100%;padding:12px;background:#7a94a8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">参加する</button>
+      <button type="button" onclick="document.getElementById('desktop-ol-overlay').style.display='none'" style="width:100%;margin-top:10px;padding:10px;background:#eef1ef;color:#3d4a44;border:none;border-radius:6px;cursor:pointer;">キャンセル</button>
     </div>
   `;
   document.body.appendChild(div);
@@ -634,10 +659,10 @@ async function olCreateRoomDesktop() {
   window._olDeckName = deckName;
   window._olDeckData = deckData;
   document.getElementById('desktop-ol-overlay').querySelector('div').innerHTML = `
-    <h3 style="margin-bottom:16px;">ルーム作成完了</h3>
-    <p style="font-size:1.2rem;font-weight:700;letter-spacing:8px;color:#059669;margin:16px 0;">${room}</p>
-    <p style="font-size:0.9rem;color:#6b7280;">相手にこのコードを伝えてください。参加を待っています...</p>
-    <button type="button" onclick="olCancelDesktopWait()" style="width:100%;margin-top:16px;padding:10px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;">キャンセル</button>
+    <h3 style="margin-bottom:16px;color:#3d4a44;">ルーム作成完了</h3>
+    <p style="font-size:1.2rem;font-weight:700;letter-spacing:8px;color:#6b8f8a;margin:16px 0;">${room}</p>
+    <p style="font-size:0.9rem;color:#6b7b72;">相手にこのコードを伝えてください。参加を待っています...</p>
+    <button type="button" onclick="olCancelDesktopWait()" style="width:100%;margin-top:16px;padding:10px;background:#a67c7c;color:#fff;border:none;border-radius:6px;cursor:pointer;">キャンセル</button>
   `;
   const es = NetworkService.createEventSource(room, 'p1');
   window._ol.eventSource = es;
@@ -711,7 +736,7 @@ async function olJoinRoomDesktop() {
 }
 
 async function getDesktopDeckDataForOnline(deckName) {
-  const savedDecks = JSON.parse(localStorage.getItem('dm_decks') || '{}');
+  const savedDecks = getSavedDecks();
   if (savedDecks[deckName]) return Array.isArray(savedDecks[deckName]) ? savedDecks[deckName] : null;
   const account = AuthService.getCurrentAccount();
   if (account) return await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
