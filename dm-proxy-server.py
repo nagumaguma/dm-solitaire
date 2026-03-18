@@ -825,7 +825,12 @@ def search_cards_dmwiki(query: str) -> list[dict]:
             if nq not in ntitle and nq.replace(" ", "") not in ntitle.replace(" ", ""):
                 continue
             seen.add(clean)
-            cards.append({"id": f"dmwiki_{clean}", "name": clean, "thumb": ""})
+            card_id = f"dmwiki_{clean}"
+            thumb = ""
+            cached = _cache_get(card_id)
+            if cached:
+                thumb = str(cached.get("img") or cached.get("thumb") or "").strip()
+            cards.append({"id": card_id, "name": clean, "thumb": thumb})
         return cards
 
     # First try: page-title-only search (fast, precise)
@@ -847,6 +852,22 @@ def search_cards_dmwiki(query: str) -> list[dict]:
         html2 = _dmwiki_fetch("/?cmd=search", post_data=form2)
         if html2:
             cards = _parse_result_html(html2)
+
+    # For exact-match queries, proactively resolve one thumbnail so search list doesn't stay NO IMG.
+    norm_query = nq.replace(" ", "")
+    for c in cards:
+        if c.get("thumb"):
+            continue
+        if _norm_fw(c.get("name", "")).replace(" ", "") != norm_query:
+            continue
+        detail = get_card_detail_dmwiki(c.get("name", ""))
+        if not detail:
+            continue
+        thumb = str(detail.get("img") or detail.get("thumb") or "").strip()
+        if thumb:
+            c["thumb"] = thumb
+        _cache_set(c["id"], detail)
+        break
 
     return cards
 
@@ -1691,7 +1712,10 @@ class Handler(BaseHTTPRequestHandler):
 
             cached = _cache_get(cache_key)
             if cached:
-                return self._json(cached)
+                cached_image = str(cached.get("imageUrl") or cached.get("img") or cached.get("thumb") or "").strip()
+                if cached_image:
+                    return self._json(cached)
+                print(f"[detail] cached entry missing image, refreshing: {cache_key}", flush=True)
 
             if pid:
                 if pid.startswith("dmwiki_"):
@@ -1708,6 +1732,8 @@ class Handler(BaseHTTPRequestHandler):
                     print(f"[detail] image missing (short cache): {cache_key}", flush=True)
                 _cache_set(cache_key, detail)
                 self._json(detail)
+            elif cached:
+                self._json(cached)
             else:
                 self._json({"error": "not found"}, 404)
 

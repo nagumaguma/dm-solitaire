@@ -6430,8 +6430,19 @@
 
 <!-- スクリプト読み込み -->
 <script>
-  // API ベースURL（デプロイ時に上書き可能）
-  window.DM_API_BASE = window.DM_API_BASE || 'https://dm-solitaire-production.up.railway.app';
+  // API ベースURL（明示設定がなければ環境で自動選択）
+  (function setApiBaseDefault() {
+    if (window.DM_API_BASE) return;
+    const host = String(window.location.hostname || '').toLowerCase();
+    const isLocal = window.location.protocol === 'file:'
+      || host === 'localhost'
+      || host === '127.0.0.1'
+      || host === '::1';
+    window.DM_API_BASE = isLocal
+      ? 'http://localhost:8765'
+      : 'https://dm-solitaire-production.up.railway.app';
+    console.info('[DM] API base:', window.DM_API_BASE);
+  })();
 </script>
 <script src="game-engine.js"></script>
 <script src="auth-service.js"></script>
