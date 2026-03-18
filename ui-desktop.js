@@ -455,6 +455,34 @@ function closeDesktopIllustrationModal() {
   _desktopIllustrationRequestToken += 1;
 }
 
+function handleDesktopIllustrationImageError(img) {
+  if (!img) return;
+
+  const currentSrc = String(img.getAttribute('src') || '').trim();
+  const retryCount = Number(img.dataset.imgRetryCount || 0);
+  if (currentSrc && retryCount < 1) {
+    const baseSrc = String(img.dataset.baseSrc || currentSrc).trim();
+    img.dataset.baseSrc = baseSrc;
+    img.dataset.imgRetryCount = String(retryCount + 1);
+    const sep = baseSrc.includes('?') ? '&' : '?';
+    img.src = `${baseSrc}${sep}_artRetry=${Date.now()}_${retryCount + 1}`;
+    return;
+  }
+
+  const tile = img.closest('.dm-art-picker-item');
+  if (tile) {
+    tile.remove();
+  }
+
+  const grid = document.querySelector('#desktop-illustration-content .dm-art-picker-grid');
+  if (grid && !grid.querySelector('.dm-art-picker-item')) {
+    const content = document.getElementById('desktop-illustration-content');
+    if (content) {
+      content.innerHTML = '<div class="dm-art-picker-empty">表示できるイラストが見つかりませんでした。</div>';
+    }
+  }
+}
+
 function renderDesktopIllustrationContent(opts = {}) {
   const content = document.getElementById('desktop-illustration-content');
   if (!content) return;
@@ -493,7 +521,7 @@ function renderDesktopIllustrationContent(opts = {}) {
             class="dm-art-picker-item ${isSelected ? 'selected' : ''}"
             onclick="applyDesktopIllustrationFromPicker(${idx})">
             ${imageUrl
-              ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(label)}" class="dm-art-picker-thumb" onerror="handleDesktopCardImageError(this)">`
+              ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(label)}" class="dm-art-picker-thumb" onerror="handleDesktopIllustrationImageError(this)">`
               : '<div class="dm-art-picker-thumb placeholder">NO IMG</div>'}
             <div class="dm-art-picker-label">${escapeHtml(label)}</div>
           </button>

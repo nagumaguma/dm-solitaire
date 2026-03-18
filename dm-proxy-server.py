@@ -1037,14 +1037,55 @@ def _official_fetch_detail_title(card_id: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+_official_img_url_cache: dict[str, str] = {}
+
+
+def _official_thumb_url_variants(card_id: str) -> list[str]:
+    cid = str(card_id or "").strip()
+    if not cid:
+        return []
+    encoded = urllib.parse.quote(cid, safe="")
+    return [
+        f"{OFFICIAL_BASE}/wp-content/card/cardthumb/{encoded}.jpg",
+        f"{OFFICIAL_BASE}/wp-content/card/cardthumb/{encoded}.png",
+    ]
+
+
+def _official_url_exists_fast(url: str, timeout: float = 2.5) -> bool:
+    req = urllib.request.Request(url, headers={**WIKI_HEADERS, "Accept": "image/*"}, method="HEAD")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            code = int(getattr(r, "status", 200) or 200)
+            return 200 <= code < 400
+    except Exception:
+        return False
+
+
+def _official_resolve_thumb_url(card_id: str) -> str:
+    cid = str(card_id or "").strip()
+    if not cid:
+        return ""
+
+    if cid in _official_img_url_cache:
+        return _official_img_url_cache[cid]
+
+    for full_url in _official_thumb_url_variants(cid):
+        if _official_url_exists_fast(full_url):
+            _official_img_url_cache[cid] = full_url
+            return full_url
+
+    _official_img_url_cache[cid] = ""
+    return ""
+
+
 def _official_image_proxy_from_card_id(card_id: str) -> str:
     cid = str(card_id or "").strip()
     if not cid:
         return ""
-    # Deterministic URL generation keeps /illustrations fast even on hosted environments.
-    # Actual image reachability is handled by the browser's onerror fallback in UI.
-    encoded = urllib.parse.quote(cid, safe="")
-    return _official_proxy_image_url(f"{OFFICIAL_BASE}/wp-content/card/cardthumb/{encoded}.jpg")
+    full_url = _official_resolve_thumb_url(cid)
+    if not full_url:
+        return ""
+    return _official_proxy_image_url(full_url)
 
 
 def _dmwiki_page_html(card_name: str) -> str:
@@ -1063,15 +1104,50 @@ def _official_ids_from_set_and_print(set_code: str, print_code: str) -> list[str
         return []
 
     prefix = sc.replace("-", "").lower()
-    # Use one canonical form per print code to avoid duplicate IDs like
-    # 1S/01S/001S or KM1/KM01/KM001 in illustration candidates.
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(v: str):
+        s = str(v or "").strip()
+        if not s or s in seen:
+            return
+        seen.add(s)
+        out.append(s)
+
     if pc.startswith("P") and pc[1:].isdigit():
-        return [f"{prefix}-{int(pc[1:]):03d}"]
+        num = int(pc[1:])
+        _add(f"{prefix}-{num:03d}")
+        _add(f"{prefix}-P{num}")
+        return out
 
     if pc.isdigit():
-        return [f"{prefix}-{int(pc):03d}"]
+        num = int(pc)
+        _add(f"{prefix}-{num}")
+        _add(f"{prefix}-{num:03d}")
+        return out
 
-    return [f"{prefix}-{pc}"]
+    # Letter + digits (e.g. KM1, S3)
+    m_head = re.fullmatch(r"([A-Z]+)(\d+)", pc)
+    if m_head:
+        head = m_head.group(1)
+        num = int(m_head.group(2))
+        _add(f"{prefix}-{head}{num}")
+        _add(f"{prefix}-{head}{num:02d}")
+        _add(f"{prefix}-{head}{num:03d}")
+        return out
+
+    # Digits + suffix (e.g. 1S, 18B)
+    m_tail = re.fullmatch(r"(\d+)([A-Z]+)", pc)
+    if m_tail:
+        num = int(m_tail.group(1))
+        tail = m_tail.group(2)
+        _add(f"{prefix}-{num}{tail}")
+        _add(f"{prefix}-{num:02d}{tail}")
+        _add(f"{prefix}-{num:03d}{tail}")
+        return out
+
+    _add(f"{prefix}-{pc}")
+    return out
 
 
 def _official_art_variants_from_dmwiki(card_name: str, limit: int = 12) -> list[dict]:
