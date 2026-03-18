@@ -1032,7 +1032,7 @@ def _img_from_dmwiki_setcode(html: str) -> str:
     """
     # Find all occurrences of set code links followed by (N/M) card number
     # e.g. href="/DM24-BD2" ... （5/16）
-    for m in re.finditer(r'href="/([A-Z]{2}[A-Z0-9\-]+)"', html, re.IGNORECASE):
+    for m in re.finditer(r'href="/(DM[A-Z0-9\-]+)"', html, re.IGNORECASE):
         raw_set = m.group(1)   # e.g. "DM24-BD2"
         # Look for （N/M） within the next 300 chars (allows for tag content between </a> and the number)
         context = html[m.start(): m.start() + 300]
@@ -1040,10 +1040,6 @@ def _img_from_dmwiki_setcode(html: str) -> str:
         if not num_m:
             continue
         card_num = int(num_m.group(1))  # e.g. 5
-
-        # Skip non-card set codes (should all start with DM)
-        if not re.match(r'^DM', raw_set, re.IGNORECASE):
-            continue
 
         # Construct filename: "DM24-BD2" + num 5 → "dm24bd2-005"
         set_part = re.sub(r'-', '', raw_set).lower()   # "dm24bd2"
