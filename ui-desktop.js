@@ -2709,48 +2709,7 @@ function playDesktopCard(idx, zone) {
   renderDesktopGame();
 }
 
-/**
- * カードプレビュー表示（hover拡大）
- */
 let _currentDragIdx = null;
-
-function showDesktopCardPreview(event, idx, card) {
-  if (idx >= 0) {
-    if (!engine) return;
-    card = engine.state.hand[idx];
-  } else if (typeof card === 'string') {
-    try {
-      card = JSON.parse(card);
-    } catch {
-      return;
-    }
-  } else if (!card) {
-    return;
-  }
-  
-  const preview = document.getElementById('desktop-card-preview');
-  const content = document.getElementById('desktop-preview-content');
-  
-  if (!preview || !content) return;
-  
-  content.innerHTML = `
-    <div class="dg-preview-name">${escapeHtml(card.name)}</div>
-    <div class="dg-preview-text">
-      ${escapeHtml(card.text || '説明文なし')}
-    </div>
-  `;
-  
-  preview.style.display = 'block';
-  preview.style.left = (event.pageX + 10) + 'px';
-  preview.style.top = (event.pageY + 10) + 'px';
-}
-
-function hideDesktopCardPreview() {
-  const preview = document.getElementById('desktop-card-preview');
-  if (preview) {
-    preview.style.display = 'none';
-  }
-}
 
 /**
  * ドラッグ & ドロップ
