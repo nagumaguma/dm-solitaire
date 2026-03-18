@@ -38,7 +38,10 @@
       "Bash(grep:*)",
       "Bash(git:*)",
       "Bash(printf %s\\\\n:*)",
-      "Bash(echo shell::*)"
+      "Bash(echo shell::*)",
+      "WebFetch(domain:dm.fandom.com)",
+      "WebFetch(domain:dmwiki.net)",
+      "WebFetch(domain:duelmasters.fandom.com)"
     ]
   }
 }
