@@ -68,6 +68,16 @@ def _sanitize_username(s: str, maxlen: int = 20) -> str:
     return cleaned[:maxlen] if maxlen else cleaned
 
 
+def _safe_text(value, *, maxlen: int | None = None, strip: bool = True) -> str:
+    """Safely coerce request values to text for robust API validation."""
+    text = "" if value is None else str(value)
+    if strip:
+        text = text.strip()
+    if maxlen is not None:
+        text = text[:maxlen]
+    return text
+
+
 def check_rate_limit(ip: str) -> bool:
     """Check if IP has exceeded rate limit. Returns True if allowed, False if blocked."""
     now = time.time()
@@ -1327,7 +1337,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/room/create":
             rid  = _gen_room_id()
             room = _make_room(rid)
-            room['p1_name'] = data.get('name', 'Player 1')[:20]
+            room['p1_name'] = _sanitize_username(data.get("name", ""), maxlen=20) or "Player 1"
             with _rooms_lock:
                 _rooms[rid] = room
             print(f"[rooms] created {rid} by {room['p1_name']}", flush=True)
@@ -1345,7 +1355,7 @@ class Handler(BaseHTTPRequestHandler):
             with room['lock']:
                 if room['p2_name']:
                     return self._json({"error": "room is full"}, 409)
-                room['p2_name'] = data.get('name', 'Player 2')[:20]
+                room['p2_name'] = _sanitize_username(data.get("name", ""), maxlen=20) or "Player 2"
                 _push_event(room, 'p1', 'joined', {'p2_name': room['p2_name']})
             print(f"[rooms] {room['p2_name']} joined {rid}", flush=True)
             self._json({"ok": True, "p": "p2", "p1_name": room['p1_name']})
@@ -1353,8 +1363,8 @@ class Handler(BaseHTTPRequestHandler):
         # POST /action  { room, p, type, ...state }
         elif parsed.path == "/action":
             rid   = _normalize_room_code(data.get("room", ""))
-            p     = data.get("p", "")
-            atype = data.get("type", "state")
+            p     = _safe_text(data.get("p", ""))
+            atype = _safe_text(data.get("type", "state"), maxlen=40) or "state"
             with _rooms_lock:
                 room = _rooms.get(rid)
             if not room:
@@ -1382,8 +1392,8 @@ class Handler(BaseHTTPRequestHandler):
         # POST /chat  { room, p, message }
         elif parsed.path == "/chat":
             rid = _normalize_room_code(data.get("room", ""))
-            p = data.get("p", "")
-            msg = data.get("message", "").strip()[:200]
+            p = _safe_text(data.get("p", ""))
+            msg = _safe_text(data.get("message", ""), maxlen=200)
             with _rooms_lock:
                 room = _rooms.get(rid)
             if not room:
@@ -1407,7 +1417,7 @@ class Handler(BaseHTTPRequestHandler):
             
             username = _sanitize_username(data.get("username", ""), maxlen=20)
             pin = str(data.get("pin", "")).strip()
-            last_deck = data.get("last_deck", "")[:20]
+            last_deck = _safe_text(data.get("last_deck", ""), maxlen=20)
             
             if not username or not pin or len(pin) != 4 or not pin.isdigit():
                 return self._json({"error": "invalid username or pin"}, 400)
@@ -1456,7 +1466,7 @@ class Handler(BaseHTTPRequestHandler):
             
             username = _sanitize_username(data.get("username", ""))
             pin = str(data.get("pin", "")).strip()
-            last_deck = data.get("last_deck", "")[:20]
+            last_deck = _safe_text(data.get("last_deck", ""), maxlen=20)
 
             if not username or not pin:
                 return self._json({"error": "username and pin required"}, 400)
@@ -1477,9 +1487,9 @@ class Handler(BaseHTTPRequestHandler):
 
         # POST /deck/save  { username, pin, deck_name, deck_data }
         elif parsed.path == "/deck/save":
-            username = data.get("username", "").strip()
+            username = _sanitize_username(data.get("username", ""), maxlen=20)
             pin = str(data.get("pin", "")).strip()
-            deck_name = data.get("deck_name", "").strip()[:50]
+            deck_name = _safe_text(data.get("deck_name", ""), maxlen=50)
             deck_data = data.get("deck_data", [])
 
             if not username or not pin:
@@ -1508,7 +1518,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # POST /deck/list | /deck/names  { username, pin }
         elif parsed.path in ("/deck/list", "/deck/names"):
-            username = data.get("username", "").strip()
+            username = _sanitize_username(data.get("username", ""), maxlen=20)
             pin = str(data.get("pin", "")).strip()
 
             if not username or not pin:
@@ -1528,9 +1538,9 @@ class Handler(BaseHTTPRequestHandler):
 
         # POST /deck/get | /deck/fetch  { username, pin, deck_name }
         elif parsed.path in ("/deck/get", "/deck/fetch"):
-            username = data.get("username", "").strip()
+            username = _sanitize_username(data.get("username", ""), maxlen=20)
             pin = str(data.get("pin", "")).strip()
-            deck_name = data.get("deck_name", "").strip()
+            deck_name = _safe_text(data.get("deck_name", ""), maxlen=50)
 
             if not username or not pin or not deck_name:
                 return self._json({"error": "username, pin, deck_name required"}, 400)
@@ -1552,9 +1562,9 @@ class Handler(BaseHTTPRequestHandler):
 
         # POST /deck/delete  { username, pin, deck_name }
         elif parsed.path == "/deck/delete":
-            username = data.get("username", "").strip()
+            username = _sanitize_username(data.get("username", ""), maxlen=20)
             pin = str(data.get("pin", "")).strip()
-            deck_name = data.get("deck_name", "").strip()
+            deck_name = _safe_text(data.get("deck_name", ""), maxlen=50)
             
             if not username or not pin or not deck_name:
                 return self._json({"error": "username, pin, deck_name required"}, 400)
@@ -1658,7 +1668,11 @@ class Handler(BaseHTTPRequestHandler):
             q = p("q")
             if not q:
                 return self._json({"error": "q required"}, 400)
-            page  = max(1, int(p("page", "1")))
+            try:
+                page = int(p("page", "1"))
+            except (TypeError, ValueError):
+                return self._json({"error": "page must be an integer"}, 400)
+            page = max(1, page)
             cards, total = search_cards(q, page)
             self._json({"cards": cards, "query": q, "page": page, "total": total})
 
