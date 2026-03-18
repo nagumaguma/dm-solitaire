@@ -1168,8 +1168,8 @@ def get_card_detail_dmwiki(name: str) -> dict | None:
     for r in rows[2:]:
         if re.match(r'^DM\d', r):
             continue
-        if re.match(r'^《[^》]+》$', r):
-            break  # wiki strategy section starts here
+        if re.match(r'^《', r):
+            break  # wiki strategy section starts here (card name ref at row start)
         effect_rows.append(r)
     effect = "\n".join(effect_rows).strip()
 
