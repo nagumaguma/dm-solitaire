@@ -457,18 +457,43 @@ def _dmwiki_name_candidates(name: str) -> list[str]:
     """
     seen: set[str] = set()
     out: list[str] = []
-    def _add(v: str):
-        if v and v not in seen:
-            seen.add(v); out.append(v)
-    _add(name)
-    _add(_normalize_card_name_for_url(name))
-    # swap wave dash (U+301C) → fullwidth tilde (U+FF5E)
-    _add(name.replace('\u301c', '\uff5e'))
-    # swap fullwidth tilde (U+FF5E) → wave dash (U+301C)
-    _add(name.replace('\uff5e', '\u301c'))
-    # also try the normalized form with wave dash instead of ~
-    normed = _normalize_card_name_for_url(name)
-    _add(normed.replace('~', '\u301c'))
+
+    def _add(v: str) -> bool:
+        t = str(v or "").strip()
+        if not t or t in seen:
+            return False
+        seen.add(t)
+        out.append(t)
+        return True
+
+    seeds = [name, _normalize_card_name_for_url(name)]
+    queue: list[str] = []
+    for seed in seeds:
+        if _add(seed):
+            queue.append(seed)
+
+    # Expand common typography variants by BFS so mixed forms like
+    # "＆ ... ~ ..." can reach "＆ ... 〜 ..." and resolve canonical dmwiki pages.
+    rules = [
+        ('\u301c', '\uff5e'),  # 〜 -> ～
+        ('\u301c', '~'),       # 〜 -> ~
+        ('\uff5e', '\u301c'),  # ～ -> 〜
+        ('\uff5e', '~'),       # ～ -> ~
+        ('~', '\u301c'),       # ~ -> 〜
+        ('~', '\uff5e'),       # ~ -> ～
+        ('＆', '&'),            # fullwidth ampersand -> halfwidth
+        ('&', '＆'),            # halfwidth ampersand -> fullwidth
+    ]
+
+    while queue and len(out) < 24:
+        cur = queue.pop(0)
+        for src, dst in rules:
+            if src not in cur:
+                continue
+            nxt = cur.replace(src, dst)
+            if _add(nxt):
+                queue.append(nxt)
+
     return out
 
 
@@ -1089,12 +1114,29 @@ def _official_image_proxy_from_card_id(card_id: str) -> str:
 
 
 def _dmwiki_page_html(card_name: str) -> str:
+    fallback_html = ""
+    set_only_html = ""
     for candidate in _dmwiki_name_candidates(card_name):
         encoded = urllib.parse.quote(f"《{candidate}》", encoding="utf-8")
         html = _dmwiki_fetch(f"/{encoded}")
-        if html:
+        if not html:
+            continue
+
+        if not fallback_html:
+            fallback_html = html
+
+        has_set_links = bool(re.search(r'href="/(DM[A-Z0-9\-]+)"', html, re.IGNORECASE))
+        has_print_note = bool(re.search(r'[（(]\s*[A-Z0-9]{1,6}\s*/\s*[A-Z0-9]{1,6}\s*[）)]', html))
+
+        # Some candidate spellings return short alias/not-found pages that may contain
+        # a set link but no print notation. Prefer pages that contain both.
+        if has_set_links and has_print_note:
             return html
-    return ""
+
+        if has_set_links and not set_only_html:
+            set_only_html = html
+
+    return set_only_html or fallback_html
 
 
 def _official_ids_from_set_and_print(set_code: str, print_code: str) -> list[str]:
@@ -1118,6 +1160,9 @@ def _official_ids_from_set_and_print(set_code: str, print_code: str) -> list[str
         num = int(pc[1:])
         _add(f"{prefix}-{num:03d}")
         _add(f"{prefix}-P{num}")
+        _add(f"{prefix}-p{num}")
+        _add(f"{prefix}-P{num:03d}")
+        _add(f"{prefix}-p{num:03d}")
         return out
 
     if pc.isdigit():
@@ -1131,9 +1176,12 @@ def _official_ids_from_set_and_print(set_code: str, print_code: str) -> list[str
     if m_head:
         head = m_head.group(1)
         num = int(m_head.group(2))
-        _add(f"{prefix}-{head}{num}")
-        _add(f"{prefix}-{head}{num:02d}")
-        _add(f"{prefix}-{head}{num:03d}")
+        for hh in {head.upper(), head.lower()}:
+            _add(f"{prefix}-{hh}{num}")
+            _add(f"{prefix}-{hh}{num:02d}")
+            _add(f"{prefix}-{hh}{num:03d}")
+        _add(f"{prefix}-{num}")
+        _add(f"{prefix}-{num:03d}")
         return out
 
     # Digits + suffix (e.g. 1S, 18B)
@@ -1141,12 +1189,17 @@ def _official_ids_from_set_and_print(set_code: str, print_code: str) -> list[str
     if m_tail:
         num = int(m_tail.group(1))
         tail = m_tail.group(2)
-        _add(f"{prefix}-{num}{tail}")
-        _add(f"{prefix}-{num:02d}{tail}")
-        _add(f"{prefix}-{num:03d}{tail}")
+        for tt in {tail.upper(), tail.lower()}:
+            _add(f"{prefix}-{num}{tt}")
+            _add(f"{prefix}-{num:02d}{tt}")
+            _add(f"{prefix}-{num:03d}{tt}")
+        _add(f"{prefix}-{num}")
+        _add(f"{prefix}-{num:03d}")
         return out
 
     _add(f"{prefix}-{pc}")
+    _add(f"{prefix}-{pc.lower()}")
+    _add(f"{prefix}-{pc.upper()}")
     return out
 
 
