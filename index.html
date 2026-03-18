@@ -1160,6 +1160,12 @@
       min-height: 0;
     }
 
+    .dl-list-panel {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
     .dl-editor-panel {
       display: flex;
       flex-direction: column;
@@ -1430,11 +1436,9 @@
 
     .dl-editor-card-list {
       flex: 1;
-      min-height: 180px;
-      max-height: 46vh;
+      min-height: 0;
       overflow-y: auto;
       padding-right: 4px;
-      margin-bottom: 10px;
     }
 
     .dl-empty-editor {
