@@ -2093,6 +2093,7 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/detail":
             pid = p("id")
             name = p("name").strip()
+            force_refresh = p("refresh") in ("1", "true")
             if not pid and not name:
                 return self._json({"error": "id or name required"}, 400)
 
@@ -2102,7 +2103,7 @@ class Handler(BaseHTTPRequestHandler):
                 cache_key = f"dmwiki_{lookup_name}"
 
             cached = _cache_get(cache_key)
-            if cached:
+            if cached and not force_refresh:
                 cached_image = str(cached.get("imageUrl") or cached.get("img") or cached.get("thumb") or "").strip()
                 if cached_image:
                     return self._json(cached)
