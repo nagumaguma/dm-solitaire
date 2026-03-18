@@ -1587,21 +1587,11 @@ function renderDesktopGame() {
                 `;
               }).join('') : '<div class="dg-zone-empty">空</div>'}
             </div>
-            <div class="dg-v2-pile-col my">
-              <button type="button" class="dg-v2-pile-btn deck"
-                onclick="openDesktopDeckTopMenu(event)" oncontextmenu="openDesktopDeckTopMenu(event)" title="山札">
-                <span class="dg-v2-pile-name">山札</span>
-                <span class="dg-v2-pile-cnt">${state.deck.length}</span>
-              </button>
-              <button type="button" class="dg-v2-pile-btn grave ${graveTopImage ? 'has-image' : ''}"
-                onclick="openDesktopGraveyardModal()"
-                ${state.graveyard.length ? `oncontextmenu="openDesktopCardZoneMenu(event, 'graveyard', ${graveTopIndex})"` : ''}
-                title="墓地">
-                ${graveTopImage ? `<img src="${escapeHtml(graveTopImage)}" alt="墓地トップ" class="dg-v2-pile-thumb" loading="lazy" decoding="async" onerror="handleDesktopCardImageError(this)">` : ''}
-                <span class="dg-v2-pile-name">墓地</span>
-                <span class="dg-v2-pile-cnt">${state.graveyard.length}</span>
-              </button>
-            </div>
+            <button type="button" class="dg-v2-pile-btn deck"
+              onclick="openDesktopDeckTopMenu(event)" oncontextmenu="openDesktopDeckTopMenu(event)" title="山札">
+              <span class="dg-v2-pile-name">山札</span>
+              <span class="dg-v2-pile-cnt">${state.deck.length}</span>
+            </button>
           </div>
 
           <div class="dg-v2-row my-mana">
@@ -1609,6 +1599,14 @@ function renderDesktopGame() {
             <div id="desktop-mana-zone" class="dg-v2-cards" ondrop="dropDesktopCard(event, 'mana')" ondragover="dragDesktopOver(event)">
               ${state.manaZone.length ? state.manaZone.map((c, i) => renderChip(c, 'mana', i)).join('') : '<div class="dg-zone-empty">空</div>'}
             </div>
+            <button type="button" class="dg-v2-pile-btn grave ${graveTopImage ? 'has-image' : ''}"
+              onclick="openDesktopGraveyardModal()"
+              ${state.graveyard.length ? `oncontextmenu="openDesktopCardZoneMenu(event, 'graveyard', ${graveTopIndex})"` : ''}
+              title="墓地">
+              ${graveTopImage ? `<img src="${escapeHtml(graveTopImage)}" alt="墓地トップ" class="dg-v2-pile-thumb" loading="lazy" decoding="async" onerror="handleDesktopCardImageError(this)">` : ''}
+              <span class="dg-v2-pile-name">墓地</span>
+              <span class="dg-v2-pile-cnt">${state.graveyard.length}</span>
+            </button>
           </div>
 
           <div class="dg-v2-row my-hand">
