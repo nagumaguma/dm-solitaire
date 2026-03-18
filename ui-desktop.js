@@ -23,6 +23,9 @@ let _handDiscardStateDesktop = null;
 let _desktopDetailCardState = null;
 let _desktopDetailRequestToken = 0;
 let _desktopDetailAllowAdd = true;
+let _desktopDetailOnCardChange = null;
+let _desktopIllustrationRequestToken = 0;
+let _desktopIllustrationOptions = [];
 let _desktopDeckPeekPrivateCards = [];
 let _desktopDeckRevealModalState = {
   mode: 'public',
@@ -393,9 +396,111 @@ function closeDesktopCardDetailModal() {
   if (modal) {
     modal.classList.remove('open');
   }
+  closeDesktopIllustrationModal();
   _desktopDetailRequestToken += 1;
   _desktopDetailCardState = null;
   _desktopDetailAllowAdd = true;
+  _desktopDetailOnCardChange = null;
+  _desktopIllustrationOptions = [];
+}
+
+function mergeDesktopCardIllustration(baseCard, nextCard) {
+  const merged = {
+    ...(baseCard || {}),
+    ...(nextCard || {})
+  };
+
+  const imageUrl = getDesktopCardImageUrl(nextCard) || getDesktopCardImageUrl(baseCard);
+  if (imageUrl) {
+    merged.imageUrl = imageUrl;
+    merged.thumb = imageUrl;
+    merged.img = imageUrl;
+    merged.selectedImageUrl = imageUrl;
+  }
+
+  const selectedArtId = String(nextCard?.selectedArtId || baseCard?.selectedArtId || '').trim();
+  if (selectedArtId) {
+    merged.selectedArtId = selectedArtId;
+  }
+
+  return merged;
+}
+
+function ensureDesktopIllustrationModal() {
+  let modal = document.getElementById('desktop-illustration-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'desktop-illustration-modal';
+    modal.className = 'dm-art-picker-modal';
+    modal.innerHTML = `
+      <div class="dm-art-picker-backdrop" onclick="closeDesktopIllustrationModal()"></div>
+      <div class="dm-art-picker-body">
+        <div class="dm-art-picker-head">
+          <div class="dm-art-picker-title">イラスト変更</div>
+          <button type="button" class="dm-art-picker-close" onclick="closeDesktopIllustrationModal()">×</button>
+        </div>
+        <div id="desktop-illustration-content" class="dm-art-picker-content"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+  return modal;
+}
+
+function closeDesktopIllustrationModal() {
+  const modal = document.getElementById('desktop-illustration-modal');
+  if (modal) {
+    modal.classList.remove('open');
+  }
+  _desktopIllustrationRequestToken += 1;
+}
+
+function renderDesktopIllustrationContent(opts = {}) {
+  const content = document.getElementById('desktop-illustration-content');
+  if (!content) return;
+
+  if (opts.loading) {
+    content.innerHTML = '<div class="dm-art-picker-loading">イラスト一覧を取得中…</div>';
+    return;
+  }
+
+  if (opts.error) {
+    content.innerHTML = `<div class="dm-art-picker-error">${escapeHtml(opts.error)}</div>`;
+    return;
+  }
+
+  const selectedArtId = String(opts.selectedArtId || '').trim();
+  const selectedImage = String(opts.selectedImage || '').trim();
+  const options = Array.isArray(opts.options) ? opts.options : [];
+  if (!options.length) {
+    content.innerHTML = '<div class="dm-art-picker-empty">選択できるイラストが見つかりませんでした。</div>';
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="dm-art-picker-grid">
+      ${options.map((option, idx) => {
+        const imageUrl = getDesktopCardImageUrl(option);
+        const artId = String(option?.artId || '').trim();
+        const isSelected = selectedArtId
+          ? artId === selectedArtId
+          : (!!selectedImage && imageUrl === selectedImage);
+        const label = String(option?.label || option?.name || `イラスト ${idx + 1}`).trim();
+
+        return `
+          <button
+            type="button"
+            class="dm-art-picker-item ${isSelected ? 'selected' : ''}"
+            onclick="applyDesktopIllustrationFromPicker(${idx})">
+            ${imageUrl
+              ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(label)}" class="dm-art-picker-thumb" onerror="handleDesktopCardImageError(this)">`
+              : '<div class="dm-art-picker-thumb placeholder">NO IMG</div>'}
+            <div class="dm-art-picker-label">${escapeHtml(label)}</div>
+          </button>
+        `;
+      }).join('')}
+    </div>
+  `;
 }
 
 function renderDesktopCardDetailContent(card, opts = {}) {
@@ -447,6 +552,9 @@ function renderDesktopCardDetailContent(card, opts = {}) {
       </table>
     </div>
     ${bodyText ? `<div class="dm-card-detail-text">${escapeHtml(bodyText).replace(/\n/g, '<br>')}</div>` : '<div class="dm-card-detail-text empty">テキスト情報なし</div>'}
+    <div class="dm-card-detail-sub-actions">
+      <button type="button" class="dm-card-detail-illustration-btn" onclick="openDesktopIllustrationPicker()">イラスト変更</button>
+    </div>
     ${allowAdd
       ? `<div class="dm-card-detail-actions">
           <input id="desktop-card-detail-count" type="number" min="1" max="4" value="1" class="dm-card-detail-count" />
@@ -455,6 +563,59 @@ function renderDesktopCardDetailContent(card, opts = {}) {
         </div>`
       : ''}
   `;
+}
+
+async function openDesktopIllustrationPicker() {
+  if (!_desktopDetailCardState) return;
+
+  const modal = ensureDesktopIllustrationModal();
+  modal.classList.add('open');
+  renderDesktopIllustrationContent({ loading: true });
+
+  const token = ++_desktopIllustrationRequestToken;
+  try {
+    const result = await NetworkService.fetchCardIllustrations(_desktopDetailCardState, {
+      timeoutMs: 20000
+    });
+    if (token !== _desktopIllustrationRequestToken) return;
+
+    const options = Array.isArray(result?.options) ? result.options : [];
+    _desktopIllustrationOptions = options;
+    renderDesktopIllustrationContent({
+      options,
+      selectedArtId: String(_desktopDetailCardState?.selectedArtId || '').trim(),
+      selectedImage: getDesktopCardImageUrl(_desktopDetailCardState)
+    });
+  } catch (error) {
+    if (token !== _desktopIllustrationRequestToken) return;
+    console.error('desktop illustration picker error:', error);
+    _desktopIllustrationOptions = [];
+    renderDesktopIllustrationContent({ error: 'イラスト一覧を取得できませんでした。' });
+  }
+}
+
+function applyDesktopIllustrationFromPicker(index) {
+  if (!_desktopDetailCardState) return;
+
+  const idx = Number(index);
+  if (!Number.isInteger(idx) || idx < 0) return;
+
+  const option = _desktopIllustrationOptions[idx];
+  if (!option) return;
+
+  const updated = NetworkService.applyCardIllustration(_desktopDetailCardState, option);
+  _desktopDetailCardState = updated;
+  renderDesktopCardDetailContent(updated, { allowAdd: _desktopDetailAllowAdd });
+
+  if (typeof _desktopDetailOnCardChange === 'function') {
+    try {
+      _desktopDetailOnCardChange(updated);
+    } catch (error) {
+      console.warn('detail onCardChange error (desktop):', error);
+    }
+  }
+
+  closeDesktopIllustrationModal();
 }
 
 async function resolveDesktopDetailCard(card) {
@@ -496,6 +657,9 @@ async function showDesktopCardDetail(cardJson, opts = {}) {
   }
 
   _desktopDetailAllowAdd = allowAdd;
+  _desktopDetailOnCardChange = typeof opts.onCardChange === 'function' ? opts.onCardChange : null;
+  _desktopIllustrationOptions = [];
+  closeDesktopIllustrationModal();
 
   const modal = ensureDesktopCardDetailModal();
   modal.classList.add('open');
@@ -514,7 +678,34 @@ async function showDesktopCardDetail(cardJson, opts = {}) {
 
 function openDesktopDeckCardDetail(cardJson) {
   const decoded = decodeDesktopData(cardJson);
-  showDesktopCardDetail(decoded, { allowAdd: false });
+  let raw = decoded;
+  try {
+    raw = typeof decoded === 'string' ? JSON.parse(decoded) : decoded;
+  } catch {
+    raw = decoded;
+  }
+
+  const base = NetworkService.normalizeCardData(raw || {});
+  const targetKey = String(base?.cardId || base?.id || '').trim();
+
+  showDesktopCardDetail(base, {
+    allowAdd: false,
+    onCardChange: (nextCard) => {
+      if (!targetKey) return;
+      const cards = Array.isArray(window._deckCards) ? window._deckCards : [];
+      const idx = cards.findIndex((item) => String(item?.cardId || item?.id || '') === targetKey);
+      if (idx < 0) return;
+
+      const current = cards[idx] || {};
+      const merged = mergeDesktopCardIllustration(current, nextCard);
+      merged.count = Number(current?.count) || 1;
+      cards[idx] = merged;
+      window._deckCards = cards;
+
+      sortCurrentDesktopDeckCards();
+      renderDesktopDeckList();
+    }
+  });
 }
 
 async function addDesktopCardFromDetail() {
@@ -2316,7 +2507,21 @@ async function openDesktopCardDetailFromZone(sourceZone, sourceIndex) {
     if (!ok) return;
   }
 
-  showDesktopCardDetail(card, { allowAdd: false });
+  const zoneKey = sourceZone;
+  const zoneIdx = idx;
+  showDesktopCardDetail(card, {
+    allowAdd: false,
+    onCardChange: (nextCard) => {
+      const zoneCards = engine?.state?.[zoneKey];
+      if (!Array.isArray(zoneCards) || !zoneCards[zoneIdx]) return;
+
+      const current = zoneCards[zoneIdx];
+      zoneCards[zoneIdx] = mergeDesktopCardIllustration(current, nextCard);
+
+      if (window._ol) olSendActionDesktop('state');
+      renderDesktopGame();
+    }
+  });
 }
 
 function openDesktopCardZoneMenu(event, sourceZone, sourceIndex) {

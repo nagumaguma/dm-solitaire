@@ -882,6 +882,12 @@ OFFICIAL_HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded",
     "Accept-Language": "ja,en;q=0.5",
 }
+OFFICIAL_DETAIL_HEADERS = {
+    "User-Agent": WIKI_HEADERS["User-Agent"],
+    "Referer": OFFICIAL_SEARCH,
+    "Accept": "text/html,application/xhtml+xml",
+    "Accept-Language": "ja,en;q=0.5",
+}
 
 
 def _img_from_en_wiki(card_name: str) -> str:
@@ -980,12 +986,258 @@ def _name_variants(card_name: str) -> list[str]:
     return variants[:6]
 
 
-def _img_from_official(card_name: str) -> str:
-    """Get card image URL from the official Takara Tomy DM card database.
-    Searches by card name, then verifies each result by fetching the detail
-    page title (only first 2 KB) to confirm name match.
-    """
+def _official_proxy_image_url(raw_url: str) -> str:
+    url = str(raw_url or "").strip()
+    if not url:
+        return ""
+    if not (url.startswith("http://") or url.startswith("https://")):
+        url = OFFICIAL_BASE + url
+    return f"{BASE_URL}/img?url={urllib.parse.quote(url, safe='')}"
+
+
+def _official_search_pairs(html: str) -> list[tuple[str, str]]:
+    pairs = re.findall(
+        r"href=['\"](?:/card/detail/\?id=([^'\"]+))['\"]"
+        r".*?src=['\"](/wp-content/card/cardthumb/[^'\"]+)['\"]",
+        html,
+        re.DOTALL,
+    )
+    if not pairs:
+        return []
+
+    uniq: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for card_id, thumb_path in pairs:
+        cid = str(card_id or "").strip()
+        thumb = str(thumb_path or "").strip()
+        if not cid or not thumb:
+            continue
+        key = f"{cid}::{thumb}"
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append((cid, thumb))
+    return uniq
+
+
+def _official_fetch_detail_title(card_id: str) -> str:
+    safe_id = urllib.parse.quote(str(card_id or "").strip(), safe="")
+    if not safe_id:
+        return ""
+
+    detail_url = f"{OFFICIAL_BASE}/card/detail/?id={safe_id}"
+    req = urllib.request.Request(detail_url, headers=OFFICIAL_DETAIL_HEADERS)
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            chunk = r.read(4096).decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+    m = re.search(r'<title>([^<(|]+)', chunk)
+    return m.group(1).strip() if m else ""
+
+
+def _official_url_exists(url: str, timeout: int = 8) -> bool:
+    req = urllib.request.Request(url, headers={**WIKI_HEADERS, "Accept": "image/*"}, method="HEAD")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            code = int(getattr(r, "status", 200) or 200)
+            return 200 <= code < 400
+    except Exception:
+        pass
+
+    # Some hosts reject HEAD; retry with normal GET and read only a tiny chunk.
+    req2 = urllib.request.Request(url, headers={**WIKI_HEADERS, "Accept": "image/*"})
+    try:
+        with urllib.request.urlopen(req2, timeout=timeout) as r:
+            r.read(16)
+            return True
+    except Exception:
+        return False
+
+
+def _official_image_proxy_from_card_id(card_id: str) -> str:
+    cid = str(card_id or "").strip()
+    if not cid:
+        return ""
+
+    encoded = urllib.parse.quote(cid, safe="")
+    candidates = [
+        f"{OFFICIAL_BASE}/wp-content/card/cardthumb/{encoded}.jpg",
+        f"{OFFICIAL_BASE}/wp-content/card/cardthumb/{encoded}.png",
+        f"{OFFICIAL_BASE}/wp-content/card/cardimage/{encoded}.jpg",
+        f"{OFFICIAL_BASE}/wp-content/card/cardimage/{encoded}.png",
+    ]
+
+    for full_url in candidates:
+        if _official_url_exists(full_url):
+            return _official_proxy_image_url(full_url)
+    return ""
+
+
+def _dmwiki_page_html(card_name: str) -> str:
+    for candidate in _dmwiki_name_candidates(card_name):
+        encoded = urllib.parse.quote(f"《{candidate}》", encoding="utf-8")
+        html = _dmwiki_fetch(f"/{encoded}")
+        if html:
+            return html
+    return ""
+
+
+def _official_ids_from_set_and_print(set_code: str, print_code: str) -> list[str]:
+    sc = re.sub(r"[^A-Z0-9-]", "", str(set_code or "").upper())
+    pc = re.sub(r"[^A-Z0-9]", "", str(print_code or "").upper())
+    if not sc or not pc:
+        return []
+
+    prefix = sc.replace("-", "").lower()
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(v: str):
+        s = str(v or "").strip()
+        if not s or s in seen:
+            return
+        seen.add(s)
+        out.append(s)
+
+    _add(f"{prefix}-{pc}")
+
+    if pc.startswith("P") and pc[1:].isdigit():
+        _add(f"{prefix}-{int(pc[1:]):03d}")
+    elif pc.isdigit():
+        _add(f"{prefix}-{int(pc):03d}")
+
+    m_digit_suffix = re.fullmatch(r"(\d+)([A-Z])", pc)
+    if m_digit_suffix:
+        number = int(m_digit_suffix.group(1))
+        suffix = m_digit_suffix.group(2)
+        _add(f"{prefix}-{number}{suffix}")
+        _add(f"{prefix}-{number:02d}{suffix}")
+        _add(f"{prefix}-{number:03d}{suffix}")
+
+    m_head_digits = re.fullmatch(r"([A-Z]+)(\d+)", pc)
+    if m_head_digits:
+        head = m_head_digits.group(1)
+        number = int(m_head_digits.group(2))
+        _add(f"{prefix}-{head}{number}")
+        _add(f"{prefix}-{head}{number:02d}")
+        _add(f"{prefix}-{head}{number:03d}")
+
+    return out
+
+
+def _official_art_variants_from_dmwiki(card_name: str, limit: int = 12) -> list[dict]:
+    html = _dmwiki_page_html(card_name)
+    if not html:
+        return []
+
+    set_print_pairs: list[tuple[str, str]] = []
+    seen_pairs: set[str] = set()
+
+    # Pair set-code links with nearby print notations: (KM1/KM2), (1S/2), (1B/10), etc.
+    for m in re.finditer(r'href="/(DM[A-Z0-9\-]+)"', html, re.IGNORECASE):
+        set_code = m.group(1).upper()
+        context = html[m.end(): m.end() + 420]
+        for p in re.finditer(r'[（(]\s*([A-Z0-9]{1,6})\s*/\s*[A-Z0-9]{1,6}\s*[）)]', context):
+            print_code = p.group(1).upper()
+            if not re.search(r'\d', print_code):
+                continue
+            key = f"{set_code}|{print_code}"
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+            set_print_pairs.append((set_code, print_code))
+
+    # Promo notation may appear only in plain text: DMPROMOY21 P34/Y21, etc.
+    plain = _html.unescape(re.sub(r'<[^>]+>', ' ', html))
+    for m in re.finditer(r'\b(DM[A-Z0-9\-]{4,})\s+([A-Z]?\d{1,3}[A-Z]?)\s*/\s*[A-Z0-9]{1,6}\b', plain, re.IGNORECASE):
+        set_code = m.group(1).upper()
+        print_code = m.group(2).upper()
+        if not re.search(r'\d', print_code):
+            continue
+        key = f"{set_code}|{print_code}"
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        set_print_pairs.append((set_code, print_code))
+
+    variants: list[dict] = []
+    seen_ids: set[str] = set()
+    seen_images: set[str] = set()
+    max_items = max(1, int(limit or 1))
+
+    for set_code, print_code in set_print_pairs:
+        if len(variants) >= max_items:
+            break
+
+        for card_id in _official_ids_from_set_and_print(set_code, print_code):
+            if len(variants) >= max_items:
+                break
+            if card_id in seen_ids:
+                continue
+
+            image_url = _official_image_proxy_from_card_id(card_id)
+            if not image_url or image_url in seen_images:
+                continue
+
+            page_title = _official_fetch_detail_title(card_id)
+            if page_title and not _official_name_matches(card_name, page_title):
+                # If title exists and clearly points to another card, skip.
+                continue
+
+            seen_ids.add(card_id)
+            seen_images.add(image_url)
+            variants.append({
+                "artId": f"official:{card_id}",
+                "sourceId": card_id,
+                "name": page_title or card_name,
+                "label": f"{set_code} {print_code}",
+                "imageUrl": image_url,
+                "thumb": image_url,
+                "source": "dmwiki-print",
+            })
+
+    return variants
+
+
+def _official_name_matches(query_name: str, page_title: str) -> bool:
+    page_norm = _norm_fw(page_title).replace(" ", "")
+    if not page_norm:
+        return False
+
+    for candidate in _name_variants(query_name):
+        qn = _norm_fw(candidate).replace(" ", "")
+        if not qn:
+            continue
+
+        if page_norm == qn:
+            return True
+        if page_norm.startswith(qn + "/"):
+            return True
+        if qn.startswith(page_norm + "/"):
+            return True
+
+        if len(qn) >= 8 and page_norm.endswith(qn):
+            return True
+        if len(page_norm) >= 8 and qn.endswith(page_norm):
+            return True
+
+        if "/" in qn and len(page_norm) >= 4:
+            if qn.startswith(page_norm + "/") or qn.endswith("/" + page_norm):
+                return True
+        if "/" in page_norm and len(qn) >= 4:
+            if page_norm.startswith(qn + "/") or page_norm.endswith("/" + qn):
+                return True
+
+    return False
+
+
+def _official_art_variants(card_name: str, limit: int = 20) -> list[dict]:
     keyword = _official_keyword(card_name)
+    if not keyword:
+        return []
+
     form = urllib.parse.urlencode(
         {"keyword": keyword, "keyword_type[]": "card_name", "pagenum": "1"},
         encoding="utf-8",
@@ -996,43 +1248,75 @@ def _img_from_official(card_name: str) -> str:
             html = r.read().decode("utf-8", errors="replace")
     except Exception as e:
         print(f"[official] fetch error: {e}", file=sys.stderr, flush=True)
-        return ""
+        return []
 
-    # Extract (card_id, thumb_path) pairs — search results have no card names
-    pairs = re.findall(
-        r"href=['\"](?:/card/detail/\?id=([^'\"]+))['\"]"
-        r".*?src=['\"](/wp-content/card/cardthumb/[^'\"]+)['\"]",
-        html, re.DOTALL
-    )
+    pairs = _official_search_pairs(html)
     if not pairs:
-        return ""
+        return []
 
-    nq = _norm_fw(card_name).replace(" ", "")
-    # Headers for plain GET (no XMLHttpRequest — avoids AJAX-only response)
-    detail_headers = {
-        "User-Agent": WIKI_HEADERS["User-Agent"],
-        "Referer":    OFFICIAL_SEARCH,
-        "Accept":     "text/html,application/xhtml+xml",
-        "Accept-Language": "ja,en;q=0.5",
-    }
+    variants: list[dict] = []
+    seen_ids: set[str] = set()
+    seen_images: set[str] = set()
+    max_items = max(1, int(limit or 1))
 
     for card_id, thumb_path in pairs:
-        try:
-            detail_url = f"{OFFICIAL_BASE}/card/detail/?id={card_id}"
-            detail_req = urllib.request.Request(detail_url, headers=detail_headers)
-            with urllib.request.urlopen(detail_req, timeout=8) as r:
-                # Only read first 2 KB — title tag is always near the top
-                chunk = r.read(2048).decode("utf-8", errors="replace")
-            m = re.search(r'<title>([^<(|]+)', chunk)
-            if not m:
-                continue
-            page_name = _norm_fw(m.group(1).strip()).replace(" ", "")
-            if page_name == nq or page_name.startswith(nq + "/"):
-                return f"{BASE_URL}/img?url={urllib.parse.quote(OFFICIAL_BASE + thumb_path)}"
-        except Exception:
+        if len(variants) >= max_items:
+            break
+        if card_id in seen_ids:
             continue
 
-    return ""
+        page_title = _official_fetch_detail_title(card_id)
+        if not page_title:
+            continue
+        if not _official_name_matches(card_name, page_title):
+            continue
+
+        image_url = _official_proxy_image_url(thumb_path)
+        if not image_url or image_url in seen_images:
+            continue
+
+        seen_ids.add(card_id)
+        seen_images.add(image_url)
+        variants.append({
+            "artId": f"official:{card_id}",
+            "sourceId": card_id,
+            "name": page_title,
+            "label": f"ID:{card_id}",
+            "imageUrl": image_url,
+            "thumb": image_url,
+            "source": "official",
+        })
+
+    # dmwiki print codes often include additional alt-art identifiers that
+    # official keyword search does not return from non-JP environments.
+    if len(variants) < max_items:
+        extra = _official_art_variants_from_dmwiki(card_name, limit=max_items)
+        for item in extra:
+            if len(variants) >= max_items:
+                break
+            cid = str(item.get("sourceId") or "").strip()
+            img = str(item.get("imageUrl") or item.get("thumb") or "").strip()
+            if not cid or cid in seen_ids:
+                continue
+            if not img or img in seen_images:
+                continue
+            seen_ids.add(cid)
+            seen_images.add(img)
+            variants.append(item)
+
+    return variants
+
+
+def _img_from_official(card_name: str) -> str:
+    """Get card image URL from the official Takara Tomy DM card database.
+    Searches by card name, then verifies each result by fetching the detail
+    page title (only first 2 KB) to confirm name match.
+    """
+    variants = _official_art_variants(card_name, limit=1)
+    if not variants:
+        return ""
+    first = variants[0]
+    return str(first.get("imageUrl") or first.get("thumb") or "").strip()
 
 
 # Set/pack image filenames look like DM24-RP1.jpg, DMRP01.jpg, DMBD09.jpg, DMX-08.jpg
@@ -1299,6 +1583,12 @@ def fetch_binary(url: str):
         if 400 <= code <= 599:
             return None, None, code
     return None, None, 504
+
+
+def _extract_card_image(data: dict | None) -> str:
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("imageUrl") or data.get("img") or data.get("thumb") or "").strip()
 
 
 # ─── HTTP Handler ──────────────────────────────────────────────────────────────
@@ -1728,7 +2018,7 @@ class Handler(BaseHTTPRequestHandler):
                 detail = get_card_detail_dmwiki(lookup_name)
 
             if detail:
-                image = str(detail.get("imageUrl") or detail.get("img") or detail.get("thumb") or "").strip()
+                image = _extract_card_image(detail)
                 if not image:
                     print(f"[detail] image missing (short cache): {cache_key}", flush=True)
                 _cache_set(cache_key, detail)
@@ -1737,6 +2027,70 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(cached)
             else:
                 self._json({"error": "not found"}, 404)
+
+        # /illustrations?id=... | /illustrations?name=...
+        elif parsed.path == "/illustrations":
+            pid = p("id").strip()
+            if pid.startswith("src:"):
+                pid = pid[4:]
+            if "|" in pid:
+                pid = ""
+
+            raw_name = p("name").strip()
+            name = raw_name[7:] if raw_name.startswith("dmwiki_") else raw_name
+            if not pid and not name:
+                return self._json({"error": "id or name required"}, 400)
+
+            detail_for_current = None
+            lookup_name = name
+
+            if not lookup_name and pid:
+                cached = _cache_get(pid)
+                if cached:
+                    detail_for_current = cached
+                    lookup_name = _safe_text(cached.get("name") or cached.get("nameEn"), maxlen=160)
+
+                if not lookup_name and pid.startswith("dmwiki_"):
+                    lookup_name = pid[7:]
+
+                if not lookup_name and pid and not pid.startswith("dmwiki_"):
+                    official_name = _safe_text(_official_fetch_detail_title(pid), maxlen=160)
+                    if official_name:
+                        lookup_name = official_name
+
+                if not lookup_name and pid.isdigit():
+                    detail = get_card_detail(pid)
+                    if detail:
+                        detail_for_current = detail
+                        lookup_name = _safe_text(detail.get("name") or detail.get("nameEn"), maxlen=160)
+                        _cache_set(pid, detail)
+
+            lookup_name = _safe_text(lookup_name, maxlen=160)
+            if not lookup_name:
+                return self._json({"error": "card name not found"}, 404)
+
+            options = _official_art_variants(lookup_name, limit=24)
+            current_img = _extract_card_image(detail_for_current)
+
+            if not current_img and pid:
+                current_img = _extract_card_image(_cache_get(pid))
+            if not current_img:
+                current_img = _extract_card_image(_cache_get(f"dmwiki_{lookup_name}"))
+
+            if current_img:
+                has_current = any(_extract_card_image(opt) == current_img for opt in options)
+                if not has_current:
+                    options.insert(0, {
+                        "artId": "current",
+                        "sourceId": pid,
+                        "name": lookup_name,
+                        "label": "現在のイラスト",
+                        "imageUrl": current_img,
+                        "thumb": current_img,
+                        "source": "current",
+                    })
+
+            self._json({"name": lookup_name, "options": options, "count": len(options)})
 
         # /img?url=ENCODED_URL  (proxy for CORS safety)
         elif parsed.path == "/img":

@@ -26,6 +26,9 @@ let _mobileSkipNextTap = false;
 let _mobileDetailCardState = null;
 let _mobileDetailRequestToken = 0;
 let _mobileDetailAllowAdd = true;
+let _mobileDetailOnCardChange = null;
+let _mobileIllustrationRequestToken = 0;
+let _mobileIllustrationOptions = [];
 let _mobileRibbonOtherOpen = false;
 let _mobileDeckNValue = 3;
 let _mobileDeckPeekPrivateCards = [];
@@ -225,9 +228,111 @@ function closeMobileCardDetailModal() {
   if (modal) {
     modal.classList.remove('open');
   }
+  closeMobileIllustrationModal();
   _mobileDetailRequestToken += 1;
   _mobileDetailCardState = null;
   _mobileDetailAllowAdd = true;
+  _mobileDetailOnCardChange = null;
+  _mobileIllustrationOptions = [];
+}
+
+function mergeMobileCardIllustration(baseCard, nextCard) {
+  const merged = {
+    ...(baseCard || {}),
+    ...(nextCard || {})
+  };
+
+  const imageUrl = getMobileCardImageUrl(nextCard) || getMobileCardImageUrl(baseCard);
+  if (imageUrl) {
+    merged.imageUrl = imageUrl;
+    merged.thumb = imageUrl;
+    merged.img = imageUrl;
+    merged.selectedImageUrl = imageUrl;
+  }
+
+  const selectedArtId = String(nextCard?.selectedArtId || baseCard?.selectedArtId || '').trim();
+  if (selectedArtId) {
+    merged.selectedArtId = selectedArtId;
+  }
+
+  return merged;
+}
+
+function ensureMobileIllustrationModal() {
+  let modal = document.getElementById('mobile-illustration-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'mobile-illustration-modal';
+    modal.className = 'dm-art-picker-modal';
+    modal.innerHTML = `
+      <div class="dm-art-picker-backdrop" onclick="closeMobileIllustrationModal()"></div>
+      <div class="dm-art-picker-body mobile">
+        <div class="dm-art-picker-head">
+          <div class="dm-art-picker-title">イラスト変更</div>
+          <button type="button" class="dm-art-picker-close" onclick="closeMobileIllustrationModal()">×</button>
+        </div>
+        <div id="mobile-illustration-content" class="dm-art-picker-content"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+  return modal;
+}
+
+function closeMobileIllustrationModal() {
+  const modal = document.getElementById('mobile-illustration-modal');
+  if (modal) {
+    modal.classList.remove('open');
+  }
+  _mobileIllustrationRequestToken += 1;
+}
+
+function renderMobileIllustrationContent(opts = {}) {
+  const content = document.getElementById('mobile-illustration-content');
+  if (!content) return;
+
+  if (opts.loading) {
+    content.innerHTML = '<div class="dm-art-picker-loading">イラスト一覧を取得中…</div>';
+    return;
+  }
+
+  if (opts.error) {
+    content.innerHTML = `<div class="dm-art-picker-error">${escapeHtmlMobile(opts.error)}</div>`;
+    return;
+  }
+
+  const selectedArtId = String(opts.selectedArtId || '').trim();
+  const selectedImage = String(opts.selectedImage || '').trim();
+  const options = Array.isArray(opts.options) ? opts.options : [];
+  if (!options.length) {
+    content.innerHTML = '<div class="dm-art-picker-empty">選択できるイラストが見つかりませんでした。</div>';
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="dm-art-picker-grid">
+      ${options.map((option, idx) => {
+        const imageUrl = getMobileCardImageUrl(option);
+        const artId = String(option?.artId || '').trim();
+        const isSelected = selectedArtId
+          ? artId === selectedArtId
+          : (!!selectedImage && imageUrl === selectedImage);
+        const label = String(option?.label || option?.name || `イラスト ${idx + 1}`).trim();
+
+        return `
+          <button
+            type="button"
+            class="dm-art-picker-item ${isSelected ? 'selected' : ''}"
+            onclick="applyMobileIllustrationFromPicker(${idx})">
+            ${imageUrl
+              ? `<img src="${escapeHtmlMobile(imageUrl)}" alt="${escapeHtmlMobile(label)}" class="dm-art-picker-thumb" onerror="handleMobileCardImageError(this)">`
+              : '<div class="dm-art-picker-thumb placeholder">NO IMG</div>'}
+            <div class="dm-art-picker-label">${escapeHtmlMobile(label)}</div>
+          </button>
+        `;
+      }).join('')}
+    </div>
+  `;
 }
 
 function renderMobileCardDetailContent(card, opts = {}) {
@@ -279,6 +384,9 @@ function renderMobileCardDetailContent(card, opts = {}) {
       </table>
     </div>
     ${bodyText ? `<div class="dm-card-detail-text">${escapeHtmlMobile(bodyText).replace(/\n/g, '<br>')}</div>` : '<div class="dm-card-detail-text empty">テキスト情報なし</div>'}
+    <div class="dm-card-detail-sub-actions">
+      <button type="button" class="dm-card-detail-illustration-btn" onclick="openMobileIllustrationPicker()">イラスト変更</button>
+    </div>
     ${allowAdd
       ? `<div class="dm-card-detail-actions">
           <input id="mobile-card-detail-count" type="number" min="1" max="4" value="1" class="dm-card-detail-count" />
@@ -287,6 +395,59 @@ function renderMobileCardDetailContent(card, opts = {}) {
         </div>`
       : ''}
   `;
+}
+
+async function openMobileIllustrationPicker() {
+  if (!_mobileDetailCardState) return;
+
+  const modal = ensureMobileIllustrationModal();
+  modal.classList.add('open');
+  renderMobileIllustrationContent({ loading: true });
+
+  const token = ++_mobileIllustrationRequestToken;
+  try {
+    const result = await NetworkService.fetchCardIllustrations(_mobileDetailCardState, {
+      timeoutMs: 20000
+    });
+    if (token !== _mobileIllustrationRequestToken) return;
+
+    const options = Array.isArray(result?.options) ? result.options : [];
+    _mobileIllustrationOptions = options;
+    renderMobileIllustrationContent({
+      options,
+      selectedArtId: String(_mobileDetailCardState?.selectedArtId || '').trim(),
+      selectedImage: getMobileCardImageUrl(_mobileDetailCardState)
+    });
+  } catch (error) {
+    if (token !== _mobileIllustrationRequestToken) return;
+    console.error('mobile illustration picker error:', error);
+    _mobileIllustrationOptions = [];
+    renderMobileIllustrationContent({ error: 'イラスト一覧を取得できませんでした。' });
+  }
+}
+
+function applyMobileIllustrationFromPicker(index) {
+  if (!_mobileDetailCardState) return;
+
+  const idx = Number(index);
+  if (!Number.isInteger(idx) || idx < 0) return;
+
+  const option = _mobileIllustrationOptions[idx];
+  if (!option) return;
+
+  const updated = NetworkService.applyCardIllustration(_mobileDetailCardState, option);
+  _mobileDetailCardState = updated;
+  renderMobileCardDetailContent(updated, { allowAdd: _mobileDetailAllowAdd });
+
+  if (typeof _mobileDetailOnCardChange === 'function') {
+    try {
+      _mobileDetailOnCardChange(updated);
+    } catch (error) {
+      console.warn('detail onCardChange error (mobile):', error);
+    }
+  }
+
+  closeMobileIllustrationModal();
 }
 
 async function resolveMobileDetailCard(card) {
@@ -328,6 +489,9 @@ async function showMobileCardDetail(cardJson, opts = {}) {
   }
 
   _mobileDetailAllowAdd = allowAdd;
+  _mobileDetailOnCardChange = typeof opts.onCardChange === 'function' ? opts.onCardChange : null;
+  _mobileIllustrationOptions = [];
+  closeMobileIllustrationModal();
 
   const modal = ensureMobileCardDetailModal();
   modal.classList.add('open');
@@ -346,7 +510,34 @@ async function showMobileCardDetail(cardJson, opts = {}) {
 
 function openMobileDeckCardDetail(cardJson) {
   const decoded = decodeMobileData(cardJson);
-  showMobileCardDetail(decoded, { allowAdd: false });
+  let raw = decoded;
+  try {
+    raw = typeof decoded === 'string' ? JSON.parse(decoded) : decoded;
+  } catch {
+    raw = decoded;
+  }
+
+  const base = NetworkService.normalizeCardData(raw || {});
+  const targetKey = String(base?.cardId || base?.id || '').trim();
+
+  showMobileCardDetail(base, {
+    allowAdd: false,
+    onCardChange: (nextCard) => {
+      if (!targetKey) return;
+      const cards = Array.isArray(window._deckCards) ? window._deckCards : [];
+      const idx = cards.findIndex((item) => String(item?.cardId || item?.id || '') === targetKey);
+      if (idx < 0) return;
+
+      const current = cards[idx] || {};
+      const merged = mergeMobileCardIllustration(current, nextCard);
+      merged.count = Number(current?.count) || 1;
+      cards[idx] = merged;
+      window._deckCards = cards;
+
+      sortCurrentMobileDeckCards();
+      renderMobileDeckList();
+    }
+  });
 }
 
 async function addMobileCardFromDetail() {
@@ -1137,7 +1328,21 @@ async function openMobileCardDetailFromZone(sourceZone, sourceIndex) {
     if (!ok) return;
   }
 
-  showMobileCardDetail(card, { allowAdd: false });
+  const zoneKey = sourceZone;
+  const zoneIdx = idx;
+  showMobileCardDetail(card, {
+    allowAdd: false,
+    onCardChange: (nextCard) => {
+      const zoneCards = engineMobile?.state?.[zoneKey];
+      if (!Array.isArray(zoneCards) || !zoneCards[zoneIdx]) return;
+
+      const current = zoneCards[zoneIdx];
+      zoneCards[zoneIdx] = mergeMobileCardIllustration(current, nextCard);
+
+      if (window._ol) olSendActionMobile('state');
+      renderMobileGame();
+    }
+  });
 }
 
 function prepareMobileInsertUnder(fromZone, fromIndex) {

@@ -7,11 +7,13 @@ const NetworkService = {
   _cardDetailCache: new Map(),
   _searchCache: new Map(),
   _deckCache: new Map(),
+  _illustrationCache: new Map(),
   _cardDetailCacheTtlMs: 60 * 60 * 1000,
   _cardDetailNoImageCacheTtlMs: 90 * 1000,
   _searchCacheMaxEntries: 120,
   _searchCacheTtlMs: 5 * 60 * 1000,
   _deckCacheTtlMs: 3 * 60 * 1000,
+  _illustrationCacheTtlMs: 30 * 60 * 1000,
 
   _wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -67,6 +69,10 @@ const NetworkService = {
     this._searchCache.clear();
   },
 
+  clearIllustrationCache() {
+    this._illustrationCache.clear();
+  },
+
   clearDeckCache(deckName, username = '') {
     const targetDeck = String(deckName || '').trim();
     const targetUser = String(username || '').trim();
@@ -110,6 +116,99 @@ const NetworkService = {
       .trim();
     if (!normalized) return '';
     return `name:${normalized}`;
+  },
+
+  _illustrationCacheKey(card) {
+    const normalized = this.normalizeCardData(card || {});
+    const lookupId = this._detailLookupId(normalized?.sourceId || normalized?.id);
+    if (lookupId) return `id:${lookupId}`;
+    return this._detailNameCacheKey(normalized?.name || normalized?.nameEn || '');
+  },
+
+  _getCachedIllustrations(cacheKey) {
+    if (!cacheKey || !this._illustrationCache.has(cacheKey)) return null;
+
+    const cached = this._illustrationCache.get(cacheKey);
+    if (!cached || !Number.isFinite(cached?.at)) {
+      this._illustrationCache.delete(cacheKey);
+      return null;
+    }
+
+    if ((Date.now() - cached.at) >= this._illustrationCacheTtlMs) {
+      this._illustrationCache.delete(cacheKey);
+      return null;
+    }
+
+    return {
+      name: String(cached?.name || '').trim(),
+      options: Array.isArray(cached?.options)
+        ? cached.options.map((item) => ({ ...item }))
+        : []
+    };
+  },
+
+  _setCachedIllustrations(cacheKey, payload) {
+    if (!cacheKey || !payload || typeof payload !== 'object') return;
+
+    this._illustrationCache.set(cacheKey, {
+      name: String(payload?.name || '').trim(),
+      options: Array.isArray(payload?.options)
+        ? payload.options.map((item) => ({ ...item }))
+        : [],
+      at: Date.now()
+    });
+  },
+
+  _normalizeIllustrationOption(option, index = 0) {
+    const imageUrl = String(option?.imageUrl || option?.img || option?.thumb || '').trim();
+    if (!imageUrl) return null;
+
+    const artId = String(option?.artId || option?.id || option?.sourceId || '').trim()
+      || `image:${Math.max(1, Number(index) + 1)}`;
+    const label = String(option?.label || option?.name || '').trim()
+      || `イラスト ${Math.max(1, Number(index) + 1)}`;
+    const source = String(option?.source || '').trim() || 'unknown';
+
+    return {
+      artId,
+      label,
+      source,
+      imageUrl,
+      thumb: imageUrl,
+      img: imageUrl
+    };
+  },
+
+  _withCurrentIllustrationOption(options, card) {
+    const normalized = this.normalizeCardData(card || {});
+    const list = Array.isArray(options)
+      ? options.map((item) => ({ ...item }))
+      : [];
+
+    const currentUrl = this._getCardImageUrl(normalized);
+    if (!currentUrl) return list;
+
+    const exists = list.some((item) => this._getCardImageUrl(item) === currentUrl);
+    if (!exists) {
+      list.unshift({
+        artId: String(normalized?.selectedArtId || '').trim() || 'current',
+        label: '現在のイラスト',
+        source: 'current',
+        imageUrl: currentUrl,
+        thumb: currentUrl,
+        img: currentUrl
+      });
+    }
+
+    return list;
+  },
+
+  _fallbackIllustrations(card) {
+    const normalized = this.normalizeCardData(card || {});
+    return {
+      name: String(normalized?.name || normalized?.nameEn || '').trim(),
+      options: this._withCurrentIllustrationOption([], normalized)
+    };
   },
 
   _getCachedCardDetail(cacheKey) {
@@ -334,6 +433,93 @@ const NetworkService = {
       console.warn('カード画像補完失敗:', detailId || `name:${fallbackName || 'unknown'}`, `attempts=${totalAttempts}`);
     }
     return merged;
+  },
+
+  async fetchCardIllustrations(card, options = {}) {
+    const normalized = this.normalizeCardData(card || {});
+    const fallback = this._fallbackIllustrations(normalized);
+
+    const detailId = this._detailLookupId(normalized?.sourceId || normalized?.id);
+    const fallbackName = String(normalized?.name || normalized?.nameEn || '').trim();
+    if (!detailId && !fallbackName) return fallback;
+
+    const cacheKey = this._illustrationCacheKey(normalized);
+    const forceRefresh = options?.forceRefresh === true;
+    if (!forceRefresh && cacheKey) {
+      const cached = this._getCachedIllustrations(cacheKey);
+      if (cached) {
+        cached.options = this._withCurrentIllustrationOption(cached.options, normalized);
+        return cached;
+      }
+    }
+
+    const timeoutRaw = Number(options?.timeoutMs);
+    const timeoutMs = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? Math.floor(timeoutRaw) : 20000;
+
+    try {
+      const params = new URLSearchParams();
+      if (detailId) params.set('id', detailId);
+      if (fallbackName) params.set('name', fallbackName);
+
+      const base = this.getApiBase();
+      const res = await fetch(`${base}/illustrations?${params.toString()}`, {
+        signal: this._abortSignal(timeoutMs)
+      });
+
+      if (!res.ok) {
+        console.warn('イラスト一覧取得失敗:', res.status, detailId || fallbackName);
+        return fallback;
+      }
+
+      const data = await this._readJsonSafe(res);
+      const rawOptions = Array.isArray(data?.options) ? data.options : [];
+      const optionsList = [];
+      const seenImage = new Set();
+
+      rawOptions.forEach((item, idx) => {
+        const option = this._normalizeIllustrationOption(item, idx);
+        if (!option) return;
+        if (seenImage.has(option.imageUrl)) return;
+        seenImage.add(option.imageUrl);
+        optionsList.push(option);
+      });
+
+      const result = {
+        name: String(data?.name || fallbackName || normalized?.name || '').trim(),
+        options: this._withCurrentIllustrationOption(optionsList, normalized)
+      };
+
+      if (cacheKey) {
+        this._setCachedIllustrations(cacheKey, result);
+      }
+
+      return result;
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        console.warn('イラスト一覧取得タイムアウト:', detailId || fallbackName, `${timeoutMs}ms`);
+      } else {
+        console.error('イラスト一覧取得エラー:', error);
+      }
+      return fallback;
+    }
+  },
+
+  applyCardIllustration(card, option) {
+    const normalized = this.normalizeCardData(card || {});
+    if (!normalized) return normalized;
+
+    const imageUrl = String(option?.imageUrl || option?.img || option?.thumb || '').trim();
+    if (!imageUrl) return normalized;
+
+    const artId = String(option?.artId || option?.id || '').trim();
+    return this.normalizeCardData({
+      ...normalized,
+      selectedArtId: artId || String(normalized?.selectedArtId || '').trim(),
+      selectedImageUrl: imageUrl,
+      imageUrl,
+      thumb: imageUrl,
+      img: imageUrl
+    });
   },
 
   /**
