@@ -1459,8 +1459,6 @@ function renderDesktopGame() {
     return `
       <div class="${chipClasses}"
         title="${escapeHtml(card?.name || '')}"
-        onmouseenter="showDesktopCardPreview(event, -1, '${escapeAttrJs(JSON.stringify(card))}')"
-        onmouseleave="hideDesktopCardPreview()"
         ${onClickAttr}
         ${contextMenuAttr}
         data-zone="${sourceZone}"
@@ -1589,13 +1587,6 @@ function renderDesktopGame() {
                 `;
               }).join('') : '<div class="dg-zone-empty">空</div>'}
             </div>
-          </div>
-
-          <div class="dg-v2-row my-mana">
-            <span class="dg-v2-label">マナ<br><b>${state.manaZone.length}</b></span>
-            <div id="desktop-mana-zone" class="dg-v2-cards" ondrop="dropDesktopCard(event, 'mana')" ondragover="dragDesktopOver(event)">
-              ${state.manaZone.length ? state.manaZone.map((c, i) => renderChip(c, 'mana', i)).join('') : '<div class="dg-zone-empty">空</div>'}
-            </div>
             <div class="dg-v2-pile-col my">
               <button type="button" class="dg-v2-pile-btn deck"
                 onclick="openDesktopDeckTopMenu(event)" oncontextmenu="openDesktopDeckTopMenu(event)" title="山札">
@@ -1613,6 +1604,13 @@ function renderDesktopGame() {
             </div>
           </div>
 
+          <div class="dg-v2-row my-mana">
+            <span class="dg-v2-label">マナ<br><b>${state.manaZone.length}</b></span>
+            <div id="desktop-mana-zone" class="dg-v2-cards" ondrop="dropDesktopCard(event, 'mana')" ondragover="dragDesktopOver(event)">
+              ${state.manaZone.length ? state.manaZone.map((c, i) => renderChip(c, 'mana', i)).join('') : '<div class="dg-zone-empty">空</div>'}
+            </div>
+          </div>
+
           <div class="dg-v2-row my-hand">
             <span class="dg-v2-label">手札<br><b>${state.hand.length}</b></span>
             <div id="desktop-hand-zone" class="dg-v2-cards">
@@ -1625,8 +1623,6 @@ function renderDesktopGame() {
                   <div class="dg-card-chip hand ${civ} ${imageUrl ? 'has-image' : ''}" draggable="true"
                     onclick="selectDesktopHandCard(${i}, event)"
                     oncontextmenu="openDesktopCardZoneMenu(event, 'hand', ${i})"
-                    onmouseenter="showDesktopCardPreview(event, ${i})"
-                    onmouseleave="hideDesktopCardPreview()"
                     ondragstart="dragDesktopCard(event, ${i})"
                     ondragend="dragDesktopCardEnd()"
                     title="${escapeHtml(c.name)}">
@@ -1671,9 +1667,6 @@ function renderDesktopGame() {
         ` : ''}
       </div>
 
-      <div id="desktop-card-preview" class="dg-preview">
-        <div id="desktop-preview-content"></div>
-      </div>
     </div>
   `;
 
