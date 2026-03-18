@@ -33,6 +33,7 @@ from socketserver import ThreadingMixIn
 
 PORT     = int(os.environ.get("PORT", 8765))
 BASE_URL = os.environ.get("BASE_URL", f"http://localhost:{PORT}")
+APP_BUILD = os.environ.get("APP_BUILD", "2026-03-19-imgfix")
 WIKI_API = "https://duelmasters.fandom.com/api.php"
 WIKI_HEADERS = {"User-Agent": "DMSolitaireTool/1.0 (local proxy)"}
 
@@ -1659,7 +1660,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # /ping
         if parsed.path == "/ping":
-            self._json({"status": "ok", "port": PORT, "source": "dmwiki"})
+            self._json({"status": "ok", "port": PORT, "source": "dmwiki", "build": APP_BUILD})
 
         # /test/rate-limit-status (for debugging)
         elif parsed.path == "/test/rate-limit-status":
