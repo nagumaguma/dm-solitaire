@@ -402,7 +402,7 @@ _JP_RE = re.compile(r'[\u3040-\u30ff\u4e00-\u9fff]')  # hiragana / katakana / ka
 
 def _norm_fw(s: str) -> str:
     """Normalize fullwidth ASCII (U+FF01..FF5E) to halfwidth and lowercase for comparison.
-    e.g. '＝' → '=',  '（' → '(',  'Ａ' → 'a'
+    e.g. '＝' → '=',  '（' → '(',  'Ａ' → 'a', '〜' → '~'
     """
     result = []
     for ch in s:
@@ -411,9 +411,52 @@ def _norm_fw(s: str) -> str:
             result.append(chr(cp - 0xFEE0))
         elif cp == 0x3000:              # ideographic space → regular space
             result.append(' ')
+        elif cp == 0x301C:              # wave dash 〜 → ~
+            result.append('~')
+        elif cp == 0x2015:              # horizontal bar ― → -
+            result.append('-')
         else:
             result.append(ch)
     return ''.join(result).lower()
+
+
+def _normalize_card_name_for_url(name: str) -> str:
+    """Normalize a card name for dmwiki URL access (no lowercasing — preserves Japanese case).
+    Converts fullwidth symbols and wave dash variants to their half-width equivalents.
+    """
+    result = []
+    for ch in name:
+        cp = ord(ch)
+        if 0xFF01 <= cp <= 0xFF5E:      # fullwidth ASCII block → halfwidth
+            result.append(chr(cp - 0xFEE0))
+        elif cp == 0x3000:              # ideographic space → space
+            result.append(' ')
+        elif cp == 0x301C:              # wave dash 〜 → ~
+            result.append('~')
+        elif cp == 0x2015:              # horizontal bar ― → -
+            result.append('-')
+        else:
+            result.append(ch)
+    return ''.join(result)
+
+
+def _dmwiki_name_candidates(name: str) -> list[str]:
+    """Return a list of name variants to try when fetching a dmwiki page directly.
+    Covers common encoding mismatches: fullwidth vs halfwidth symbols, wave dash variants.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    def _add(v: str):
+        if v and v not in seen:
+            seen.add(v); out.append(v)
+    _add(name)
+    _add(_normalize_card_name_for_url(name))
+    # swap wave dash (U+301C) ↔ fullwidth tilde (U+FF5E)
+    _add(name.replace('\u301c', '\uff5e').replace('\uff5e', '\u301c'))
+    # also try the normalized form with the other tilde
+    normed = _normalize_card_name_for_url(name)
+    _add(normed.replace('~', '\u301c'))
+    return out
 
 
 def search_cards(query: str, page: int = 1) -> tuple[list[dict], int]:
@@ -1012,8 +1055,12 @@ def _img_from_dmwiki_attach(page_name: str) -> str:
     """Fetch dmwiki's attachment list for 《page_name》 and return the first
     non-pack image URL found there.  This catches card scans that are uploaded
     to the page but not directly linked in the rendered HTML."""
-    encoded = urllib.parse.quote(f"《{page_name}》", encoding="utf-8")
-    html = _dmwiki_fetch(f"/?cmd=attach&refer={encoded}&pcmd=list")
+    html = None
+    for candidate in _dmwiki_name_candidates(page_name):
+        encoded = urllib.parse.quote(f"《{candidate}》", encoding="utf-8")
+        html = _dmwiki_fetch(f"/?cmd=attach&refer={encoded}&pcmd=list")
+        if html:
+            break
     if not html:
         return ""
     for m in re.finditer(
@@ -1030,9 +1077,15 @@ def _img_from_dmwiki_attach(page_name: str) -> str:
 
 
 def get_card_detail_dmwiki(name: str) -> dict | None:
-    """Fetch card detail from dmwiki.net by card name (without 《》 brackets)."""
-    encoded = urllib.parse.quote(f"《{name}》", encoding="utf-8")
-    html = _dmwiki_fetch(f"/{encoded}")
+    """Fetch card detail from dmwiki.net by card name (without 《》 brackets).
+    Tries multiple name variants to handle fullwidth/halfwidth and wave-dash encoding mismatches.
+    """
+    html = None
+    for candidate in _dmwiki_name_candidates(name):
+        encoded = urllib.parse.quote(f"《{candidate}》", encoding="utf-8")
+        html = _dmwiki_fetch(f"/{encoded}")
+        if html:
+            break
     if not html:
         return None
 
