@@ -1037,42 +1037,14 @@ def _official_fetch_detail_title(card_id: str) -> str:
     return m.group(1).strip() if m else ""
 
 
-def _official_url_exists(url: str, timeout: int = 8) -> bool:
-    req = urllib.request.Request(url, headers={**WIKI_HEADERS, "Accept": "image/*"}, method="HEAD")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            code = int(getattr(r, "status", 200) or 200)
-            return 200 <= code < 400
-    except Exception:
-        pass
-
-    # Some hosts reject HEAD; retry with normal GET and read only a tiny chunk.
-    req2 = urllib.request.Request(url, headers={**WIKI_HEADERS, "Accept": "image/*"})
-    try:
-        with urllib.request.urlopen(req2, timeout=timeout) as r:
-            r.read(16)
-            return True
-    except Exception:
-        return False
-
-
 def _official_image_proxy_from_card_id(card_id: str) -> str:
     cid = str(card_id or "").strip()
     if not cid:
         return ""
-
+    # Deterministic URL generation keeps /illustrations fast even on hosted environments.
+    # Actual image reachability is handled by the browser's onerror fallback in UI.
     encoded = urllib.parse.quote(cid, safe="")
-    candidates = [
-        f"{OFFICIAL_BASE}/wp-content/card/cardthumb/{encoded}.jpg",
-        f"{OFFICIAL_BASE}/wp-content/card/cardthumb/{encoded}.png",
-        f"{OFFICIAL_BASE}/wp-content/card/cardimage/{encoded}.jpg",
-        f"{OFFICIAL_BASE}/wp-content/card/cardimage/{encoded}.png",
-    ]
-
-    for full_url in candidates:
-        if _official_url_exists(full_url):
-            return _official_proxy_image_url(full_url)
-    return ""
+    return _official_proxy_image_url(f"{OFFICIAL_BASE}/wp-content/card/cardthumb/{encoded}.jpg")
 
 
 def _dmwiki_page_html(card_name: str) -> str:

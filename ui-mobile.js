@@ -407,8 +407,7 @@ async function openMobileIllustrationPicker() {
   const token = ++_mobileIllustrationRequestToken;
   try {
     const result = await NetworkService.fetchCardIllustrations(_mobileDetailCardState, {
-      timeoutMs: 20000,
-      forceRefresh: true
+      timeoutMs: 45000
     });
     if (token !== _mobileIllustrationRequestToken) return;
 
