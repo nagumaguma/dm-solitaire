@@ -1680,7 +1680,7 @@ def get_card_detail_dmwiki(name: str) -> dict | None:
             continue
         if re.match(r'^《', r):
             break  # wiki strategy section starts here (card name ref at row start)
-        if _card_header_pat.match(r):
+        if _card_header_pat.match(r.splitlines()[0].strip()):
             break  # related card header row — stop here
         effect_rows.append(r)
     effect = "\n".join(effect_rows).strip()
