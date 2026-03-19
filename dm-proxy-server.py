@@ -1802,9 +1802,17 @@ def _cached_detail_needs_refresh(cache_key: str, data: dict | None) -> tuple[boo
                     return True, f"image-updated:{cid}"
 
             title = _official_fetch_detail_title(cid)
-            name = _safe_text(data.get("name") or data.get("nameEn"), maxlen=160)
-            if title and name and not _official_name_matches(name, title):
-                return True, f"image-name-mismatch:{cid}"
+            if title:
+                title_matched = False
+                for candidate_name in (
+                    _safe_text(data.get("name") or "", maxlen=160),
+                    _safe_text(data.get("nameEn") or "", maxlen=160),
+                ):
+                    if candidate_name and _official_name_matches(candidate_name, title):
+                        title_matched = True
+                        break
+                if not title_matched:
+                    return True, f"image-name-mismatch:{cid}"
 
     return False, ""
 
