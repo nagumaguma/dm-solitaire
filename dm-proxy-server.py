@@ -1111,6 +1111,57 @@ def _official_thumb_url_variants(card_id: str) -> list[str]:
     ]
 
 
+def _official_thumb_id_candidates(card_id: str) -> list[str]:
+    """Generate thumbnail ID candidates for official card images.
+
+    Some official images are stored with letter suffixes (e.g. 032a) even
+    when dmwiki set notation only exposes numeric print code (e.g. 32/74).
+    """
+    cid = str(card_id or "").strip().lower()
+    if not cid:
+        return []
+
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(v: str):
+        t = str(v or "").strip().lower()
+        if not t or t in seen:
+            return
+        seen.add(t)
+        out.append(t)
+
+    _add(cid)
+
+    m = re.fullmatch(r'(.+?-)(\d{1,3})([a-z]?)', cid, re.IGNORECASE)
+    if not m:
+        return out
+
+    prefix = m.group(1)
+    num = int(m.group(2))
+    suffix = m.group(3).lower()
+
+    num_variants: list[str] = []
+    for nv in (f"{num}", f"{num:03d}"):
+        if nv not in num_variants:
+            num_variants.append(nv)
+
+    if suffix:
+        for nv in num_variants:
+            _add(f"{prefix}{nv}{suffix}")
+        return out
+
+    for nv in num_variants:
+        _add(f"{prefix}{nv}")
+
+    # Letter suffix variants are commonly used for twin-pact/card-face images.
+    for letter in ("a", "b", "c"):
+        for nv in num_variants:
+            _add(f"{prefix}{nv}{letter}")
+
+    return out
+
+
 def _official_url_exists_fast(url: str, timeout: float = 2.5) -> bool:
     req = urllib.request.Request(url, headers={**WIKI_HEADERS, "Accept": "image/*"}, method="HEAD")
     try:
@@ -1129,10 +1180,13 @@ def _official_resolve_thumb_url(card_id: str) -> str:
     if cid in _official_img_url_cache:
         return _official_img_url_cache[cid]
 
-    for full_url in _official_thumb_url_variants(cid):
-        if _official_url_exists_fast(full_url):
-            _official_img_url_cache[cid] = full_url
-            return full_url
+    for candidate_id in _official_thumb_id_candidates(cid):
+        for full_url in _official_thumb_url_variants(candidate_id):
+            if _official_url_exists_fast(full_url):
+                _official_img_url_cache[cid] = full_url
+                if candidate_id != cid:
+                    _official_img_url_cache[candidate_id] = full_url
+                return full_url
 
     _official_img_url_cache[cid] = ""
     return ""
@@ -1359,6 +1413,14 @@ def _official_art_variants(card_name: str, limit: int = 20) -> list[dict]:
         if not _official_name_matches(card_name, page_title):
             continue
 
+        # Official search can return stale/broken thumb paths for some cards
+        # (notably twin-pact alt IDs). Only keep resolvable images.
+        thumb_full = str(thumb_path or "").strip()
+        if thumb_full and not (thumb_full.startswith("http://") or thumb_full.startswith("https://")):
+            thumb_full = OFFICIAL_BASE + thumb_full
+        if not thumb_full or not _official_url_exists_fast(thumb_full):
+            continue
+
         image_url = _official_proxy_image_url(thumb_path)
         if not image_url or image_url in seen_images:
             continue
@@ -1434,24 +1496,23 @@ def _img_from_dmwiki_setcode(html: str) -> str:
     This lets us construct the official thumbnail URL directly without a POST search,
     which is unreliable from non-Japanese IP addresses (Railway, etc.).
     """
-    # Find all occurrences of set code links followed by (N/M) card number
-    # e.g. href="/DM24-BD2" ... （5/16）
+    # Find all occurrences of set code links followed by print notation
+    # e.g. href="/DM24-BD2" ... （5/16）, （32A/74）
     for m in re.finditer(r'href="/(DM[A-Z0-9\-]+)"', html, re.IGNORECASE):
-        raw_set = m.group(1)   # e.g. "DM24-BD2"
-        # Look for （N/M） within the next 300 chars (allows for tag content between </a> and the number)
-        context = html[m.start(): m.start() + 300]
-        num_m = re.search(r'[（(](\d+)/\d+[）)]', context)
-        if not num_m:
-            continue
-        card_num = int(num_m.group(1))  # e.g. 5
+        raw_set = m.group(1).upper()
+        # Look for print notation within nearby context.
+        context = html[m.start(): m.start() + 420]
 
-        # Construct filename: "DM24-BD2" + num 5 → "dm24bd2-005"
-        set_part = re.sub(r'-', '', raw_set).lower()   # "dm24bd2"
-        fname    = f"{set_part}-{card_num:03d}.jpg"
+        for p in re.finditer(r'[（(]\s*([A-Z]?\d{1,3}[A-Z]?)\s*/\s*[A-Z0-9]{1,6}\s*[）)]', context, re.IGNORECASE):
+            print_code = str(p.group(1) or "").upper()
+            if not re.search(r'\d', print_code):
+                continue
 
-        thumb_path = f"/wp-content/card/cardthumb/{fname}"
-        full_url   = OFFICIAL_BASE + thumb_path
-        return f"{BASE_URL}/img?url={urllib.parse.quote(full_url, safe='')}"
+            for card_id in _official_ids_from_set_and_print(raw_set, print_code):
+                image_url = _official_image_proxy_from_card_id(card_id)
+                if image_url:
+                    return image_url
+
     return ""
 
 
@@ -1727,6 +1788,19 @@ def _cached_detail_needs_refresh(cache_key: str, data: dict | None) -> tuple[boo
     if key.startswith("dmwiki_"):
         cid = _image_card_id_key(image)
         if cid:
+            # If image URL points to an official thumb ID that currently has no
+            # resolvable file, refresh so fallback paths can recover (e.g. 032 -> 032a).
+            image_norm = _norm_fw(image)
+            if "/wp-content/card/cardthumb/" in image_norm:
+                resolved = _official_resolve_thumb_url(cid)
+                if not resolved:
+                    return True, f"image-not-found:{cid}"
+
+                current_key = _image_identity_key(image)
+                resolved_key = _image_identity_key(resolved)
+                if current_key and resolved_key and current_key != resolved_key:
+                    return True, f"image-updated:{cid}"
+
             title = _official_fetch_detail_title(cid)
             name = _safe_text(data.get("name") or data.get("nameEn"), maxlen=160)
             if title and name and not _official_name_matches(name, title):
