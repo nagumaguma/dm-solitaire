@@ -40,6 +40,14 @@ WIKI_HEADERS = {"User-Agent": "DMSolitaireTool/1.0 (local proxy)"}
 _dmwiki_cache: dict[str, list[dict]] = {}   # normalized_query → all matched cards
 DMWIKI_CACHE_MAX = 500
 
+_en_search_cache: dict[str, tuple[list[dict], int, float]] = {}  # key → (cards, total, timestamp)
+EN_SEARCH_CACHE_TTL = 5 * 60        # 5分
+EN_SEARCH_CACHE_MAX = 200
+
+_illustrations_cache: dict[str, tuple[dict, float]] = {}  # lookup_name → (response_dict, timestamp)
+ILLUSTRATIONS_CACHE_TTL = 6 * 60 * 60   # 6時間
+ILLUSTRATIONS_CACHE_MAX = 300
+
 # ─── Account management ──────────────────────────────────────────────────────────
 
 def hash_pin(pin: str, salt: str = None) -> tuple[str, str]:
@@ -231,6 +239,8 @@ def _init_cache():
     _bootstrap_cache_db_if_needed()
     print(f"[db] using CACHE_DB: {CACHE_DB}", flush=True)
     con = sqlite3.connect(CACHE_DB)
+    con.execute("PRAGMA journal_mode = WAL")
+    con.execute("PRAGMA synchronous = NORMAL")
     con.execute("""
         CREATE TABLE IF NOT EXISTS card_cache (
             id        TEXT PRIMARY KEY,
@@ -343,12 +353,12 @@ def _cache_ttl(data: dict) -> int:
 
 
 def _cache_get(cid: str) -> dict | None:
+    con = None
     try:
         con = sqlite3.connect(CACHE_DB)
         row = con.execute(
             "SELECT data, cached_at FROM card_cache WHERE id = ?", (cid,)
         ).fetchone()
-        con.close()
         if not row:
             return None
 
@@ -358,10 +368,14 @@ def _cache_get(cid: str) -> dict | None:
             return data
     except Exception as e:
         print(f"[cache] get error: {e}", file=sys.stderr, flush=True)
+    finally:
+        if con:
+            con.close()
     return None
 
 
 def _cache_set(cid: str, data: dict):
+    con = None
     try:
         con = sqlite3.connect(CACHE_DB)
         con.execute(
@@ -369,9 +383,11 @@ def _cache_set(cid: str, data: dict):
             (cid, json.dumps(data, ensure_ascii=False), time.time())
         )
         con.commit()
-        con.close()
     except Exception as e:
         print(f"[cache] set error: {e}", file=sys.stderr, flush=True)
+    finally:
+        if con:
+            con.close()
 
 
 # ─── Wiki API fetch ────────────────────────────────────────────────────────────
@@ -533,13 +549,20 @@ def search_cards(query: str, page: int = 1) -> tuple[list[dict], int]:
             results = search_cards_dmwiki(query)
             if results:  # only cache non-empty to avoid permanently stale entries
                 if len(_dmwiki_cache) >= DMWIKI_CACHE_MAX:
-                    _dmwiki_cache.clear()
+                    _dmwiki_cache.pop(next(iter(_dmwiki_cache)))
                 _dmwiki_cache[cache_key] = results
         all_cards = _dmwiki_cache.get(cache_key, [])
         start = (page - 1) * PAGE_SIZE
         return all_cards[start:start + PAGE_SIZE], len(all_cards)
 
-    # English queries → English wiki
+    # English queries → English wiki (with cache)
+    _en_cache_key = f"{query.lower().strip()}|{page}"
+    _en_cached = _en_search_cache.get(_en_cache_key)
+    if _en_cached:
+        _en_cards, _en_total, _en_at = _en_cached
+        if time.time() - _en_at < EN_SEARCH_CACHE_TTL:
+            return _en_cards, _en_total
+
     hits, totalhits = _wiki_search(query)
     if not hits:
         return [], totalhits
@@ -558,6 +581,11 @@ def search_cards(query: str, page: int = 1) -> tuple[list[dict], int]:
             "name": jpname if jpname else h["title"],
             "thumb": thumb,
         })
+
+    if cards:
+        if len(_en_search_cache) >= EN_SEARCH_CACHE_MAX:
+            _en_search_cache.pop(next(iter(_en_search_cache)))
+        _en_search_cache[_en_cache_key] = (cards, totalhits, time.time())
 
     return cards, totalhits
 
@@ -1903,6 +1931,8 @@ class Handler(BaseHTTPRequestHandler):
     def _do_post_impl(self):
         parsed = urllib.parse.urlparse(self.path)
         length = int(self.headers.get("Content-Length", 0))
+        if length > 512 * 1024:  # 512KB 上限
+            return self._json({"error": "request too large"}, 413)
         body = self.rfile.read(length) if length > 0 else b"{}"
         try:
             data = json.loads(body)
@@ -2237,7 +2267,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # /deck/list, /deck/names, /deck/get, /deck/fetch are POST-only to keep PIN out of URL
         elif parsed.path in ("/deck/list", "/deck/names", "/deck/get", "/deck/fetch"):
-            self._json({"error": "use POST for this endpoint"}, 405)
+            return self._json({"error": "use POST for this endpoint"}, 405)
 
         # /search?q=...&page=1
         elif parsed.path == "/search":
@@ -2334,6 +2364,12 @@ class Handler(BaseHTTPRequestHandler):
             if not lookup_name:
                 return self._json({"error": "card name not found"}, 404)
 
+            _illust_cached = _illustrations_cache.get(lookup_name)
+            if _illust_cached:
+                _illust_resp, _illust_at = _illust_cached
+                if time.time() - _illust_at < ILLUSTRATIONS_CACHE_TTL:
+                    return self._json(_illust_resp)
+
             options = _official_art_variants(lookup_name, limit=24)
             current_img = _extract_card_image(detail_for_current)
 
@@ -2359,7 +2395,12 @@ class Handler(BaseHTTPRequestHandler):
                         "source": "current",
                     })
 
-            self._json({"name": lookup_name, "options": options, "count": len(options)})
+            _illust_response = {"name": lookup_name, "options": options, "count": len(options)}
+            if options:
+                if len(_illustrations_cache) >= ILLUSTRATIONS_CACHE_MAX:
+                    _illustrations_cache.pop(next(iter(_illustrations_cache)))
+                _illustrations_cache[lookup_name] = (_illust_response, time.time())
+            self._json(_illust_response)
 
         # /img?url=ENCODED_URL  (proxy for CORS safety)
         elif parsed.path == "/img":

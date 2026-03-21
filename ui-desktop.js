@@ -191,10 +191,12 @@ function askDesktopInput(placeholder = 'デッキ名を入力') {
   });
 }
 
-function onDesktopSearchInput(query) {
+function onDesktopSearchInput() {
   if (_desktopSearchDebounceTimer) clearTimeout(_desktopSearchDebounceTimer);
   _desktopSearchDebounceTimer = setTimeout(() => {
-    desktopSearchCards(query);
+    const el = document.getElementById('desktop-search-input');
+    if (el === null) return;
+    desktopSearchCards(el.value);
   }, 280);
 }
 
@@ -1368,7 +1370,7 @@ function renderDesktopDeckList() {
         <h3 class="dl-heading">カード検索</h3>
         <input type="text" id="desktop-search-input" placeholder="カード名..." value="${escapeHtml(_desktopSearchState.query || '')}"
           class="dl-input"
-          onkeyup="onDesktopSearchInput(this.value)">
+          oninput="onDesktopSearchInput()">
         <div id="desktop-search-results" class="dl-stack dl-stack-tight"></div>
       </div>
 
@@ -4428,6 +4430,7 @@ function desktopOnlineStartWaitingForJoin() {
       if (window._ol.reconnectAttempt < 3) {
         const delay = Math.pow(2, window._ol.reconnectAttempt) * 1000;
         desktopOnlineUpdateStatus(`接続を再試行中… (${window._ol.reconnectAttempt}/3)`);
+        if (_olReconnectTimerDesktop) clearTimeout(_olReconnectTimerDesktop);
         _olReconnectTimerDesktop = setTimeout(connect, delay);
       } else {
         desktopOnlineUpdateStatus('接続が不安定なため待機を終了しました。再度お試しください。');
@@ -4926,6 +4929,7 @@ function olStartEventListenerDesktop() {
     window._ol.reconnectAttempt = (window._ol.reconnectAttempt || 0) + 1;
     if (window._ol.reconnectAttempt < 3) {
       const delay = Math.pow(2, window._ol.reconnectAttempt) * 1000;
+      if (_olReconnectTimerDesktop) clearTimeout(_olReconnectTimerDesktop);
       _olReconnectTimerDesktop = setTimeout(() => {
         if (window._ol && window._ol.room === room) {
           olStartEventListenerDesktop();

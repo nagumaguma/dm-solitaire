@@ -17,6 +17,7 @@ let _mobileDeckSaving = false;
 const _mobileSearchHydrateCooldownUntil = new Map();
 const MOBILE_SEARCH_HYDRATE_NO_IMAGE_COOLDOWN_MS = 45 * 1000;
 const MOBILE_SEARCH_HYDRATE_ERROR_COOLDOWN_MS = 8 * 1000;
+let _mobileSearchHydrateToken = null;
 let _mobileSearchState = { query: '', page: 0, items: [], hasMore: false, loading: false };
 let _mobileZoneMenuState = null;
 let _mobileZoneMenuLongPressTimer = null;
@@ -609,10 +610,12 @@ function renderMobileDeckCivDots(cards) {
   return civs.map(civ => `<span class="ml-civ-dot ${escapeHtmlMobile(civ)}"></span>`).join('');
 }
 
-function onMobileSearchInput(query) {
+function onMobileSearchInput() {
   if (_mobileSearchDebounceTimer) clearTimeout(_mobileSearchDebounceTimer);
   _mobileSearchDebounceTimer = setTimeout(() => {
-    mobileSearchCards(query);
+    const el = document.getElementById('mobile-search-input');
+    if (el === null) return;
+    mobileSearchCards(el.value);
   }, 280);
 }
 
@@ -1839,7 +1842,6 @@ function initMobileUI() {
   if (window.GameController) {
     _mobileSearchController = window.GameController.createSearchController({
       searchFn: (keyword, page) => NetworkService.searchCards(keyword, page),
-      transformPage: (items) => hydrateMobileSearchCards(items),
       pageSize: 20
     });
   }
@@ -1979,7 +1981,7 @@ function renderMobileDeckList() {
             placeholder="カード名..."
             value="${escapeHtmlMobile(_mobileSearchState.query || '')}"
             class="ml-input"
-            onkeyup="onMobileSearchInput(this.value)">
+            oninput="onMobileSearchInput()">
           <div id="mobile-search-results" class="ml-stack ml-stack-tight"></div>
         </div>
       </div>
@@ -2061,11 +2063,11 @@ async function mobileSearchCards(q) {
     try {
       const results = await NetworkService.searchCards(keyword, 1);
       const pageItems = Array.isArray(results) ? results.slice(0, 20) : [];
-      const hydratedItems = await hydrateMobileSearchCards(pageItems);
+      const normalizedItems = pageItems.map(c => NetworkService.normalizeCardData(c));
       // 非同期処理中にキーワードが変わっていたら破棄
       if (_mobileSearchState.query !== keyword) return;
       _mobileSearchState.page = 1;
-      _mobileSearchState.items = hydratedItems;
+      _mobileSearchState.items = normalizedItems;
       _mobileSearchState.hasMore = pageItems.length >= 20;
     } finally {
       if (_mobileSearchState.query === keyword) {
@@ -2074,13 +2076,13 @@ async function mobileSearchCards(q) {
     }
 
     renderMobileSearchResults();
+    _kickMobileSearchHydrate(keyword, _mobileSearchState.items);
     return;
   }
 
   if (!_mobileSearchController) {
     _mobileSearchController = window.GameController.createSearchController({
       searchFn: (kw, page) => NetworkService.searchCards(kw, page),
-      transformPage: (items) => hydrateMobileSearchCards(items),
       pageSize: 20
     });
   }
@@ -2090,6 +2092,17 @@ async function mobileSearchCards(q) {
   const container = document.getElementById('mobile-search-results');
   if (!container) return;
 
+  const keyword = String(q || '').trim();
+  if (!keyword) {
+    _mobileSearchState = { query: '', page: 0, items: [], hasMore: false, loading: false };
+    container.innerHTML = '';
+    return;
+  }
+
+  // ローディング表示（即時フィードバック）
+  _mobileSearchState = { ..._mobileSearchState, query: keyword, loading: true };
+  renderMobileSearchResults();
+
   _mobileSearchState = await _mobileSearchController.search(q);
 
   if (!_mobileSearchState.query) {
@@ -2098,24 +2111,29 @@ async function mobileSearchCards(q) {
   }
 
   renderMobileSearchResults();
+  _kickMobileSearchHydrate(keyword, _mobileSearchState.items);
 }
 
 async function mobileSearchMore() {
   if (!window.GameController) {
     if (!_mobileSearchState.query || _mobileSearchState.loading || !_mobileSearchState.hasMore) return;
+    const queryAtStart = _mobileSearchState.query;
     _mobileSearchState.loading = true;
     const nextPage = _mobileSearchState.page + 1;
     try {
-      const results = await NetworkService.searchCards(_mobileSearchState.query, nextPage);
+      const results = await NetworkService.searchCards(queryAtStart, nextPage);
       const pageItems = Array.isArray(results) ? results.slice(0, 20) : [];
-      const hydratedItems = await hydrateMobileSearchCards(pageItems);
+      const normalizedItems = pageItems.map(c => NetworkService.normalizeCardData(c));
+      // 非同期処理中にキーワードが変わっていたら破棄
+      if (_mobileSearchState.query !== queryAtStart) return;
       _mobileSearchState.page = nextPage;
-      _mobileSearchState.items = [..._mobileSearchState.items, ...hydratedItems];
+      _mobileSearchState.items = [..._mobileSearchState.items, ...normalizedItems];
       _mobileSearchState.hasMore = pageItems.length >= 20;
     } finally {
-      _mobileSearchState.loading = false;
+      if (_mobileSearchState.query === queryAtStart) _mobileSearchState.loading = false;
     }
     renderMobileSearchResults();
+    _kickMobileSearchHydrate(queryAtStart, _mobileSearchState.items);
     return;
   }
 
@@ -2124,6 +2142,7 @@ async function mobileSearchMore() {
   _mobileSearchState = await _mobileSearchController.searchMore();
 
   renderMobileSearchResults();
+  _kickMobileSearchHydrate(_mobileSearchState.query, _mobileSearchState.items);
 }
 
 function getMobileSearchHydrateKey(card) {
@@ -2188,9 +2207,83 @@ async function hydrateMobileSearchCards(items) {
   return hydrated;
 }
 
+/**
+ * 検索結果のサムネイルをバックグラウンドで取得し、DOMを逐次更新する（2フェーズ描画）。
+ * @param {string} keyword 起動時のキーワード（変わったらキャンセル）
+ * @param {Array} items hydrate対象カード一覧
+ */
+async function _kickMobileSearchHydrate(keyword, items) {
+  const token = {};
+  _mobileSearchHydrateToken = token;
+
+  const sourceItems = Array.isArray(items) ? items : [];
+  const needHydration = sourceItems.filter(card => {
+    if (getMobileCardImageUrl(card)) return false;
+    const key = getMobileSearchHydrateKey(card);
+    return !shouldSkipMobileSearchHydrate(key);
+  });
+
+  const BATCH = 5;
+  for (let i = 0; i < needHydration.length; i += BATCH) {
+    if (_mobileSearchHydrateToken !== token) return;
+    if (_mobileSearchState.query !== keyword) return;
+    const batch = needHydration.slice(i, i + BATCH);
+    await Promise.all(batch.map(async (card) => {
+      const key = getMobileSearchHydrateKey(card);
+      try {
+        const enriched = await NetworkService.enrichCardImage(card, { retries: 1, retryDelayMs: 300 });
+        const normalized = NetworkService.normalizeCardData(enriched);
+        const url = getMobileCardImageUrl(normalized);
+        if (url) {
+          if (key) _mobileSearchHydrateCooldownUntil.delete(key);
+          try { _patchMobileSearchCardImage(key, url); } catch { /* DOM再描画済みは無視 */ }
+        } else {
+          if (key) markMobileSearchHydrateCooldown(key, MOBILE_SEARCH_HYDRATE_NO_IMAGE_COOLDOWN_MS);
+        }
+      } catch {
+        if (key) markMobileSearchHydrateCooldown(key, MOBILE_SEARCH_HYDRATE_ERROR_COOLDOWN_MS);
+      }
+    }));
+  }
+}
+
+function _patchMobileSearchCardImage(hydrateKey, imageUrl) {
+  if (!hydrateKey || !imageUrl) return;
+  const container = document.getElementById('mobile-search-results');
+  if (!container) return;
+  const item = container.querySelector(`[data-hydrate-id="${CSS.escape(hydrateKey)}"]`);
+  if (!item) return;
+  const existing = item.querySelector('.ml-search-thumb');
+  if (!existing) return;
+  try {
+    if (existing.tagName === 'DIV') {
+      // placeholder → img に差し替え
+      const parent = existing.parentNode;
+      if (!parent) return;
+      const img = document.createElement('img');
+      img.src = imageUrl;
+      img.alt = existing.textContent || '';
+      img.className = 'ml-search-thumb';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.onerror = function() { handleMobileCardImageError(this); };
+      parent.replaceChild(img, existing);
+    } else if (existing.tagName === 'IMG') {
+      existing.src = imageUrl;
+    }
+  } catch {
+    // DOM再描画済みの場合はスキップ
+  }
+}
+
 function renderMobileSearchResults() {
   const container = document.getElementById('mobile-search-results');
   if (!container) return;
+
+  if (_mobileSearchState.loading) {
+    container.innerHTML = '<div class="ml-search-empty">検索中...</div>';
+    return;
+  }
 
   const cards = _mobileSearchState.items || [];
   if (!cards.length) {
@@ -2203,8 +2296,9 @@ function renderMobileSearchResults() {
     const cost = getMobileCardCostLabel(card);
     const cardName = getMobileCardDisplayName(card);
     const thumb = renderMobileCardThumb(card);
+    const hydrateKey = getMobileSearchHydrateKey(card);
     return `
-      <div class="ml-search-item">
+      <div class="ml-search-item"${hydrateKey ? ` data-hydrate-id="${escapeHtmlMobile(hydrateKey)}"` : ''}>
         <div class="ml-search-card-head">
           ${thumb}
           <div class="ml-search-main">
@@ -4528,6 +4622,7 @@ function olStartEventListenerMobile() {
 
     window._ol.reconnectAttempt = (window._ol.reconnectAttempt || 0) + 1;
     if (window._ol.reconnectAttempt < 3) {
+      if (_olReconnectTimerMobile) clearTimeout(_olReconnectTimerMobile);
       _olReconnectTimerMobile = setTimeout(olStartEventListenerMobile, Math.pow(2, window._ol.reconnectAttempt) * 1000);
     } else {
       showMobileToast('接続が切れました。ロビーに戻ります', 'warn');
