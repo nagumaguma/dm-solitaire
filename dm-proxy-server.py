@@ -1763,18 +1763,79 @@ def get_card_detail_dmwiki(name: str) -> dict | None:
     _card_header_pat = re.compile(
         r'^.+?[\s\t\u3000]+[A-Z]{1,5}[+\uff0b]?[\s\t\u3000]+.+?[\s\t\u3000]+[（(]\d+[）)]\s*$'
     )
-    effect_rows = []
+
+    def _parse_header_row(r: str) -> tuple[str, int]:
+        """呪文ヘッダー行から (呪文名, コスト) を抽出する。失敗時は ('', 0)。"""
+        m = re.match(
+            r'^(.+?)[\s\t　]+[A-Z]{1,5}[+＋]?[\s\t　]+.+?[\s\t　]+[（(](\d+)[）)]',
+            r
+        )
+        if m:
+            return m.group(1).strip(), int(m.group(2))
+        m2 = re.match(r'^(.+?)[\s\t　]+.+?文明.*[\s\t　]+[（(](\d+)[）)]', r)
+        if m2:
+            return m2.group(1).strip(), int(m2.group(2))
+        return "", 0
+
+    effect_rows: list[str] = []
+    spell_name  = ""
+    spell_cost  = 0
+    spell_type  = ""
+    spell_text_rows: list[str] = []
+    in_spell = False
+
     for r in rows[2:]:
         if r in ("コスト", "主要な対応クリーチャー", "代表的なロック対象", "コメント"):
             break
         if re.match(r'^DM\d', r):
             continue
         if re.match(r'^《', r):
-            break  # wiki strategy section starts here (card name ref at row start)
+            break  # wiki strategy section starts here
         if _card_header_pat.match(r.splitlines()[0].strip()):
-            break  # related card header row — stop here
-        effect_rows.append(r)
-    effect = "\n".join(effect_rows).strip()
+            if not in_spell and not spell_name:
+                # 最初の追加ヘッダー = ツインパクトの呪文半部
+                in_spell = True
+                spell_name, spell_cost = _parse_header_row(r)
+            else:
+                break  # 2番目以降のヘッダーは関連カード
+            continue
+        if in_spell:
+            if not spell_type and not spell_text_rows:
+                for ja, en in _TYPE_MAP_JA.items():
+                    if ja in r:
+                        spell_type = en
+                        break
+                if spell_type:
+                    continue  # 種類行は spell_text に含めない
+            spell_text_rows.append(r)
+        else:
+            effect_rows.append(r)
+
+    # 同一テーブルで呪文半部が見つからない場合、2番目の style_table を試みる（dmwiki は2テーブル構成もある）
+    if not spell_name:
+        all_tables = re.findall(
+            r'<table[^>]*class="style_table"[^>]*>(.*?)</table>', html, re.DOTALL | re.IGNORECASE
+        )
+        if len(all_tables) >= 2:
+            spell_rows = _extract_style_rows(all_tables[1])
+            if spell_rows:
+                spell_name, spell_cost = _parse_header_row(spell_rows[0])
+                if not spell_type and len(spell_rows) > 1:
+                    for ja, en in _TYPE_MAP_JA.items():
+                        if ja in spell_rows[1]:
+                            spell_type = en
+                            break
+                for r in spell_rows[2:]:
+                    if r in ("コスト", "主要な対応クリーチャー", "代表的なロック対象", "コメント"):
+                        break
+                    if re.match(r'^DM\d', r):
+                        continue
+                    if re.match(r'^《', r):
+                        break
+                    spell_text_rows.append(r)
+
+    effect     = "\n".join(effect_rows).strip()
+    spell_text = "\n".join(spell_text_rows).strip()
 
     # Get card image: prefer images from before the card table (card's own scan) to avoid
     # picking up related-card images from the strategy section below the table.
@@ -1818,18 +1879,25 @@ def get_card_detail_dmwiki(name: str) -> dict | None:
                     if img_url:
                         break
 
-    return {
+    result: dict = {
         "id":     f"dmwiki_{name}",
         "name":   card_name,
         "nameEn": name,
         "civ":    civ,
         "cost":   max(1, cost),
-        "type":   card_type,
+        "type":   card_type if not spell_name else "creature",
         "power":  power,
         "img":    img_url,
         "race":   race,
         "text":   effect,
     }
+    if spell_name:
+        result["twinpact"]  = True
+        result["spellName"] = spell_name
+        result["spellCost"] = max(0, spell_cost)
+        result["spellType"] = spell_type or "spell"
+        result["spellText"] = spell_text
+    return result
 
 
 # ─── Image proxy ──────────────────────────────────────────────────────────────

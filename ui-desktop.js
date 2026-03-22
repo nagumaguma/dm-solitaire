@@ -374,7 +374,8 @@ function renderDesktopUnderPeekLayers(card) {
   return layers + overflow;
 }
 
-function getDesktopCardTypeLabel(type) {
+function getDesktopCardTypeLabel(type, isTwinpact = false) {
+  if (isTwinpact) return 'ツインパクト';
   const normalized = String(type || '').toLowerCase();
   if (!normalized) return '-';
   if (normalized.includes('evolution') || normalized.includes('進化')) return '進化クリーチャー';
@@ -567,13 +568,28 @@ function renderDesktopCardDetailContent(card, opts = {}) {
   const civClass = getDesktopCardCivClass(current);
   const civLabel = getCivLabel(civClass) || '-';
   const cost = Number.isFinite(Number(current?.cost)) ? Number(current.cost) : '-';
-  const typeLabel = getDesktopCardTypeLabel(current?.type);
+  const isTwinpact = !!current?.twinpact;
+  const typeLabel = getDesktopCardTypeLabel(current?.type, isTwinpact);
   const power = current?.power ? String(current.power) : '-';
   const sourceId = String(current?.sourceId || current?.id || current?.cardId || '').trim() || '-';
   const bodyText = String(current?.text || '').trim();
   const rowRace = current?.race
     ? `<tr><th>種族</th><td>${escapeHtml(String(current.race))}</td></tr>`
     : '';
+
+  // ツインパクト呪文半部
+  const spellSection = isTwinpact && current.spellName ? (() => {
+    const spellCost = Number.isFinite(Number(current.spellCost)) ? Number(current.spellCost) : '-';
+    const spellText = String(current.spellText || '').trim();
+    return `
+      <div class="dm-card-detail-twinpact-divider">――― 呪文 ―――</div>
+      <table class="dm-card-detail-table">
+        <tr><th>呪文名</th><td>${escapeHtml(String(current.spellName))}</td></tr>
+        <tr><th>コスト</th><td>${escapeHtml(String(spellCost))}</td></tr>
+      </table>
+      ${spellText ? `<div class="dm-card-detail-text">${escapeHtml(spellText).replace(/\n/g, '<br>')}</div>` : ''}
+    `;
+  })() : '';
 
   title.textContent = current?.name || 'カード詳細';
   content.innerHTML = `
@@ -593,6 +609,7 @@ function renderDesktopCardDetailContent(card, opts = {}) {
       </table>
     </div>
     ${bodyText ? `<div class="dm-card-detail-text">${escapeHtml(bodyText).replace(/\n/g, '<br>')}</div>` : '<div class="dm-card-detail-text empty">テキスト情報なし</div>'}
+    ${spellSection}
     <div class="dm-card-detail-sub-actions">
       <button type="button" class="dm-card-detail-illustration-btn" onclick="openDesktopIllustrationPicker()">イラスト変更</button>
     </div>
