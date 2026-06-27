@@ -805,9 +805,12 @@ function renderDesktopSearchResults() {
           const payload = encodeURIComponent(JSON.stringify(card));
           const thumb = renderDesktopCardThumb(card, 'dl-search-card-image');
           const name = getDesktopCardDisplayName(card);
+          const sourceId = String(card?.sourceId || card?.id || '').trim();
           const metaParts = [
-            `???${getDesktopCardCostLabel(card)}`,
+            `Cost ${getDesktopCardCostLabel(card)}`,
             String(card?.civilization || card?.civ || '').trim(),
+            String(card?.type || '').trim(),
+            sourceId ? `ID ${sourceId}` : '',
             String(card?.source || '').trim()
           ].filter(Boolean);
           const label = `${name} / ${metaParts.join(' / ')}`;
@@ -874,41 +877,11 @@ function markDesktopSearchHydrateCooldown(key, cooldownMs = DESKTOP_SEARCH_HYDRA
 
 async function hydrateDesktopSearchCards(items) {
   const sourceItems = Array.isArray(items) ? items : [];
-  if (!sourceItems.length) return [];
-
-  const hydrated = await Promise.all(sourceItems.map(async (card) => {
-    const normalizedCard = NetworkService.normalizeCardData(card);
-    if (getDesktopCardImageUrl(normalizedCard)) return normalizedCard;
-
-    const key = getDesktopSearchHydrateKey(normalizedCard);
-    if (key && shouldSkipDesktopSearchHydrate(key)) {
-      return normalizedCard;
-    }
-
-    try {
-      const enriched = await NetworkService.enrichCardImage(normalizedCard, {
-        retries: 1,
-        retryDelayMs: 300
-      });
-      const normalized = NetworkService.normalizeCardData(enriched);
-      if (getDesktopCardImageUrl(normalized)) {
-        if (key) _desktopSearchHydrateCooldownUntil.delete(key);
-        return normalized;
-      }
-
-      if (key) {
-        markDesktopSearchHydrateCooldown(key, DESKTOP_SEARCH_HYDRATE_NO_IMAGE_COOLDOWN_MS);
-      }
-      return normalized;
-    } catch {
-      if (key) {
-        markDesktopSearchHydrateCooldown(key, DESKTOP_SEARCH_HYDRATE_ERROR_COOLDOWN_MS);
-      }
-      return normalizedCard;
-    }
-  }));
-
-  return hydrated;
+  return sourceItems.map(card => (
+    typeof NetworkService.normalizeSearchResultCard === 'function'
+      ? NetworkService.normalizeSearchResultCard(card)
+      : NetworkService.normalizeCardData({ ...card, imageUrl: '', thumb: '', img: '', selectedImageUrl: '' })
+  ));
 }
 
 function resetDesktopSearchServerState(query = '') {
@@ -1273,10 +1246,14 @@ function onDesktopChatKeyDown(event) {
   sendDesktopChat();
 }
 
-/** localStorage dm_decks を安全に取得（破損時は {}） */
+/** Normal deck management ignores localStorage dm_decks. */
 function getSavedDecks() {
-  if (window.GameController) {
-    return window.GameController.getSavedDecks();
+  return {};
+}
+
+function getLocalSavedDecksForMigration() {
+  if (window.GameController?.getLocalSavedDecks) {
+    return window.GameController.getLocalSavedDecks();
   }
   try {
     const raw = localStorage.getItem('dm_decks');
@@ -1285,6 +1262,10 @@ function getSavedDecks() {
     console.warn('dm_decks parse error', e);
     return {};
   }
+}
+
+function hasLocalDecksForMigration() {
+  return Object.values(getLocalSavedDecksForMigration()).some(Array.isArray);
 }
 
 /**
@@ -1310,9 +1291,8 @@ function renderDesktopDeckList() {
   if (window._vs) { window._vs = null; window._olOpponent = null; }
 
   const container = document.getElementById('app-desktop');
-  const savedDecks = getSavedDecks();
-  const localDeckNames = Object.keys(savedDecks);
   const account = AuthService.getCurrentAccount();
+  const hasLocalMigrationDecks = hasLocalDecksForMigration();
   const editingState = window.GameController
     ? window.GameController.getDeckEditingState()
     : { deckName: window._deckEditing, cards: window._deckCards };
@@ -1320,10 +1300,13 @@ function renderDesktopDeckList() {
   let cards = Array.isArray(editingState.cards) ? editingState.cards : [];
 
   const cloudDeckNames = Array.isArray(window._serverDeckNames) ? window._serverDeckNames : [];
-  const mergedDeckNames = Array.from(new Set([...localDeckNames, ...cloudDeckNames]))
-    .sort((a, b) => String(a).localeCompare(String(b), 'ja'));
+  const visibleDeckNames = cloudDeckNames.slice().sort((a, b) => String(a).localeCompare(String(b), 'ja'));
+  const currentEditingDeckName = String(deckName || '').trim();
+  if (currentEditingDeckName && !visibleDeckNames.includes(currentEditingDeckName)) {
+    visibleDeckNames.unshift(currentEditingDeckName);
+  }
 
-  if (deckName && !mergedDeckNames.includes(deckName)) {
+  if (deckName && !visibleDeckNames.includes(deckName)) {
     deckName = null;
     cards = [];
     if (window.GameController) {
@@ -1342,7 +1325,7 @@ function renderDesktopDeckList() {
   const canCloudSave = !!(account && !account.isGuest && account.pin);
   const hasDeckSelected = !!deckName;
   const canSaveSelectedDeck = hasDeckSelected && canCloudSave;
-  const canBulkCloudRestore = canCloudSave && localDeckNames.length > 0;
+  const canBulkCloudRestore = canCloudSave && hasLocalMigrationDecks;
 
   const cardCount = getDeckCardTotal(orderedCards);
 
@@ -1391,8 +1374,8 @@ function renderDesktopDeckList() {
     }).join('')
     : '<div class="dl-empty-editor">選択中デッキのカード画像がここに並びます。</div>';
 
-  const deckOptionsHtml = mergedDeckNames.length
-    ? mergedDeckNames.map((name) => `
+  const deckOptionsHtml = visibleDeckNames.length
+    ? visibleDeckNames.map((name) => `
       <option value="${escapeHtml(name)}" ${deckName === name ? 'selected' : ''}>${escapeHtml(name)}</option>
     `).join('')
     : '<option value="">デッキがありません</option>';
@@ -1592,15 +1575,10 @@ async function startDesktopGame(deckName) {
     ? await window.GameController.resolveDeckData(deckName, account)
     : null;
 
-  if (!deckData) {
-    const savedDecks = getSavedDecks();
-    if (savedDecks[deckName]) {
-      deckData = savedDecks[deckName];
-    } else if (account && !account.isGuest && account.pin) {
-      deckData = await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
-    }
+  if (!deckData && account && !account.isGuest && account.pin) {
+    deckData = await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
   }
-  
+
   if (!deckData || !deckData.length) {
     showDesktopToast('デッキが取得できませんでした', 'warn');
     return;
@@ -1658,6 +1636,7 @@ function renderDesktopGame() {
   const myName = olEff ? (olEff.p === 'p1' ? (olEff.p1Name || 'P1') : (olEff.p2Name || 'P2')) : '自分';
   const oppName = olEff ? (olEff.p === 'p1' ? (olEff.p2Name || 'P2') : (olEff.p1Name || 'P1')) : '相手';
 
+  const onlineStatusText = '';
   const getZoneCount = (zone) => Array.isArray(zone) ? zone.length : Math.max(0, Number(zone) || 0);
 
   const renderOpponentPublicZone = (zone, zoneClass) => {
@@ -1768,19 +1747,19 @@ function renderDesktopGame() {
           ${onlineStatusText ? `<span class="dg-v2-match">${escapeHtml(onlineStatusText)}</span>` : ''}
         </div>
         <div class="dg-v2-head-actions">
-          <button onclick="drawDesktopCard()" class="dg-btn draw ${_desktopNeedDrawGuide ? 'guide' : ''}">ドロー</button>
-          <button onclick="turnDesktopEnd()" class="dg-btn end">ターン終了</button>
-          <button onclick="moveDesktopDeckTopTo('manaZone')" class="dg-btn deck-mana">→マナ</button>
-          <button onclick="moveDesktopDeckTopTo('graveyard')" class="dg-btn deck-grave">→墓地</button>
-          <button onclick="moveDesktopDeckTopTo('shields')" class="dg-btn deck-shield">→シールド</button>
+          <button onclick="drawDesktopCard()" class="dg-btn draw ${_desktopNeedDrawGuide ? 'guide' : ''}">\u30c9\u30ed\u30fc</button>
+          <button onclick="turnDesktopEnd()" class="dg-btn end">\u30bf\u30fc\u30f3\u7d42\u4e86</button>
+          <button onclick="moveDesktopDeckTopTo('manaZone')" class="dg-btn deck-mana">\u5c71\u4e0a\u2192\u30de\u30ca</button>
+          <button onclick="moveDesktopDeckTopTo('graveyard')" class="dg-btn deck-grave">\u5c71\u4e0a\u2192\u5893\u5730</button>
+          <button onclick="moveDesktopDeckTopTo('shields')" class="dg-btn deck-shield">\u5c71\u4e0a\u2192\u30b7\u30fc\u30eb\u30c9</button>
           <div class="dg-n-control">
             <span class="dg-n-label">n</span>
             <input type="number" id="desktop-deck-n-input" class="dg-n-input" min="1" max="40" value="${_desktopDeckNValue}" oninput="setDesktopDeckNValue(this.value)">
           </div>
-          <button onclick="drawDesktopDeckCardsToPublic()" class="dg-btn deck-reveal">n枚表向き</button>
-          <button onclick="drawDesktopDeckCardsToPrivate()" class="dg-btn deck-peek">n枚見る</button>
-          <button onclick="openDesktopDeckAllModal()" class="dg-btn deck-all">全部見る</button>
-          <button onclick="untapAllDesktopMana()" class="dg-btn mana-untap">全アンタップ</button>
+          <button onclick="drawDesktopDeckCardsToPublic()" class="dg-btn deck-reveal">N\u679a\u516c\u958b</button>
+          <button onclick="drawDesktopDeckCardsToPrivate()" class="dg-btn deck-peek">N\u679a\u898b\u308b</button>
+          <button onclick="openDesktopDeckAllModal()" class="dg-btn deck-all">\u5c71\u672d\u5168\u90e8\u898b\u308b</button>
+          <button onclick="untapAllDesktopMana()" class="dg-btn mana-untap">\u30de\u30ca\u5168\u30a2\u30f3\u30bf\u30c3\u30d7</button>
           ${!window._ol ? `<button onclick="undoDesktopGame()" class="dg-btn undo">やり直し</button>` : ''}
           <button onclick="renderDesktopDeckList()" class="dg-btn back">戻る</button>
         </div>
@@ -1969,7 +1948,7 @@ function renderDesktopGame() {
 
 function selectDesktopHandCard(idx, event) {
   if (window._ol && !canActDesktopOnline()) {
-    showDesktopToast('相手のターンです', 'warn');
+    showDesktopToast('\u76f8\u624b\u306e\u30bf\u30fc\u30f3\u3067\u3059', 'warn');
     return;
   }
 
@@ -1989,9 +1968,14 @@ function selectDesktopHandCard(idx, event) {
   picker.id = 'desktop-hand-picker';
   picker.className = 'dg-hand-picker';
   picker.innerHTML = `
-    <button type="button" onclick="playDesktopCard(${index}, 'battle')">バトルゾーンへ</button>
-    <button type="button" onclick="playDesktopCard(${index}, 'mana')">マナゾーンへ</button>
-    <button type="button" class="cancel" onclick="closeDesktopHandPicker()">キャンセル</button>
+    <button type="button" onclick="playDesktopCard(${index}, 'battle')">\u624b\u672d \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3</button>
+    <button type="button" onclick="playDesktopCard(${index}, 'mana')">\u624b\u672d \u2192 \u30de\u30ca\u30be\u30fc\u30f3</button>
+    <button type="button" onclick="closeDesktopHandPicker(); moveDesktopCardBetweenZones('hand', ${index}, 'graveyard', 'top')">\u624b\u672d \u2192 \u5893\u5730</button>
+    <button type="button" onclick="closeDesktopHandPicker(); moveDesktopCardBetweenZones('hand', ${index}, 'shields', 'top')">\u624b\u672d \u2192 \u30b7\u30fc\u30eb\u30c9\u8ffd\u52a0</button>
+    <button type="button" onclick="closeDesktopHandPicker(); moveDesktopCardBetweenZones('hand', ${index}, 'deck', 'top')">\u624b\u672d \u2192 \u5c71\u672d\u4e0a</button>
+    <button type="button" onclick="closeDesktopHandPicker(); moveDesktopCardBetweenZones('hand', ${index}, 'deck', 'bottom')">\u624b\u672d \u2192 \u5c71\u672d\u4e0b</button>
+    <button type="button" onclick="closeDesktopHandPicker(); openDesktopCardDetailFromZone('hand', ${index})">\u30ab\u30fc\u30c9\u8a73\u7d30</button>
+    <button type="button" class="cancel" onclick="closeDesktopHandPicker()">\u9589\u3058\u308b</button>
   `;
 
   document.body.appendChild(picker);
@@ -2399,13 +2383,17 @@ function canActDesktopOnline() {
 
 function getDesktopZoneLabel(zoneKey) {
   const labels = {
-    hand: '手札',
-    battleZone: 'バトル',
-    manaZone: 'マナ',
-    shields: 'シールド',
-    revealedZone: '公開中',
-    deck: '山札',
-    graveyard: '墓地'
+    hand: '\u624b\u672d',
+    battleZone: '\u30d0\u30c8\u30eb\u30be\u30fc\u30f3',
+    manaZone: '\u30de\u30ca\u30be\u30fc\u30f3',
+    shields: '\u30b7\u30fc\u30eb\u30c9',
+    revealedZone: '\u516c\u958b\u30be\u30fc\u30f3',
+    deckRevealZone: '\u5c71\u672d\u516c\u958b\u30be\u30fc\u30f3',
+    deck: '\u5c71\u672d',
+    graveyard: '\u5893\u5730',
+    hyperZone: '\u8d85\u6b21\u5143\u30be\u30fc\u30f3',
+    grZone: '\u8d85GR\u30be\u30fc\u30f3',
+    specialZone: '\u7279\u6b8a\u30be\u30fc\u30f3'
   };
   return labels[zoneKey] || zoneKey;
 }
@@ -2419,123 +2407,126 @@ function isDesktopHiddenCardInfo(sourceZone, sourceCard) {
 function getDesktopCardZoneActions(sourceZone, sourceCard) {
   const actions = [];
   const move = (label, toZone, position = 'top', red = false) => ({ kind: 'move', label, toZone, position, red });
+  const sep = () => {
+    if (actions.length && actions[actions.length - 1].kind !== 'sep') actions.push({ kind: 'sep' });
+  };
+  const addExternalTargets = () => {
+    actions.push(
+      move('\u8d85\u6b21\u5143\u30be\u30fc\u30f3\u3078', 'hyperZone'),
+      move('\u8d85GR\u30be\u30fc\u30f3\u3078', 'grZone'),
+      move('\u7279\u6b8a\u30be\u30fc\u30f3\u3078', 'specialZone')
+    );
+  };
+  const addUnderControls = () => {
+    actions.push({ kind: 'under', label: '\u3053\u306e\u30ab\u30fc\u30c9\u3092\u4e0b\u306b\u7f6e\u304f\uff08\u9032\u5316\u5143/\u5c01\u5370/\u4e0b\u6577\u304d\uff09' });
+    if (Array.isArray(sourceCard?.underCards) && sourceCard.underCards.length > 0) {
+      actions.push({ kind: 'viewUnder', label: `\u4e0b\u306e\u30ab\u30fc\u30c9\u3092\u898b\u308b/\u5916\u3059 (${sourceCard.underCards.length}\u679a)` });
+    }
+  };
 
   if (sourceZone === 'hand') {
     actions.push(
-      move('マナゾーンへ', 'manaZone'),
-      move('バトルゾーンへ', 'battleZone'),
-      move('シールドへ', 'shields'),
-      move('山札トップへ', 'deck', 'top'),
-      move('山札ボトムへ', 'deck', 'bottom'),
-      { kind: 'sep' },
-      move('墓地へ（呪文使用）', 'graveyard', 'top', true),
-      { kind: 'sep' },
-      { kind: 'under', label: '盤面カードの下へ（対象選択）' }
+      move('\u624b\u672d \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3', 'battleZone'),
+      move('\u624b\u672d \u2192 \u30de\u30ca\u30be\u30fc\u30f3', 'manaZone'),
+      move('\u624b\u672d \u2192 \u5893\u5730', 'graveyard', 'top', true),
+      move('\u624b\u672d \u2192 \u30b7\u30fc\u30eb\u30c9\u8ffd\u52a0', 'shields'),
+      move('\u624b\u672d \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
+      move('\u624b\u672d \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
+    sep();
+    addUnderControls();
   } else if (sourceZone === 'battleZone') {
     actions.push(
-      { kind: 'tap', label: sourceCard?.tapped ? 'アンタップ' : 'タップ（攻撃）', tapped: !sourceCard?.tapped },
-      move('手札へ', 'hand'),
-      move('マナゾーンへ', 'manaZone'),
-      move('シールドへ', 'shields'),
-      move('山札トップへ', 'deck', 'top'),
-      move('山札ボトムへ', 'deck', 'bottom'),
-      { kind: 'under', label: '盤面カードの下へ（対象選択）' },
-      { kind: 'sep' },
-      move('墓地へ', 'graveyard', 'top', true)
+      { kind: 'tap', label: sourceCard?.tapped ? '\u30a2\u30f3\u30bf\u30c3\u30d7\u3059\u308b' : '\u30bf\u30c3\u30d7\u3059\u308b', tapped: !sourceCard?.tapped },
+      move('\u30d0\u30c8\u30eb\u30be\u30fc\u30f3 \u2192 \u5893\u5730', 'graveyard', 'top', true),
+      move('\u30d0\u30c8\u30eb\u30be\u30fc\u30f3 \u2192 \u30de\u30ca\u30be\u30fc\u30f3', 'manaZone'),
+      move('\u30d0\u30c8\u30eb\u30be\u30fc\u30f3 \u2192 \u624b\u672d', 'hand'),
+      move('\u30d0\u30c8\u30eb\u30be\u30fc\u30f3 \u2192 \u30b7\u30fc\u30eb\u30c9', 'shields'),
+      move('\u30d0\u30c8\u30eb\u30be\u30fc\u30f3 \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
+      move('\u30d0\u30c8\u30eb\u30be\u30fc\u30f3 \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
-    if (Array.isArray(sourceCard?.underCards) && sourceCard.underCards.length > 0) {
-      actions.push({ kind: 'sep' });
-      actions.push({ kind: 'viewUnder', label: `下のカードを見る (${sourceCard.underCards.length}枚)` });
-    }
+    sep();
+    addUnderControls();
   } else if (sourceZone === 'manaZone') {
     actions.push(
-      { kind: 'tap', label: sourceCard?.tapped ? 'アンタップ' : 'タップ（マナ使用）', tapped: !sourceCard?.tapped },
-      move('手札へ', 'hand'),
-      move('バトルゾーンへ', 'battleZone'),
-      move('シールドへ', 'shields'),
-      move('山札トップへ', 'deck', 'top'),
-      move('山札ボトムへ', 'deck', 'bottom'),
-      { kind: 'sep' },
-      move('墓地へ', 'graveyard', 'top', true)
+      { kind: 'tap', label: sourceCard?.tapped ? '\u30a2\u30f3\u30bf\u30c3\u30d7\u3059\u308b' : '\u30bf\u30c3\u30d7\u3059\u308b\uff08\u30de\u30ca\u4f7f\u7528\uff09', tapped: !sourceCard?.tapped },
+      move('\u30de\u30ca\u30be\u30fc\u30f3 \u2192 \u624b\u672d', 'hand'),
+      move('\u30de\u30ca\u30be\u30fc\u30f3 \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3', 'battleZone'),
+      move('\u30de\u30ca\u30be\u30fc\u30f3 \u2192 \u5893\u5730', 'graveyard', 'top', true),
+      move('\u30de\u30ca\u30be\u30fc\u30f3 \u2192 \u30b7\u30fc\u30eb\u30c9', 'shields'),
+      move('\u30de\u30ca\u30be\u30fc\u30f3 \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
+      move('\u30de\u30ca\u30be\u30fc\u30f3 \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
-    if (Array.isArray(sourceCard?.underCards) && sourceCard.underCards.length > 0) {
-      actions.push({ kind: 'sep' });
-      actions.push({ kind: 'viewUnder', label: `下のカードを見る (${sourceCard.underCards.length}枚)` });
-    }
+    sep();
+    addUnderControls();
   } else if (sourceZone === 'shields') {
     actions.push(
-      move('公開中へ（シールドブレイク）', 'revealedZone'),
-      move('マナゾーンへ', 'manaZone'),
-      move('バトルゾーンへ', 'battleZone'),
-      move('山札トップへ', 'deck', 'top'),
-      move('山札ボトムへ', 'deck', 'bottom'),
-      { kind: 'sep' },
-      move('墓地へ', 'graveyard', 'top', true),
-      { kind: 'sep' },
-      { kind: 'flip', label: sourceCard?.faceUp ? '裏向きにする' : '表向きにする', faceUp: !sourceCard?.faceUp },
-      { kind: 'sep' },
-      { kind: 'under', label: '盤面カードの下へ（対象選択）' }
+      { kind: 'flip', label: sourceCard?.faceUp ? '\u88cf\u5411\u304d\u306b\u623b\u3059' : '\u8868\u5411\u304d\u306b\u3059\u308b/\u78ba\u8a8d\u6e08\u307f\u306b\u3059\u308b', faceUp: !sourceCard?.faceUp },
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u624b\u672d', 'hand'),
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u516c\u958b\u30be\u30fc\u30f3\uff08\u30d6\u30ec\u30a4\u30af\uff09', 'revealedZone'),
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u5893\u5730', 'graveyard', 'top', true),
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u30de\u30ca\u30be\u30fc\u30f3', 'manaZone'),
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3', 'battleZone'),
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
-  } else if (sourceZone === 'revealedZone') {
+    sep();
+    addUnderControls();
+  } else if (sourceZone === 'revealedZone' || sourceZone === 'deckRevealZone') {
     actions.push(
-      move('手札に加える', 'hand'),
-      move('バトルゾーンへ（トリガー）', 'battleZone'),
-      move('マナゾーンへ（トリガー）', 'manaZone'),
-      { kind: 'sep' },
-      move('墓地へ（トリガー解決）', 'graveyard', 'top', true)
+      move('\u516c\u958b\u4e2d \u2192 \u624b\u672d', 'hand'),
+      move('\u516c\u958b\u4e2d \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3', 'battleZone'),
+      move('\u516c\u958b\u4e2d \u2192 \u30de\u30ca\u30be\u30fc\u30f3', 'manaZone'),
+      move('\u516c\u958b\u4e2d \u2192 \u30b7\u30fc\u30eb\u30c9', 'shields'),
+      move('\u516c\u958b\u4e2d \u2192 \u5893\u5730', 'graveyard', 'top', true),
+      move('\u516c\u958b\u4e2d \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
+      move('\u516c\u958b\u4e2d \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
+    sep();
+    addExternalTargets();
   } else if (sourceZone === 'graveyard') {
     actions.push(
-      move('手札へ', 'hand'),
-      move('バトルゾーンへ', 'battleZone'),
-      move('マナゾーンへ', 'manaZone'),
-      move('シールドへ', 'shields'),
-      move('山札トップへ', 'deck', 'top'),
-      move('山札ボトムへ', 'deck', 'bottom')
+      move('\u5893\u5730 \u2192 \u624b\u672d', 'hand'),
+      move('\u5893\u5730 \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3', 'battleZone'),
+      move('\u5893\u5730 \u2192 \u30de\u30ca\u30be\u30fc\u30f3', 'manaZone'),
+      move('\u5893\u5730 \u2192 \u30b7\u30fc\u30eb\u30c9', 'shields'),
+      move('\u5893\u5730 \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
+      move('\u5893\u5730 \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
+    sep();
+    addExternalTargets();
   } else if (sourceZone === 'deck') {
     actions.push(
-      move('手札へ', 'hand'),
-      move('バトルゾーンへ', 'battleZone'),
-      move('マナゾーンへ', 'manaZone'),
-      move('シールドへ', 'shields'),
-      move('墓地へ', 'graveyard', 'top', true),
-      move('山札ボトムへ', 'deck', 'bottom'),
-      { kind: 'sep' },
-      { kind: 'deckAll', label: '山札を全部見る' }
+      move('\u5c71\u672d\u4e0a \u2192 \u624b\u672d', 'hand'),
+      move('\u5c71\u672d\u4e0a \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3', 'battleZone'),
+      move('\u5c71\u672d\u4e0a \u2192 \u30de\u30ca\u30be\u30fc\u30f3', 'manaZone'),
+      move('\u5c71\u672d\u4e0a \u2192 \u30b7\u30fc\u30eb\u30c9', 'shields'),
+      move('\u5c71\u672d\u4e0a \u2192 \u5893\u5730', 'graveyard', 'top', true),
+      move('\u5c71\u672d\u4e0a \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom'),
+      { kind: 'deckAll', label: '\u5c71\u672d\u3092\u5168\u90e8\u898b\u308b/\u9806\u756a\u78ba\u8a8d' }
     );
-  }
-
-  const externalTargets = [
-    move('Move to Hyper Zone', 'hyperZone'),
-    move('Move to GR Zone', 'grZone'),
-    move('Move to Special Zone', 'specialZone')
-  ];
-  if (!['hyperZone', 'grZone', 'specialZone'].includes(sourceZone) && sourceZone !== 'deck') {
-    actions.push({ kind: 'sep' }, ...externalTargets);
-  }
-  if (['hyperZone', 'grZone', 'specialZone'].includes(sourceZone)) {
+  } else if (['hyperZone', 'grZone', 'specialZone'].includes(sourceZone)) {
     actions.push(
-      move('Move to Hand', 'hand'),
-      move('Move to Battle', 'battleZone'),
-      move('Move to Mana', 'manaZone'),
-      move('Move to Grave', 'graveyard', 'top', true),
-      move('Move to Deck top', 'deck', 'top'),
-      move('Move to Deck bottom', 'deck', 'bottom')
+      move(`${getDesktopZoneLabel(sourceZone)} \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3`, 'battleZone'),
+      move(`${getDesktopZoneLabel(sourceZone)} \u2192 \u624b\u672d`, 'hand'),
+      move(`${getDesktopZoneLabel(sourceZone)} \u2192 \u30de\u30ca\u30be\u30fc\u30f3`, 'manaZone'),
+      move(`${getDesktopZoneLabel(sourceZone)} \u2192 \u5893\u5730`, 'graveyard', 'top', true),
+      move(`${getDesktopZoneLabel(sourceZone)} \u2192 \u30b7\u30fc\u30eb\u30c9`, 'shields'),
+      move(`${getDesktopZoneLabel(sourceZone)} \u2192 \u5c71\u672d\u4e0a`, 'deck', 'top'),
+      move(`${getDesktopZoneLabel(sourceZone)} \u2192 \u5c71\u672d\u4e0b`, 'deck', 'bottom')
     );
   }
 
-  if (actions.length && actions[actions.length - 1].kind === 'sep') {
-    actions.pop();
+  if (!['hyperZone', 'grZone', 'specialZone', 'deck'].includes(sourceZone)) {
+    sep();
+    addExternalTargets();
   }
+
+  while (actions.length && actions[actions.length - 1].kind === 'sep') actions.pop();
+
   const canShowDetail = !window._ol || !isDesktopHiddenCardInfo(sourceZone, sourceCard);
-  if (actions.length && canShowDetail) {
-    actions.push({ kind: 'sep' });
-  }
-  if (canShowDetail) {
-    actions.push({ kind: 'detail', label: 'カード詳細' });
-  }
+  if (actions.length && canShowDetail) actions.push({ kind: 'sep' });
+  if (canShowDetail) actions.push({ kind: 'detail', label: '\u30ab\u30fc\u30c9\u8a73\u7d30' });
 
   return actions;
 }
@@ -3248,13 +3239,16 @@ function maybeAutoOpenDesktopOpponentDeckRevealModal() {
 
 function getDesktopDeckRevealDestinationOptions() {
   return [
-    { value: 'hand', label: '手札' },
-    { value: 'battleZone', label: 'バトルゾーン' },
-    { value: 'manaZone', label: 'マナゾーン' },
-    { value: 'shields', label: 'シールド' },
-    { value: 'graveyard', label: '墓地' },
-    { value: 'deck:top', label: '山札トップ' },
-    { value: 'deck:bottom', label: '山札ボトム' }
+    { value: 'hand', label: '\u624b\u672d' },
+    { value: 'battleZone', label: '\u30d0\u30c8\u30eb\u30be\u30fc\u30f3' },
+    { value: 'manaZone', label: '\u30de\u30ca\u30be\u30fc\u30f3' },
+    { value: 'shields', label: '\u30b7\u30fc\u30eb\u30c9' },
+    { value: 'graveyard', label: '\u5893\u5730' },
+    { value: 'deck:top', label: '\u5c71\u672d\u4e0a' },
+    { value: 'deck:bottom', label: '\u5c71\u672d\u4e0b' },
+    { value: 'hyperZone', label: '\u8d85\u6b21\u5143\u30be\u30fc\u30f3' },
+    { value: 'grZone', label: '\u8d85GR\u30be\u30fc\u30f3' },
+    { value: 'specialZone', label: '\u7279\u6b8a\u30be\u30fc\u30f3' }
   ];
 }
 
@@ -3408,7 +3402,8 @@ function renderDesktopDeckRevealModal() {
   const modal = document.getElementById('desktop-deck-reveal-modal');
   if (!modal || !modal.classList.contains('open')) return;
 
-  const mode = _desktopDeckRevealModalState.mode === 'peek' ? 'peek' : 'public';
+  const rawMode = String(_desktopDeckRevealModalState.mode || 'public');
+  const mode = rawMode === 'peek' ? 'peek' : (rawMode === 'opponent' ? 'opponent' : 'public');
   const cards = getDesktopDeckRevealCards(mode);
   if (!cards.length) {
     closeDesktopDeckRevealModal();
@@ -3439,13 +3434,16 @@ function renderDesktopDeckRevealModal() {
 
   const selected = _desktopDeckRevealModalState.selected;
   const quickButtons = [
-    { value: 'hand', label: '手札', className: 'hand' },
+    { value: 'hand', label: '\u624b\u672d', className: 'hand' },
     { value: 'battleZone', label: 'BZ', className: 'battle' },
-    { value: 'manaZone', label: 'マナ', className: 'mana' },
-    { value: 'shields', label: '盾', className: 'shield' },
-    { value: 'graveyard', label: '墓地', className: 'grave' },
-    { value: 'deck:top', label: '上', className: 'deck' },
-    { value: 'deck:bottom', label: '下', className: 'deck' }
+    { value: 'manaZone', label: '\u30de\u30ca', className: 'mana' },
+    { value: 'shields', label: '\u76fe', className: 'shield' },
+    { value: 'graveyard', label: '\u5893\u5730', className: 'grave' },
+    { value: 'deck:top', label: '\u5c71\u4e0a', className: 'deck' },
+    { value: 'deck:bottom', label: '\u5c71\u4e0b', className: 'deck' },
+    { value: 'hyperZone', label: '\u8d85\u6b21\u5143', className: 'deck' },
+    { value: 'grZone', label: 'GR', className: 'deck' },
+    { value: 'specialZone', label: '\u7279\u6b8a', className: 'deck' }
   ];
 
   listEl.innerHTML = cards.map((card, index) => {
@@ -3738,18 +3736,9 @@ async function newDesktopDeck() {
   const name = String(await askDesktopInput('デッキ名を入力') || '').trim();
   if (!name) return;
   
-  const decks = getSavedDecks();
-  if (decks[name]) {
-    showDesktopToast('このデッキは既に存在します', 'warn');
-    return;
-  }
-  
-  decks[name] = [];
   if (window.GameController) {
-    window.GameController.saveSavedDecks(decks);
     window.GameController.setDeckEditingState(name, []);
   } else {
-    localStorage.setItem('dm_decks', JSON.stringify(decks));
     window._deckEditing = name;
     window._deckCards = [];
   }
@@ -3764,72 +3753,39 @@ async function deleteDesktopDeck(name) {
   if (!deckName) return;
 
   const account = AuthService.getCurrentAccount();
-  const canCloudDelete = !!(account && !account.isGuest && account.pin);
-  let cloudDeleteError = '';
-  let deletedCloud = false;
-
-  if (canCloudDelete) {
-    const result = await NetworkService.deleteDeck(account.username, account.pin, deckName);
-    if (result?.ok) {
-      deletedCloud = true;
-    } else if (result?.error) {
-      cloudDeleteError = result.error;
-    }
-  }
-
-  const decks = getSavedDecks();
-  const hadLocalDeck = Object.prototype.hasOwnProperty.call(decks, deckName);
-  if (hadLocalDeck) {
-    delete decks[deckName];
-  }
-
-  if (window.GameController) {
-    if (hadLocalDeck) {
-      window.GameController.saveSavedDecks(decks);
-    }
-    if (window._deckEditing === deckName) {
-      window.GameController.setDeckEditingState(null, []);
-    }
-  } else {
-    if (hadLocalDeck) {
-      localStorage.setItem('dm_decks', JSON.stringify(decks));
-    }
-    if (window._deckEditing === deckName) {
-      window._deckEditing = null;
-      window._deckCards = [];
-    }
-  }
-
-  if (canCloudDelete) {
-    const names = await NetworkService.loadServerDecks(account.username, account.pin);
-    if (Array.isArray(names)) {
-      if (window.AppState) {
-        window.AppState.set('_serverDeckNames', names);
-      } else {
-        window._serverDeckNames = names;
-      }
-    } else {
-      showDesktopToast('クラウド一覧の更新に失敗しました（ローカル表示は維持）', 'warn');
-    }
-  }
-
-  if (!deletedCloud && !hadLocalDeck) {
-    showDesktopToast(cloudDeleteError || 'デッキが見つかりませんでした', 'warn');
-    renderDesktopDeckList();
+  if (!account || account.isGuest || !account.pin) {
+    showDesktopToast('PIN login is required for cloud deck deletion', 'warn');
     return;
   }
 
-  if (cloudDeleteError && hadLocalDeck) {
-    showDesktopToast(`ローカルから削除しました（クラウド削除失敗: ${cloudDeleteError}）`, 'warn');
-  } else {
-    showDesktopToast('デッキを削除しました', 'ok');
+  const result = await NetworkService.deleteDeck(account.username, account.pin, deckName);
+  if (!result?.ok) {
+    showDesktopToast(result?.error || 'Failed to delete cloud deck', 'warn');
+    return;
   }
+
+  if (window.GameController) {
+    window.GameController.setDeckEditingState(null, []);
+  } else {
+    window._deckEditing = null;
+    window._deckCards = [];
+  }
+
+  const names = await NetworkService.loadServerDecks(account.username, account.pin);
+  if (Array.isArray(names)) {
+    if (window.AppState) {
+      window.AppState.set('_serverDeckNames', names);
+    } else {
+      window._serverDeckNames = names;
+    }
+  } else {
+    showDesktopToast('Failed to refresh cloud deck list', 'warn');
+  }
+
+  showDesktopToast('Cloud deck deleted', 'ok');
   renderDesktopDeckList();
 }
 
-/**
- * PC版 デッキ編集画面
- */
 function renderDesktopDeckEdit() {
   renderDesktopDeckList();
 }
@@ -3873,24 +3829,22 @@ async function openDesktopDeck(name) {
     return;
   }
 
-  try {
-    const savedDecks = getSavedDecks();
-    let cards = [];
+  const account = AuthService.getCurrentAccount();
+  if (!account || account.isGuest || !account.pin) {
+    showDesktopToast('Log in to use cloud decks', 'warn');
+    clearDesktopDeckSelection();
+    return;
+  }
 
-    const account = AuthService.getCurrentAccount();
-    if (account && !account.isGuest && account.pin) {
-      // ログイン中はクラウドを優先、失敗時にローカルへフォールバック
-      const remoteDeck = await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
-      if (Array.isArray(remoteDeck) && remoteDeck.length > 0) {
-        cards = remoteDeck.map(card => NetworkService.normalizeCardData(card));
-      } else if (Array.isArray(savedDecks[deckName])) {
-        cards = JSON.parse(JSON.stringify(savedDecks[deckName])).map(card => NetworkService.normalizeCardData(card));
-      }
-    } else if (Array.isArray(savedDecks[deckName])) {
-      cards = JSON.parse(JSON.stringify(savedDecks[deckName])).map(card => NetworkService.normalizeCardData(card));
+  try {
+    const remoteDeck = await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
+    if (!Array.isArray(remoteDeck)) {
+      showDesktopToast('API unavailable; cloud deck could not be loaded', 'warn');
+      clearDesktopDeckSelection();
+      return;
     }
 
-    const sortedCards = sortDesktopDeckCards(cards);
+    const sortedCards = sortDesktopDeckCards(remoteDeck.map(card => NetworkService.normalizeCardData(card)));
     if (window.GameController) {
       window.GameController.setDeckEditingState(deckName, sortedCards);
     } else {
@@ -3912,26 +3866,13 @@ async function openDesktopDeck(name) {
       window._deckCards = hydratedSorted;
     }
 
-    const decks = getSavedDecks();
-    if (Array.isArray(decks[deckName])) {
-      decks[deckName] = hydratedSorted.map(card => NetworkService.normalizeCardData(card));
-      if (window.GameController) {
-        window.GameController.saveSavedDecks(decks);
-      } else {
-        localStorage.setItem('dm_decks', JSON.stringify(decks));
-      }
-    }
-
     renderDesktopDeckList();
   } catch (error) {
-    console.error('デッキ読み込みエラー:', error);
-    showDesktopToast('デッキの読み込みに失敗しました', 'warn');
+    console.error('deck load error:', error);
+    showDesktopToast('API unavailable; cloud deck could not be loaded', 'warn');
   }
 }
 
-/**
- * カード枚数増加
- */
 function incrementDesktopCardCount(idx) {
   if (!window._deckEditing) {
     showDesktopToast('先に編集するデッキを選択してください', 'warn');
@@ -4004,9 +3945,14 @@ async function addToDesktopDeck(cardJson, addCount = 1) {
     }
 
     const rawCard = typeof cardJson === 'string' ? JSON.parse(cardJson) : cardJson;
+    const hasUserSelectedImage = !!String(rawCard?.selectedImageUrl || rawCard?.selectedArtId || '').trim();
+    const suppressUnsafeSearchImage = !hasUserSelectedImage
+      && String(rawCard?.imageStatus || '').includes('suppressed-unsafe');
     const card = await NetworkService.enrichCardImage(rawCard, {
       retries: 2,
-      retryDelayMs: 350
+      retryDelayMs: 350,
+      allowNameFallback: !suppressUnsafeSearchImage,
+      suppressImage: suppressUnsafeSearchImage
     });
     const normalized = NetworkService.normalizeCardData(card);
     const normalizedKey = String(normalized.cardId || normalized.id || '');
@@ -4064,7 +4010,7 @@ async function restoreAllDesktopLocalDecksToCloud() {
     return;
   }
 
-  const savedDecks = getSavedDecks();
+  const savedDecks = getLocalSavedDecksForMigration();
   const deckNames = Object.keys(savedDecks).filter((name) => Array.isArray(savedDecks[name]));
   if (!deckNames.length) {
     showDesktopToast('ローカル復元できるデッキがありません', 'warn');
@@ -4114,6 +4060,22 @@ async function restoreAllDesktopLocalDecksToCloud() {
   } else {
     showDesktopToast(`クラウド復元完了（${success}件）`, 'ok');
   }
+  if (success > 0 && failed === 0) {
+    const clearLocal = await askDesktopConfirm(
+      'Remove migrated local dm_decks now?',
+      'Remove',
+      'Keep'
+    );
+    if (clearLocal) {
+      try {
+        localStorage.removeItem('dm_decks');
+        showDesktopToast('Local decks removed', 'ok');
+      } catch (error) {
+        console.warn('dm_decks cleanup failed', error);
+        showDesktopToast('Failed to delete cloud deck', 'warn');
+      }
+    }
+  }
   renderDesktopDeckList();
 }
 
@@ -4156,14 +4118,6 @@ async function saveDesktopDeckToCloud() {
 
     if (typeof NetworkService.clearDeckCache === 'function') {
       NetworkService.clearDeckCache(deckName);
-    }
-
-    const decks = getSavedDecks();
-    decks[deckName] = deckData;
-    if (window.GameController) {
-      window.GameController.saveSavedDecks(decks);
-    } else {
-      localStorage.setItem('dm_decks', JSON.stringify(decks));
     }
 
     const names = await NetworkService.loadServerDecks(account.username, account.pin);
@@ -4209,10 +4163,8 @@ async function openDesktopVsSetup() {
     showDesktopToast('先にデッキを選択してください', 'warn');
     return;
   }
-  const savedDecks = getSavedDecks();
-  const localNames = Object.keys(savedDecks);
-  const cloudNames = Array.isArray(window._serverDeckNames) ? window._serverDeckNames : [];
-  const allNames = Array.from(new Set([...localNames, ...cloudNames]))
+  const allNames = (Array.isArray(window._serverDeckNames) ? window._serverDeckNames : [])
+    .slice()
     .sort((a, b) => String(a).localeCompare(String(b), 'ja'));
 
   const optionsHtml = allNames.map(n =>
@@ -4267,8 +4219,6 @@ async function startDesktopVsGame(p1DeckName, p2DeckName) {
       const d = await window.GameController.resolveDeckData(name, account);
       if (d && d.length) return d;
     }
-    const saved = getSavedDecks();
-    if (saved[name] && saved[name].length) return saved[name];
     if (account && !account.isGuest && account.pin) {
       return await NetworkService.fetchServerDeck(account.username, account.pin, name).catch(() => null);
     }
@@ -4718,14 +4668,9 @@ async function desktopOnlineJoinRoom() {
 function renderDesktopOnlineLobby() {
   const container = document.getElementById('app-desktop');
   const account = AuthService.getCurrentAccount();
-  const savedDecks = getSavedDecks();
-  const localNames = Object.keys(savedDecks);
   const cloudNames = Array.isArray(window._serverDeckNames) ? window._serverDeckNames : [];
 
-  const deckOptions = [
-    ...localNames.map(name => ({ label: `ローカル: ${name}`, value: name })),
-    ...cloudNames.map(name => ({ label: `クラウド: ${name}`, value: name }))
-  ];
+  const deckOptions = cloudNames.map(name => ({ label: `Cloud: ${name}`, value: name }));
 
   const optionsHtml = deckOptions.length
     ? deckOptions.map(opt => `<option value="${escapeHtml(opt.value)}">${escapeHtml(opt.label)}</option>`).join('')
@@ -4881,10 +4826,6 @@ async function getDesktopDeckDataForOnline(deckName) {
     return await window.GameController.resolveDeckData(deckName, account);
   }
 
-  const savedDecks = getSavedDecks();
-  if (savedDecks[deckName]) {
-    return Array.isArray(savedDecks[deckName]) ? savedDecks[deckName] : null;
-  }
   if (account && !account.isGuest && account.pin) {
     return await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
   }

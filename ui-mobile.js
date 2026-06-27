@@ -1094,13 +1094,17 @@ function canActMobileOnline() {
 
 function getMobileZoneLabel(zoneKey) {
   const labels = {
-    hand: '手札',
-    battleZone: 'バトル',
-    manaZone: 'マナ',
-    shields: 'シールド',
-    revealedZone: '公開中',
-    deck: '山札',
-    graveyard: '墓地'
+    hand: '\u624b\u672d',
+    battleZone: '\u30d0\u30c8\u30eb\u30be\u30fc\u30f3',
+    manaZone: '\u30de\u30ca\u30be\u30fc\u30f3',
+    shields: '\u30b7\u30fc\u30eb\u30c9',
+    revealedZone: '\u516c\u958b\u30be\u30fc\u30f3',
+    deckRevealZone: '\u5c71\u672d\u516c\u958b\u30be\u30fc\u30f3',
+    deck: '\u5c71\u672d',
+    graveyard: '\u5893\u5730',
+    hyperZone: '\u8d85\u6b21\u5143\u30be\u30fc\u30f3',
+    grZone: '\u8d85GR\u30be\u30fc\u30f3',
+    specialZone: '\u7279\u6b8a\u30be\u30fc\u30f3'
   };
   return labels[zoneKey] || zoneKey;
 }
@@ -1114,123 +1118,126 @@ function isMobileHiddenCardInfo(sourceZone, sourceCard) {
 function getMobileCardZoneActions(sourceZone, sourceCard) {
   const actions = [];
   const move = (label, toZone, position = 'top', red = false) => ({ kind: 'move', label, toZone, position, red });
+  const sep = () => {
+    if (actions.length && actions[actions.length - 1].kind !== 'sep') actions.push({ kind: 'sep' });
+  };
+  const addExternalTargets = () => {
+    actions.push(
+      move('\u8d85\u6b21\u5143\u30be\u30fc\u30f3\u3078', 'hyperZone'),
+      move('\u8d85GR\u30be\u30fc\u30f3\u3078', 'grZone'),
+      move('\u7279\u6b8a\u30be\u30fc\u30f3\u3078', 'specialZone')
+    );
+  };
+  const addUnderControls = () => {
+    actions.push({ kind: 'under', label: '\u3053\u306e\u30ab\u30fc\u30c9\u3092\u4e0b\u306b\u7f6e\u304f\uff08\u9032\u5316\u5143/\u5c01\u5370/\u4e0b\u6577\u304d\uff09' });
+    if (Array.isArray(sourceCard?.underCards) && sourceCard.underCards.length > 0) {
+      actions.push({ kind: 'viewUnder', label: `\u4e0b\u306e\u30ab\u30fc\u30c9\u3092\u898b\u308b/\u5916\u3059 (${sourceCard.underCards.length}\u679a)` });
+    }
+  };
 
   if (sourceZone === 'hand') {
     actions.push(
-      move('マナゾーンへ', 'manaZone'),
-      move('バトルゾーンへ', 'battleZone'),
-      move('シールドへ', 'shields'),
-      move('山札トップへ', 'deck', 'top'),
-      move('山札ボトムへ', 'deck', 'bottom'),
-      { kind: 'sep' },
-      move('墓地へ（呪文使用）', 'graveyard', 'top', true),
-      { kind: 'sep' },
-      { kind: 'under', label: '盤面カードの下へ（対象選択）' }
+      move('\u624b\u672d \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3', 'battleZone'),
+      move('\u624b\u672d \u2192 \u30de\u30ca\u30be\u30fc\u30f3', 'manaZone'),
+      move('\u624b\u672d \u2192 \u5893\u5730', 'graveyard', 'top', true),
+      move('\u624b\u672d \u2192 \u30b7\u30fc\u30eb\u30c9\u8ffd\u52a0', 'shields'),
+      move('\u624b\u672d \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
+      move('\u624b\u672d \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
+    sep();
+    addUnderControls();
   } else if (sourceZone === 'battleZone') {
     actions.push(
-      { kind: 'tap', label: sourceCard?.tapped ? 'アンタップ' : 'タップ（攻撃）', tapped: !sourceCard?.tapped },
-      move('手札へ', 'hand'),
-      move('マナゾーンへ', 'manaZone'),
-      move('シールドへ', 'shields'),
-      move('山札トップへ', 'deck', 'top'),
-      move('山札ボトムへ', 'deck', 'bottom'),
-      { kind: 'under', label: '盤面カードの下へ（対象選択）' },
-      { kind: 'sep' },
-      move('墓地へ', 'graveyard', 'top', true)
+      { kind: 'tap', label: sourceCard?.tapped ? '\u30a2\u30f3\u30bf\u30c3\u30d7\u3059\u308b' : '\u30bf\u30c3\u30d7\u3059\u308b', tapped: !sourceCard?.tapped },
+      move('\u30d0\u30c8\u30eb\u30be\u30fc\u30f3 \u2192 \u5893\u5730', 'graveyard', 'top', true),
+      move('\u30d0\u30c8\u30eb\u30be\u30fc\u30f3 \u2192 \u30de\u30ca\u30be\u30fc\u30f3', 'manaZone'),
+      move('\u30d0\u30c8\u30eb\u30be\u30fc\u30f3 \u2192 \u624b\u672d', 'hand'),
+      move('\u30d0\u30c8\u30eb\u30be\u30fc\u30f3 \u2192 \u30b7\u30fc\u30eb\u30c9', 'shields'),
+      move('\u30d0\u30c8\u30eb\u30be\u30fc\u30f3 \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
+      move('\u30d0\u30c8\u30eb\u30be\u30fc\u30f3 \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
-    if (Array.isArray(sourceCard?.underCards) && sourceCard.underCards.length > 0) {
-      actions.push({ kind: 'sep' });
-      actions.push({ kind: 'viewUnder', label: `下のカードを見る (${sourceCard.underCards.length}枚)` });
-    }
+    sep();
+    addUnderControls();
   } else if (sourceZone === 'manaZone') {
     actions.push(
-      { kind: 'tap', label: sourceCard?.tapped ? 'アンタップ' : 'タップ（マナ使用）', tapped: !sourceCard?.tapped },
-      move('手札へ', 'hand'),
-      move('バトルゾーンへ', 'battleZone'),
-      move('シールドへ', 'shields'),
-      move('山札トップへ', 'deck', 'top'),
-      move('山札ボトムへ', 'deck', 'bottom'),
-      { kind: 'sep' },
-      move('墓地へ', 'graveyard', 'top', true)
+      { kind: 'tap', label: sourceCard?.tapped ? '\u30a2\u30f3\u30bf\u30c3\u30d7\u3059\u308b' : '\u30bf\u30c3\u30d7\u3059\u308b\uff08\u30de\u30ca\u4f7f\u7528\uff09', tapped: !sourceCard?.tapped },
+      move('\u30de\u30ca\u30be\u30fc\u30f3 \u2192 \u624b\u672d', 'hand'),
+      move('\u30de\u30ca\u30be\u30fc\u30f3 \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3', 'battleZone'),
+      move('\u30de\u30ca\u30be\u30fc\u30f3 \u2192 \u5893\u5730', 'graveyard', 'top', true),
+      move('\u30de\u30ca\u30be\u30fc\u30f3 \u2192 \u30b7\u30fc\u30eb\u30c9', 'shields'),
+      move('\u30de\u30ca\u30be\u30fc\u30f3 \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
+      move('\u30de\u30ca\u30be\u30fc\u30f3 \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
-    if (Array.isArray(sourceCard?.underCards) && sourceCard.underCards.length > 0) {
-      actions.push({ kind: 'sep' });
-      actions.push({ kind: 'viewUnder', label: `下のカードを見る (${sourceCard.underCards.length}枚)` });
-    }
+    sep();
+    addUnderControls();
   } else if (sourceZone === 'shields') {
     actions.push(
-      move('公開中へ（シールドブレイク）', 'revealedZone'),
-      move('マナゾーンへ', 'manaZone'),
-      move('バトルゾーンへ', 'battleZone'),
-      move('山札トップへ', 'deck', 'top'),
-      move('山札ボトムへ', 'deck', 'bottom'),
-      { kind: 'sep' },
-      move('墓地へ', 'graveyard', 'top', true),
-      { kind: 'sep' },
-      { kind: 'flip', label: sourceCard?.faceUp ? '裏向きにする' : '表向きにする', faceUp: !sourceCard?.faceUp },
-      { kind: 'sep' },
-      { kind: 'under', label: '盤面カードの下へ（対象選択）' }
+      { kind: 'flip', label: sourceCard?.faceUp ? '\u88cf\u5411\u304d\u306b\u623b\u3059' : '\u8868\u5411\u304d\u306b\u3059\u308b/\u78ba\u8a8d\u6e08\u307f\u306b\u3059\u308b', faceUp: !sourceCard?.faceUp },
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u624b\u672d', 'hand'),
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u516c\u958b\u30be\u30fc\u30f3\uff08\u30d6\u30ec\u30a4\u30af\uff09', 'revealedZone'),
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u5893\u5730', 'graveyard', 'top', true),
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u30de\u30ca\u30be\u30fc\u30f3', 'manaZone'),
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3', 'battleZone'),
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
+      move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
-  } else if (sourceZone === 'revealedZone') {
+    sep();
+    addUnderControls();
+  } else if (sourceZone === 'revealedZone' || sourceZone === 'deckRevealZone') {
     actions.push(
-      move('手札に加える', 'hand'),
-      move('バトルゾーンへ（トリガー）', 'battleZone'),
-      move('マナゾーンへ（トリガー）', 'manaZone'),
-      { kind: 'sep' },
-      move('墓地へ（トリガー解決）', 'graveyard', 'top', true)
+      move('\u516c\u958b\u4e2d \u2192 \u624b\u672d', 'hand'),
+      move('\u516c\u958b\u4e2d \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3', 'battleZone'),
+      move('\u516c\u958b\u4e2d \u2192 \u30de\u30ca\u30be\u30fc\u30f3', 'manaZone'),
+      move('\u516c\u958b\u4e2d \u2192 \u30b7\u30fc\u30eb\u30c9', 'shields'),
+      move('\u516c\u958b\u4e2d \u2192 \u5893\u5730', 'graveyard', 'top', true),
+      move('\u516c\u958b\u4e2d \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
+      move('\u516c\u958b\u4e2d \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
+    sep();
+    addExternalTargets();
   } else if (sourceZone === 'graveyard') {
     actions.push(
-      move('手札へ', 'hand'),
-      move('バトルゾーンへ', 'battleZone'),
-      move('マナゾーンへ', 'manaZone'),
-      move('シールドへ', 'shields'),
-      move('山札トップへ', 'deck', 'top'),
-      move('山札ボトムへ', 'deck', 'bottom')
+      move('\u5893\u5730 \u2192 \u624b\u672d', 'hand'),
+      move('\u5893\u5730 \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3', 'battleZone'),
+      move('\u5893\u5730 \u2192 \u30de\u30ca\u30be\u30fc\u30f3', 'manaZone'),
+      move('\u5893\u5730 \u2192 \u30b7\u30fc\u30eb\u30c9', 'shields'),
+      move('\u5893\u5730 \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
+      move('\u5893\u5730 \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
+    sep();
+    addExternalTargets();
   } else if (sourceZone === 'deck') {
     actions.push(
-      move('手札へ', 'hand'),
-      move('バトルゾーンへ', 'battleZone'),
-      move('マナゾーンへ', 'manaZone'),
-      move('シールドへ', 'shields'),
-      move('墓地へ', 'graveyard', 'top', true),
-      move('山札ボトムへ', 'deck', 'bottom'),
-      { kind: 'sep' },
-      { kind: 'deckAll', label: '山札を全部見る' }
+      move('\u5c71\u672d\u4e0a \u2192 \u624b\u672d', 'hand'),
+      move('\u5c71\u672d\u4e0a \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3', 'battleZone'),
+      move('\u5c71\u672d\u4e0a \u2192 \u30de\u30ca\u30be\u30fc\u30f3', 'manaZone'),
+      move('\u5c71\u672d\u4e0a \u2192 \u30b7\u30fc\u30eb\u30c9', 'shields'),
+      move('\u5c71\u672d\u4e0a \u2192 \u5893\u5730', 'graveyard', 'top', true),
+      move('\u5c71\u672d\u4e0a \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom'),
+      { kind: 'deckAll', label: '\u5c71\u672d\u3092\u5168\u90e8\u898b\u308b/\u9806\u756a\u78ba\u8a8d' }
     );
-  }
-
-  const externalTargets = [
-    move('Move to Hyper Zone', 'hyperZone'),
-    move('Move to GR Zone', 'grZone'),
-    move('Move to Special Zone', 'specialZone')
-  ];
-  if (!['hyperZone', 'grZone', 'specialZone'].includes(sourceZone) && sourceZone !== 'deck') {
-    actions.push({ kind: 'sep' }, ...externalTargets);
-  }
-  if (['hyperZone', 'grZone', 'specialZone'].includes(sourceZone)) {
+  } else if (['hyperZone', 'grZone', 'specialZone'].includes(sourceZone)) {
     actions.push(
-      move('Move to Hand', 'hand'),
-      move('Move to Battle', 'battleZone'),
-      move('Move to Mana', 'manaZone'),
-      move('Move to Grave', 'graveyard', 'top', true),
-      move('Move to Deck top', 'deck', 'top'),
-      move('Move to Deck bottom', 'deck', 'bottom')
+      move(`${getMobileZoneLabel(sourceZone)} \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3`, 'battleZone'),
+      move(`${getMobileZoneLabel(sourceZone)} \u2192 \u624b\u672d`, 'hand'),
+      move(`${getMobileZoneLabel(sourceZone)} \u2192 \u30de\u30ca\u30be\u30fc\u30f3`, 'manaZone'),
+      move(`${getMobileZoneLabel(sourceZone)} \u2192 \u5893\u5730`, 'graveyard', 'top', true),
+      move(`${getMobileZoneLabel(sourceZone)} \u2192 \u30b7\u30fc\u30eb\u30c9`, 'shields'),
+      move(`${getMobileZoneLabel(sourceZone)} \u2192 \u5c71\u672d\u4e0a`, 'deck', 'top'),
+      move(`${getMobileZoneLabel(sourceZone)} \u2192 \u5c71\u672d\u4e0b`, 'deck', 'bottom')
     );
   }
 
-  if (actions.length && actions[actions.length - 1].kind === 'sep') {
-    actions.pop();
+  if (!['hyperZone', 'grZone', 'specialZone', 'deck'].includes(sourceZone)) {
+    sep();
+    addExternalTargets();
   }
+
+  while (actions.length && actions[actions.length - 1].kind === 'sep') actions.pop();
+
   const canShowDetail = !window._ol || !isMobileHiddenCardInfo(sourceZone, sourceCard);
-  if (actions.length && canShowDetail) {
-    actions.push({ kind: 'sep' });
-  }
-  if (canShowDetail) {
-    actions.push({ kind: 'detail', label: 'カード詳細' });
-  }
+  if (actions.length && canShowDetail) actions.push({ kind: 'sep' });
+  if (canShowDetail) actions.push({ kind: 'detail', label: '\u30ab\u30fc\u30c9\u8a73\u7d30' });
 
   return actions;
 }
@@ -1906,10 +1913,14 @@ function cancelMobileZoneLongPress() {
   _mobileZoneLongPressCtx = null;
 }
 
-/** localStorage dm_decks を安全に取得（破損時は {}） */
+/** Normal deck management ignores localStorage dm_decks. */
 function getSavedDecksMobile() {
-  if (window.GameController) {
-    return window.GameController.getSavedDecks();
+  return {};
+}
+
+function getLocalSavedDecksMobileForMigration() {
+  if (window.GameController?.getLocalSavedDecks) {
+    return window.GameController.getLocalSavedDecks();
   }
   try {
     const raw = localStorage.getItem('dm_decks');
@@ -1918,6 +1929,10 @@ function getSavedDecksMobile() {
     console.warn('dm_decks parse error', e);
     return {};
   }
+}
+
+function hasLocalDecksMobileForMigration() {
+  return Object.values(getLocalSavedDecksMobileForMigration()).some(Array.isArray);
 }
 
 /**
@@ -1968,8 +1983,8 @@ function renderMobileDeckList() {
   };
 
   const container = document.getElementById('app-mobile');
-  const savedDecks = getSavedDecksMobile();
   const account = AuthService.getCurrentAccount();
+  const hasLocalMigrationDecks = hasLocalDecksMobileForMigration();
   const userLabel = getMobileUserLabel(account);
   const editingState = window.GameController
     ? window.GameController.getDeckEditingState()
@@ -1977,12 +1992,14 @@ function renderMobileDeckList() {
   let deckName = editingState.deckName;
   let cards = Array.isArray(editingState.cards) ? editingState.cards : [];
 
-  const localDeckNames = Object.keys(savedDecks);
   const cloudDeckNames = Array.isArray(window._serverDeckNames) ? window._serverDeckNames : [];
-  const mergedDeckNames = Array.from(new Set([...localDeckNames, ...cloudDeckNames]))
-    .sort((a, b) => String(a).localeCompare(String(b), 'ja'));
+  const visibleDeckNames = cloudDeckNames.slice().sort((a, b) => String(a).localeCompare(String(b), 'ja'));
+  const currentEditingDeckName = String(deckName || '').trim();
+  if (currentEditingDeckName && !visibleDeckNames.includes(currentEditingDeckName)) {
+    visibleDeckNames.unshift(currentEditingDeckName);
+  }
 
-  if (deckName && !mergedDeckNames.includes(deckName)) {
+  if (deckName && !visibleDeckNames.includes(deckName)) {
     deckName = null;
     cards = [];
     if (window.GameController) {
@@ -2000,13 +2017,13 @@ function renderMobileDeckList() {
 
   const hasDeckSelected = !!deckName;
   const canSaveSelectedDeck = !!(hasDeckSelected && account && !account.isGuest && account.pin);
-  const canBulkCloudRestore = !!(account && !account.isGuest && account.pin && localDeckNames.length > 0);
+  const canBulkCloudRestore = !!(account && !account.isGuest && account.pin && hasLocalMigrationDecks);
   const canPlaySelectedDeck = !!(hasDeckSelected && countMobileDeckCards(orderedCards) > 0);
   const cardCount = countMobileDeckCards(orderedCards);
   const uniqueCount = orderedCards.length;
 
-  const deckOptionsHtml = mergedDeckNames.length
-    ? mergedDeckNames.map((name) => `
+  const deckOptionsHtml = visibleDeckNames.length
+    ? visibleDeckNames.map((name) => `
       <option value="${escapeHtmlMobile(name)}" ${deckName === name ? 'selected' : ''}>${escapeHtmlMobile(name)}</option>
     `).join('')
     : '<option value="">デッキがありません</option>';
@@ -2292,41 +2309,11 @@ function markMobileSearchHydrateCooldown(key, cooldownMs = MOBILE_SEARCH_HYDRATE
 
 async function hydrateMobileSearchCards(items) {
   const sourceItems = Array.isArray(items) ? items : [];
-  if (!sourceItems.length) return [];
-
-  const hydrated = await Promise.all(sourceItems.map(async (card) => {
-    const normalizedCard = NetworkService.normalizeCardData(card);
-    if (getMobileCardImageUrl(normalizedCard)) return normalizedCard;
-
-    const key = getMobileSearchHydrateKey(normalizedCard);
-    if (key && shouldSkipMobileSearchHydrate(key)) {
-      return normalizedCard;
-    }
-
-    try {
-      const enriched = await NetworkService.enrichCardImage(normalizedCard, {
-        retries: 1,
-        retryDelayMs: 300
-      });
-      const normalized = NetworkService.normalizeCardData(enriched);
-      if (getMobileCardImageUrl(normalized)) {
-        if (key) _mobileSearchHydrateCooldownUntil.delete(key);
-        return normalized;
-      }
-
-      if (key) {
-        markMobileSearchHydrateCooldown(key, MOBILE_SEARCH_HYDRATE_NO_IMAGE_COOLDOWN_MS);
-      }
-      return normalized;
-    } catch {
-      if (key) {
-        markMobileSearchHydrateCooldown(key, MOBILE_SEARCH_HYDRATE_ERROR_COOLDOWN_MS);
-      }
-      return normalizedCard;
-    }
-  }));
-
-  return hydrated;
+  return sourceItems.map(card => (
+    typeof NetworkService.normalizeSearchResultCard === 'function'
+      ? NetworkService.normalizeSearchResultCard(card)
+      : NetworkService.normalizeCardData({ ...card, imageUrl: '', thumb: '', img: '', selectedImageUrl: '' })
+  ));
 }
 
 /**
@@ -2334,39 +2321,8 @@ async function hydrateMobileSearchCards(items) {
  * @param {string} keyword 起動時のキーワード（変わったらキャンセル）
  * @param {Array} items hydrate対象カード一覧
  */
-async function _kickMobileSearchHydrate(keyword, items) {
-  const token = {};
-  _mobileSearchHydrateToken = token;
-
-  const sourceItems = Array.isArray(items) ? items : [];
-  const needHydration = sourceItems.filter(card => {
-    if (getMobileCardImageUrl(card)) return false;
-    const key = getMobileSearchHydrateKey(card);
-    return !shouldSkipMobileSearchHydrate(key);
-  });
-
-  const BATCH = 5;
-  for (let i = 0; i < needHydration.length; i += BATCH) {
-    if (_mobileSearchHydrateToken !== token) return;
-    if (_mobileSearchState.query !== keyword) return;
-    const batch = needHydration.slice(i, i + BATCH);
-    await Promise.all(batch.map(async (card) => {
-      const key = getMobileSearchHydrateKey(card);
-      try {
-        const enriched = await NetworkService.enrichCardImage(card, { retries: 1, retryDelayMs: 300 });
-        const normalized = NetworkService.normalizeCardData(enriched);
-        const url = getMobileCardImageUrl(normalized);
-        if (url) {
-          if (key) _mobileSearchHydrateCooldownUntil.delete(key);
-          try { _patchMobileSearchCardImage(key, url); } catch { /* DOM再描画済みは無視 */ }
-        } else {
-          if (key) markMobileSearchHydrateCooldown(key, MOBILE_SEARCH_HYDRATE_NO_IMAGE_COOLDOWN_MS);
-        }
-      } catch {
-        if (key) markMobileSearchHydrateCooldown(key, MOBILE_SEARCH_HYDRATE_ERROR_COOLDOWN_MS);
-      }
-    }));
-  }
+async function _kickMobileSearchHydrate(_keyword, _items) {
+  _mobileSearchHydrateToken = {};
 }
 
 function _patchMobileSearchCardImage(hydrateKey, imageUrl) {
@@ -2417,7 +2373,7 @@ function renderMobileSearchResults() {
   const hasTotal = Number.isFinite(total) && total > 0;
   const source = String(_mobileSearchState.source || '').trim();
   const summary = hasTotal
-    ? `<div class="ml-search-summary">${cards.length} / ${total}?${source ? ` ? ${escapeHtmlMobile(source)}` : ''}</div>`
+    ? `<div class="ml-search-summary">${cards.length} / ${total}${source ? ` / ${escapeHtmlMobile(source)}` : ''}</div>`
     : '';
 
   const rows = cards.map(card => {
@@ -2426,6 +2382,12 @@ function renderMobileSearchResults() {
     const cardName = getMobileCardDisplayName(card);
     const thumb = renderMobileCardThumb(card);
     const hydrateKey = getMobileSearchHydrateKey(card);
+    const sourceId = String(card?.sourceId || card?.id || '').trim();
+    const metaParts = [
+      String(card?.civilization || card?.civ || '').trim(),
+      String(card?.type || '').trim(),
+      sourceId ? `ID ${sourceId}` : ''
+    ].filter(Boolean);
     return `
       <div class="ml-search-item"${hydrateKey ? ` data-hydrate-id="${escapeHtmlMobile(hydrateKey)}"` : ''}>
         <div class="ml-search-card-head">
@@ -2435,7 +2397,7 @@ function renderMobileSearchResults() {
               <div class="ml-search-name">${escapeHtmlMobile(cardName)}</div>
               <div class="ml-search-cost">${escapeHtmlMobile(String(cost))}</div>
             </div>
-            <div class="ml-search-meta">${escapeHtmlMobile(String(card?.civilization || ''))}</div>
+            <div class="ml-search-meta">${escapeHtmlMobile(metaParts.join(' / '))}</div>
             <div class="ml-search-text">${escapeHtmlMobile(card.text || '')}</div>
           </div>
         </div>
@@ -2463,15 +2425,10 @@ async function startMobileGame(deckName) {
     ? await window.GameController.resolveDeckData(deckName, account)
     : null;
 
-  if (!deckData) {
-    const savedDecks = getSavedDecksMobile();
-    if (savedDecks[deckName]) {
-      deckData = savedDecks[deckName];
-    } else if (account && !account.isGuest && account.pin) {
-      deckData = await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
-    }
+  if (!deckData && account && !account.isGuest && account.pin) {
+    deckData = await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
   }
-  
+
   if (!deckData || !deckData.length) {
     showMobileToast('デッキが取得できませんでした', 'warn');
     return;
@@ -2775,14 +2732,14 @@ function renderMobileGame() {
   const handSheetContent = selCard ? `
     <div class="mg-sheet-title">${escapeHtmlMobile(selCard?.name || 'CARD')}</div>
     <div class="mg-sheet-btns">
-      <button class="mg-sheet-btn battle" onclick="playMobileSelectedCard('battle')">BZへ出す</button>
-      <button class="mg-sheet-btn mana" onclick="playMobileSelectedCard('mana')">マナに置く</button>
-      <button class="mg-sheet-btn shield" onclick="playMobileHandCardTo('shields','top')">シールドへ</button>
-      <button class="mg-sheet-btn deck" onclick="playMobileHandCardTo('deck','top')">デッキトップへ</button>
-      <button class="mg-sheet-btn deck" onclick="playMobileHandCardTo('deck','bottom')">デッキボトムへ</button>
-      <button class="mg-sheet-btn grave" onclick="playMobileHandCardTo('graveyard','top')">墓地へ</button>
-      <button class="mg-sheet-btn detail" onclick="openMobileHandCardDetail()">カード詳細</button>
-      <button class="mg-sheet-btn close" onclick="closeMobileHandSheet()">閉じる</button>
+      <button class="mg-sheet-btn battle" onclick="playMobileSelectedCard('battle')">BZ\u3078\u51fa\u3059</button>
+      <button class="mg-sheet-btn mana" onclick="playMobileSelectedCard('mana')">\u30de\u30ca\u306b\u7f6e\u304f</button>
+      <button class="mg-sheet-btn shield" onclick="playMobileHandCardTo('shields','top')">\u30b7\u30fc\u30eb\u30c9\u8ffd\u52a0</button>
+      <button class="mg-sheet-btn deck" onclick="playMobileHandCardTo('deck','top')">\u5c71\u672d\u4e0a\u3078</button>
+      <button class="mg-sheet-btn deck" onclick="playMobileHandCardTo('deck','bottom')">\u5c71\u672d\u4e0b\u3078</button>
+      <button class="mg-sheet-btn grave" onclick="playMobileHandCardTo('graveyard','top')">\u5893\u5730\u3078</button>
+      <button class="mg-sheet-btn detail" onclick="openMobileHandCardDetail()">\u30ab\u30fc\u30c9\u8a73\u7d30</button>
+      <button class="mg-sheet-btn close" onclick="closeMobileHandSheet()">\u9589\u3058\u308b</button>
     </div>
   ` : '';
 
@@ -2820,8 +2777,8 @@ function renderMobileGame() {
 
       <div class="mg-ribbon">
         <div class="mg-ribbon-main">
-          <button class="mg-rbn-btn ${_mobileNeedDrawGuide ? 'guide' : ''}" onclick="drawMobileCard()">ドロー</button>
-          <button class="mg-rbn-btn end" onclick="turnMobileEnd()">ターンエンド</button>
+          <button class="mg-rbn-btn ${_mobileNeedDrawGuide ? 'guide' : ''}" onclick="drawMobileCard()">\u30c9\u30ed\u30fc</button>
+          <button class="mg-rbn-btn end" onclick="turnMobileEnd()">\u30bf\u30fc\u30f3\u7d42\u4e86</button>
           ${olEff ? `<span class="mg-turn-badge ${isMyTurnLS ? 'mine' : 'opp'}">${isMyTurnLS ? '自分のターン' : '相手のターン'}</span>` : ''}
           <button class="mg-rbn-btn" onclick="toggleMobileRibbonOther()">${_mobileRibbonOtherOpen ? '▲' : '▼ その他'}</button>
           <button class="mg-rbn-btn log" onclick="toggleMobileGameLog()">ログ</button>
@@ -2993,13 +2950,16 @@ function getMobileDeckRevealCards(mode = 'public') {
 
 function getMobileDeckRevealDestinationOptions() {
   return [
-    { value: 'hand', label: '手札' },
-    { value: 'battleZone', label: 'バトルゾーン' },
-    { value: 'manaZone', label: 'マナゾーン' },
-    { value: 'shields', label: 'シールド' },
-    { value: 'graveyard', label: '墓地' },
-    { value: 'deck:top', label: '山札トップ' },
-    { value: 'deck:bottom', label: '山札ボトム' }
+    { value: 'hand', label: '\u624b\u672d' },
+    { value: 'battleZone', label: '\u30d0\u30c8\u30eb\u30be\u30fc\u30f3' },
+    { value: 'manaZone', label: '\u30de\u30ca\u30be\u30fc\u30f3' },
+    { value: 'shields', label: '\u30b7\u30fc\u30eb\u30c9' },
+    { value: 'graveyard', label: '\u5893\u5730' },
+    { value: 'deck:top', label: '\u5c71\u672d\u4e0a' },
+    { value: 'deck:bottom', label: '\u5c71\u672d\u4e0b' },
+    { value: 'hyperZone', label: '\u8d85\u6b21\u5143\u30be\u30fc\u30f3' },
+    { value: 'grZone', label: '\u8d85GR\u30be\u30fc\u30f3' },
+    { value: 'specialZone', label: '\u7279\u6b8a\u30be\u30fc\u30f3' }
   ];
 }
 
@@ -3182,13 +3142,16 @@ function renderMobileDeckRevealModal() {
 
   const selected = _mobileDeckRevealModalState.selected;
   const quickButtons = [
-    { value: 'hand', label: '手札', className: 'hand' },
+    { value: 'hand', label: '\u624b\u672d', className: 'hand' },
     { value: 'battleZone', label: 'BZ', className: 'battle' },
-    { value: 'manaZone', label: 'マナ', className: 'mana' },
-    { value: 'shields', label: '盾', className: 'shield' },
-    { value: 'graveyard', label: '墓地', className: 'grave' },
-    { value: 'deck:top', label: '上', className: 'deck' },
-    { value: 'deck:bottom', label: '下', className: 'deck' }
+    { value: 'manaZone', label: '\u30de\u30ca', className: 'mana' },
+    { value: 'shields', label: '\u76fe', className: 'shield' },
+    { value: 'graveyard', label: '\u5893\u5730', className: 'grave' },
+    { value: 'deck:top', label: '\u5c71\u4e0a', className: 'deck' },
+    { value: 'deck:bottom', label: '\u5c71\u4e0b', className: 'deck' },
+    { value: 'hyperZone', label: '\u8d85\u6b21\u5143', className: 'deck' },
+    { value: 'grZone', label: 'GR', className: 'deck' },
+    { value: 'specialZone', label: '\u7279\u6b8a', className: 'deck' }
   ];
 
   listEl.innerHTML = cards.map((card, index) => {
@@ -3762,18 +3725,9 @@ async function newMobileDeck() {
   const name = String(await askMobileInput('デッキ名を入力') || '').trim();
   if (!name) return;
 
-  const decks = getSavedDecksMobile();
-  if (decks[name]) {
-    showMobileToast('このデッキは既に存在します', 'warn');
-    return;
-  }
-
-  decks[name] = [];
   if (window.GameController) {
-    window.GameController.saveSavedDecks(decks);
     window.GameController.setDeckEditingState(name, []);
   } else {
-    localStorage.setItem('dm_decks', JSON.stringify(decks));
     window._deckEditing = name;
     window._deckCards = [];
   }
@@ -3788,72 +3742,39 @@ async function deleteMobileDeck(name) {
   if (!deckName) return;
 
   const account = AuthService.getCurrentAccount();
-  const canCloudDelete = !!(account && !account.isGuest && account.pin);
-  let cloudDeleteError = '';
-  let deletedCloud = false;
-
-  if (canCloudDelete) {
-    const result = await NetworkService.deleteDeck(account.username, account.pin, deckName);
-    if (result?.ok) {
-      deletedCloud = true;
-    } else if (result?.error) {
-      cloudDeleteError = result.error;
-    }
-  }
-
-  const decks = getSavedDecksMobile();
-  const hadLocalDeck = Object.prototype.hasOwnProperty.call(decks, deckName);
-  if (hadLocalDeck) {
-    delete decks[deckName];
-  }
-
-  if (window.GameController) {
-    if (hadLocalDeck) {
-      window.GameController.saveSavedDecks(decks);
-    }
-    if (window._deckEditing === deckName) {
-      window.GameController.setDeckEditingState(null, []);
-    }
-  } else {
-    if (hadLocalDeck) {
-      localStorage.setItem('dm_decks', JSON.stringify(decks));
-    }
-    if (window._deckEditing === deckName) {
-      window._deckEditing = null;
-      window._deckCards = [];
-    }
-  }
-
-  if (canCloudDelete) {
-    const names = await NetworkService.loadServerDecks(account.username, account.pin);
-    if (Array.isArray(names)) {
-      if (window.AppState) {
-        window.AppState.set('_serverDeckNames', names);
-      } else {
-        window._serverDeckNames = names;
-      }
-    } else {
-      showMobileToast('クラウド一覧の更新に失敗しました（ローカル表示は維持）', 'warn');
-    }
-  }
-
-  if (!deletedCloud && !hadLocalDeck) {
-    showMobileToast(cloudDeleteError || 'デッキが見つかりませんでした', 'warn');
-    renderMobileDeckList();
+  if (!account || account.isGuest || !account.pin) {
+    showMobileToast('PIN login is required for cloud deck deletion', 'warn');
     return;
   }
 
-  if (cloudDeleteError && hadLocalDeck) {
-    showMobileToast(`ローカルから削除しました（クラウド削除失敗: ${cloudDeleteError}）`, 'warn');
-  } else {
-    showMobileToast('デッキを削除しました', 'ok');
+  const result = await NetworkService.deleteDeck(account.username, account.pin, deckName);
+  if (!result?.ok) {
+    showMobileToast(result?.error || 'Failed to delete cloud deck', 'warn');
+    return;
   }
+
+  if (window.GameController) {
+    window.GameController.setDeckEditingState(null, []);
+  } else {
+    window._deckEditing = null;
+    window._deckCards = [];
+  }
+
+  const names = await NetworkService.loadServerDecks(account.username, account.pin);
+  if (Array.isArray(names)) {
+    if (window.AppState) {
+      window.AppState.set('_serverDeckNames', names);
+    } else {
+      window._serverDeckNames = names;
+    }
+  } else {
+    showMobileToast('Failed to refresh cloud deck list', 'warn');
+  }
+
+  showMobileToast('Cloud deck deleted', 'ok');
   renderMobileDeckList();
 }
 
-/**
- * SP版 デッキ編集画面
- */
 function renderMobileDeckEdit() {
   renderMobileDeckList();
 }
@@ -3897,24 +3818,22 @@ async function openMobileDeck(name) {
     return;
   }
 
-  try {
-    const savedDecks = getSavedDecksMobile();
-    let cards = [];
+  const account = AuthService.getCurrentAccount();
+  if (!account || account.isGuest || !account.pin) {
+    showMobileToast('Log in to use cloud decks', 'warn');
+    clearMobileDeckSelection();
+    return;
+  }
 
-    const account = AuthService.getCurrentAccount();
-    if (account && !account.isGuest && account.pin) {
-      // ログイン中はクラウドを優先、失敗時にローカルへフォールバック
-      const remoteDeck = await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
-      if (Array.isArray(remoteDeck) && remoteDeck.length > 0) {
-        cards = remoteDeck.map(card => NetworkService.normalizeCardData(card));
-      } else if (Array.isArray(savedDecks[deckName])) {
-        cards = JSON.parse(JSON.stringify(savedDecks[deckName])).map(card => NetworkService.normalizeCardData(card));
-      }
-    } else if (Array.isArray(savedDecks[deckName])) {
-      cards = JSON.parse(JSON.stringify(savedDecks[deckName])).map(card => NetworkService.normalizeCardData(card));
+  try {
+    const remoteDeck = await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
+    if (!Array.isArray(remoteDeck)) {
+      showMobileToast('API unavailable; cloud deck could not be loaded', 'warn');
+      clearMobileDeckSelection();
+      return;
     }
 
-    const sortedCards = sortMobileDeckCards(cards);
+    const sortedCards = sortMobileDeckCards(remoteDeck.map(card => NetworkService.normalizeCardData(card)));
     if (window.GameController) {
       window.GameController.setDeckEditingState(deckName, sortedCards);
     } else {
@@ -3936,26 +3855,13 @@ async function openMobileDeck(name) {
       window._deckCards = hydratedSorted;
     }
 
-    const decks = getSavedDecksMobile();
-    if (Array.isArray(decks[deckName])) {
-      decks[deckName] = hydratedSorted.map(card => NetworkService.normalizeCardData(card));
-      if (window.GameController) {
-        window.GameController.saveSavedDecks(decks);
-      } else {
-        localStorage.setItem('dm_decks', JSON.stringify(decks));
-      }
-    }
-
     renderMobileDeckList();
   } catch (error) {
-    console.error('デッキ読み込みエラー:', error);
-    showMobileToast('デッキの読み込みに失敗しました', 'warn');
+    console.error('deck load error:', error);
+    showMobileToast('API unavailable; cloud deck could not be loaded', 'warn');
   }
 }
 
-/**
- * カード枚数増加（SP版）
- */
 function incrementMobileCardCount(idx) {
   if (!window._deckEditing) {
     showMobileToast('先に編集するデッキを選択してください', 'warn');
@@ -4026,9 +3932,14 @@ async function addToMobileDeck(cardJson, addCount = 1) {
     }
 
     const rawCard = typeof cardJson === 'string' ? JSON.parse(cardJson) : cardJson;
+    const hasUserSelectedImage = !!String(rawCard?.selectedImageUrl || rawCard?.selectedArtId || '').trim();
+    const suppressUnsafeSearchImage = !hasUserSelectedImage
+      && String(rawCard?.imageStatus || '').includes('suppressed-unsafe');
     const card = await NetworkService.enrichCardImage(rawCard, {
       retries: 2,
-      retryDelayMs: 350
+      retryDelayMs: 350,
+      allowNameFallback: !suppressUnsafeSearchImage,
+      suppressImage: suppressUnsafeSearchImage
     });
     const normalized = NetworkService.normalizeCardData(card);
     const normalizedKey = String(normalized.cardId || normalized.id || '');
@@ -4078,7 +3989,7 @@ async function restoreAllMobileLocalDecksToCloud() {
     return;
   }
 
-  const savedDecks = getSavedDecksMobile();
+  const savedDecks = getLocalSavedDecksMobileForMigration();
   const deckNames = Object.keys(savedDecks).filter((name) => Array.isArray(savedDecks[name]));
   if (!deckNames.length) {
     showMobileToast('ローカル復元できるデッキがありません', 'warn');
@@ -4128,6 +4039,22 @@ async function restoreAllMobileLocalDecksToCloud() {
   } else {
     showMobileToast(`クラウド復元完了（${success}件）`, 'ok');
   }
+  if (success > 0 && failed === 0) {
+    const clearLocal = await askMobileConfirm(
+      'Remove migrated local dm_decks now?',
+      'Remove',
+      'Keep'
+    );
+    if (clearLocal) {
+      try {
+        localStorage.removeItem('dm_decks');
+        showMobileToast('Local decks removed', 'ok');
+      } catch (error) {
+        console.warn('dm_decks cleanup failed', error);
+        showMobileToast('Failed to delete cloud deck', 'warn');
+      }
+    }
+  }
   renderMobileDeckList();
 }
 
@@ -4170,14 +4097,6 @@ async function saveMobileDeckToCloud() {
 
     if (typeof NetworkService.clearDeckCache === 'function') {
       NetworkService.clearDeckCache(deckName);
-    }
-
-    const decks = getSavedDecksMobile();
-    decks[deckName] = deckData;
-    if (window.GameController) {
-      window.GameController.saveSavedDecks(decks);
-    } else {
-      localStorage.setItem('dm_decks', JSON.stringify(decks));
     }
 
     const names = await NetworkService.loadServerDecks(account.username, account.pin);
@@ -4225,10 +4144,8 @@ async function openMobileVsSetup() {
     showMobileToast('先にデッキを選択してください', 'warn');
     return;
   }
-  const savedDecks = getSavedDecksMobile();
-  const localNames = Object.keys(savedDecks);
-  const cloudNames = Array.isArray(window._serverDeckNames) ? window._serverDeckNames : [];
-  const allNames = Array.from(new Set([...localNames, ...cloudNames]))
+  const allNames = (Array.isArray(window._serverDeckNames) ? window._serverDeckNames : [])
+    .slice()
     .sort((a, b) => String(a).localeCompare(String(b), 'ja'));
 
   const optionsHtml = allNames.map(n =>
@@ -4283,8 +4200,6 @@ async function startMobileVsGame(p1DeckName, p2DeckName) {
       const d = await window.GameController.resolveDeckData(name, account);
       if (d && d.length) return d;
     }
-    const saved = getSavedDecksMobile();
-    if (saved[name] && saved[name].length) return saved[name];
     if (account && !account.isGuest && account.pin) {
       return await NetworkService.fetchServerDeck(account.username, account.pin, name).catch(() => null);
     }
@@ -4593,10 +4508,6 @@ async function getMobileDeckDataForOnline(deckName) {
     return await window.GameController.resolveDeckData(deckName, account);
   }
 
-  const savedDecks = getSavedDecksMobile();
-  if (savedDecks[deckName]) {
-    return Array.isArray(savedDecks[deckName]) ? savedDecks[deckName] : null;
-  }
   if (account && !account.isGuest && account.pin) {
     return await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
   }

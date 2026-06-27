@@ -2675,6 +2675,32 @@ def _image_identity_key(raw_url: str) -> str:
 
 # ─── HTTP Handler ──────────────────────────────────────────────────────────────
 
+
+def _sanitize_search_result_card(card: dict) -> dict:
+    """Return search-list data with unsafe images suppressed.
+
+    Search hits can come from partial name matches, legacy thumbnails, or cached
+    dmwiki/name fallbacks. Those images are not authoritative enough for deck
+    building, so search results prefer NO IMG over a possibly wrong card image.
+    Detail and illustration endpoints still provide image selection.
+    """
+    if not isinstance(card, dict):
+        return {}
+    out = dict(card)
+    source_id = _safe_text(out.get("sourceId") or out.get("id") or out.get("card_id"), maxlen=240)
+    if source_id:
+        out["sourceId"] = source_id
+        out["id"] = source_id
+    for key in ("imageUrl", "image_url", "image", "img", "thumb", "selectedImageUrl"):
+        out.pop(key, None)
+    out["imageConfidence"] = "none"
+    out["imageStatus"] = "suppressed-unsafe-search-image"
+    return out
+
+
+def _sanitize_search_results(cards: list[dict]) -> list[dict]:
+    return [_sanitize_search_result_card(card) for card in (cards or []) if isinstance(card, dict)]
+
 class DMServer(ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     daemon_threads = True         # threads die with the server
@@ -3075,9 +3101,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "page must be an integer"}, 400)
             page = max(1, page)
             cards, total = search_cards(q, page)
-            sources = sorted({str(c.get("source") or "").strip() for c in cards if isinstance(c, dict) and c.get("source")})
+            safe_cards = _sanitize_search_results(cards)
+            sources = sorted({str(c.get("source") or "").strip() for c in safe_cards if isinstance(c, dict) and c.get("source")})
             source = sources[0] if len(sources) == 1 else ("mixed" if sources else "")
-            self._json({"cards": cards, "query": q, "page": page, "total": total, "source": source})
+            self._json({"cards": safe_cards, "query": q, "page": page, "total": total, "source": source})
 
         # /detail?id=...  (prefix "dmwiki_" = dmwiki.net)
         # /detail?name=... (dmwiki card name fallback)

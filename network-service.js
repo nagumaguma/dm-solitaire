@@ -344,6 +344,27 @@ const NetworkService = {
     };
   },
 
+  isSearchImageTrusted(card) {
+    const confidence = String(card?.imageConfidence || '').trim().toLowerCase();
+    return confidence === 'verified-id' || confidence === 'official-id';
+  },
+
+  normalizeSearchResultCard(card) {
+    const normalized = this.normalizeCardData(card);
+    if (!normalized || typeof normalized !== 'object') return normalized;
+    if (this.isSearchImageTrusted(normalized)) return normalized;
+
+    return {
+      ...normalized,
+      imageUrl: '',
+      thumb: '',
+      img: '',
+      selectedImageUrl: '',
+      imageConfidence: String(normalized?.imageConfidence || 'none'),
+      imageStatus: String(normalized?.imageStatus || 'suppressed-unsafe-search-image')
+    };
+  },
+
   async fetchCardDetail(cardId, options = {}) {
     const cacheKey = this._detailLookupId(cardId);
     if (!cacheKey) return null;
@@ -426,6 +447,17 @@ const NetworkService = {
   async enrichCardImage(card, options = {}) {
     const normalized = this.normalizeCardData(card);
     if (!normalized) return normalized;
+    const suppressImage = options?.suppressImage === true;
+    if (suppressImage) {
+      return {
+        ...normalized,
+        imageUrl: '',
+        thumb: '',
+        img: '',
+        selectedImageUrl: '',
+        imageStatus: String(normalized?.imageStatus || 'suppressed-unsafe-search-image')
+      };
+    }
     if (this._getCardImageUrl(normalized) && normalized.name && Number.isFinite(Number(normalized.cost))) return normalized;
 
     const detailId = this._detailLookupId(normalized.sourceId || normalized.id);
@@ -464,7 +496,8 @@ const NetworkService = {
       }
     }
 
-    if (!this._getCardImageUrl(merged) && fallbackName) {
+    const allowNameFallback = options?.allowNameFallback !== false;
+    if (allowNameFallback && !this._getCardImageUrl(merged) && fallbackName) {
       const byName = await this.fetchCardDetailByName(fallbackName, {
         timeoutMs,
         forceRefresh: options?.forceDetailRefresh === true || !!detailId
@@ -863,7 +896,7 @@ const NetworkService = {
         let data = {};
         try { data = await res.json(); } catch { data = {}; }
         const cards = Array.isArray(data.cards) ? data.cards : [];
-        const normalized = cards.map(card => this.normalizeCardData(card));
+        const normalized = cards.map(card => this.normalizeSearchResultCard(card));
         const total = Number(data.total);
         const safeTotal = Number.isFinite(total) ? total : normalized.length;
         this._setSearchCache(cacheKey, normalized, safeTotal, data.source);

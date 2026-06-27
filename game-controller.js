@@ -8,7 +8,7 @@
     return Array.isArray(cards) ? JSON.parse(JSON.stringify(cards)) : [];
   }
 
-  function getSavedDecks() {
+  function getLocalSavedDecks() {
     try {
       const raw = localStorage.getItem('dm_decks');
       return raw ? JSON.parse(raw) : {};
@@ -18,8 +18,12 @@
     }
   }
 
-  function saveSavedDecks(decks) {
-    localStorage.setItem('dm_decks', JSON.stringify(decks || {}));
+  function getSavedDecks() {
+    return {};
+  }
+
+  function saveSavedDecks(_decks) {
+    // Cloud-only deck management: do not write dm_decks during normal flows.
   }
 
   function setDeckEditingState(deckName, cards) {
@@ -50,11 +54,6 @@
   }
 
   async function resolveDeckData(deckName, account) {
-    const savedDecks = getSavedDecks();
-    if (savedDecks[deckName]) {
-      return cloneCards(savedDecks[deckName]);
-    }
-
     if (account && !account.isGuest && account.pin) {
       const remote = await NetworkService.fetchServerDeck(account.username, account.pin, deckName);
       return Array.isArray(remote) ? remote : null;
@@ -496,6 +495,7 @@
 
   global.GameController = {
     getSavedDecks,
+    getLocalSavedDecks,
     saveSavedDecks,
     setDeckEditingState,
     getDeckEditingState,

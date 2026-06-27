@@ -1,0 +1,12 @@
+{
+  "name": "dm-solitaire-local-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test:search-image": "playwright test tests/search-image.spec.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0"
+  }
+}
