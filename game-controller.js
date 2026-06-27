@@ -260,6 +260,9 @@
       shields: 5,
       deckRevealZone: 0,
       revealedZone: 0,
+      hyperZone: 0,
+      grZone: 0,
+      specialZone: 0,
       deck: 30,
       graveyard: 0
     };
@@ -319,6 +322,9 @@
       shields: state.shields.length,
       deckRevealZone: serializePublicCards(state.deckRevealZone),
       revealedZone: serializePublicCards(state.revealedZone),
+      hyperZone: serializePublicCards(state.hyperZone),
+      grZone: serializePublicCards(state.grZone),
+      specialZone: serializePublicCards(state.specialZone),
       battleZone: serializePublicCards(state.battleZone),
       manaZone: serializePublicCards(state.manaZone),
       graveyard: serializePublicCards(state.graveyard)
@@ -389,22 +395,30 @@
       throw new Error('createSearchController requires searchFn');
     }
 
-    let state = {
+    const emptyState = () => ({
       query: '',
+      effectiveQuery: '',
       page: 0,
       items: [],
+      total: 0,
       hasMore: false,
-      loading: false
-    };
+      loading: false,
+      source: ''
+    });
+
+    let state = emptyState();
     let requestId = 0;
 
     function snapshot() {
       return {
         query: state.query,
+        effectiveQuery: state.effectiveQuery,
         page: state.page,
         items: [...state.items],
+        total: state.total,
         hasMore: state.hasMore,
-        loading: state.loading
+        loading: state.loading,
+        source: state.source
       };
     }
 
@@ -412,12 +426,12 @@
       const keyword = String(query || '').trim();
       if (!keyword) {
         requestId += 1;
-        state = { query: '', page: 0, items: [], hasMore: false, loading: false };
+        state = emptyState();
         return snapshot();
       }
 
       if (!append && keyword !== state.query) {
-        state = { query: keyword, page: 0, items: [], hasMore: false, loading: false };
+        state = { ...emptyState(), query: keyword };
       }
 
       if (state.loading) return snapshot();
@@ -427,26 +441,38 @@
       const nextPage = append ? state.page + 1 : 1;
 
       try {
-        const results = await searchFn(keyword, nextPage);
+        const result = await searchFn(keyword, nextPage);
         if (thisRequest !== requestId) return snapshot();
 
-        const rawItems = Array.isArray(results) ? results.slice(0, pageSize) : [];
+        const rawItems = Array.isArray(result)
+          ? result.slice()
+          : (Array.isArray(result?.cards) ? result.cards.slice() : []);
         const pageItems = transformPage
           ? await transformPage(rawItems, {
             query: keyword,
             page: nextPage,
-            append
+            append,
+            result
           })
           : rawItems;
         if (thisRequest !== requestId) return snapshot();
         const safePageItems = Array.isArray(pageItems) ? pageItems : [];
 
+        const previousCount = append ? state.items.length : 0;
+        const combinedCount = previousCount + safePageItems.length;
+        const resultTotal = Number(result?.total);
+        const hasTotal = Number.isFinite(resultTotal) && resultTotal >= 0;
+        const fallbackHasMore = rawItems.length >= pageSize || safePageItems.length >= pageSize;
+
         state = {
           query: keyword,
-          page: nextPage,
+          effectiveQuery: String(result?.query || keyword),
+          page: Number(result?.page) || nextPage,
           items: append ? [...state.items, ...safePageItems] : safePageItems,
-          hasMore: safePageItems.length >= pageSize,
-          loading: false
+          total: hasTotal ? resultTotal : combinedCount,
+          hasMore: hasTotal ? combinedCount < resultTotal : fallbackHasMore,
+          loading: false,
+          source: String(result?.source || '')
         };
       } catch (err) {
         if (thisRequest === requestId) state.loading = false;
@@ -461,7 +487,7 @@
       searchMore: () => search(state.query, true),
       reset: () => {
         requestId += 1;
-        state = { query: '', page: 0, items: [], hasMore: false, loading: false };
+        state = emptyState();
         return snapshot();
       },
       getState: snapshot

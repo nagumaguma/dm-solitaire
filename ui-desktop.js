@@ -804,7 +804,13 @@ function renderDesktopSearchResults() {
         ${items.map(card => {
           const payload = encodeURIComponent(JSON.stringify(card));
           const thumb = renderDesktopCardThumb(card, 'dl-search-card-image');
-          const label = `${getDesktopCardDisplayName(card)} / コスト${getDesktopCardCostLabel(card)}`;
+          const name = getDesktopCardDisplayName(card);
+          const metaParts = [
+            `???${getDesktopCardCostLabel(card)}`,
+            String(card?.civilization || card?.civ || '').trim(),
+            String(card?.source || '').trim()
+          ].filter(Boolean);
+          const label = `${name} / ${metaParts.join(' / ')}`;
           const safeLabel = escapeHtml(label);
           return `
             <button
@@ -814,7 +820,11 @@ function renderDesktopSearchResults() {
               data-card-json="${payload}"
               title="${safeLabel}"
               aria-label="${safeLabel}">
-              ${thumb}
+              <div class="dl-search-thumb-wrap">${thumb}</div>
+              <div class="dl-search-tile-body">
+                <div class="dl-search-tile-name">${escapeHtml(name)}</div>
+                <div class="dl-search-tile-meta">${escapeHtml(metaParts.join(' / '))}</div>
+              </div>
             </button>
           `;
         }).join('')}
@@ -1126,6 +1136,9 @@ function normalizeDesktopOpponentState(rawState) {
     shields: Math.max(0, Number(src.shields) || 0),
     deckRevealZone: normalizeDesktopPublicZone(src.deckRevealZone),
     revealedZone: normalizeDesktopPublicZone(src.revealedZone),
+    hyperZone: normalizeDesktopPublicZone(src.hyperZone),
+    grZone: normalizeDesktopPublicZone(src.grZone),
+    specialZone: normalizeDesktopPublicZone(src.specialZone),
     battleZone: normalizeDesktopPublicZone(src.battleZone),
     manaZone: normalizeDesktopPublicZone(src.manaZone),
     graveyard: normalizeDesktopPublicZone(src.graveyard)
@@ -1169,6 +1182,9 @@ function buildDesktopPublicState(state) {
     shields: state.shields.length,
     deckRevealZone: serializeDesktopPublicCards(state.deckRevealZone),
     revealedZone: serializeDesktopPublicCards(state.revealedZone),
+    hyperZone: serializeDesktopPublicCards(state.hyperZone),
+    grZone: serializeDesktopPublicCards(state.grZone),
+    specialZone: serializeDesktopPublicCards(state.specialZone),
     battleZone: serializeDesktopPublicCards(state.battleZone),
     manaZone: serializeDesktopPublicCards(state.manaZone),
     graveyard: serializeDesktopPublicCards(state.graveyard)
@@ -1676,7 +1692,13 @@ function renderDesktopGame() {
         ? 'manaZone'
         : (zoneClass === 'grave'
           ? 'graveyard'
-          : (zoneClass === 'revealed' ? 'revealedZone' : '')));
+          : (zoneClass === 'revealed'
+            ? 'revealedZone'
+            : (zoneClass === 'hyper'
+              ? 'hyperZone'
+              : (zoneClass === 'gr'
+                ? 'grZone'
+                : (zoneClass === 'special' ? 'specialZone' : ''))))));
     const isOpponentCard = String(extra || '').includes('opponent');
     const isVsOpp = extra === 'vs-opp';
     const isOwnBoardCard = !isOpponentCard && !isVsOpp && idx >= 0 && (sourceZone === 'battleZone' || sourceZone === 'manaZone');
@@ -1743,6 +1765,7 @@ function renderDesktopGame() {
           <div class="dg-turn-pill">T<b>${state.turn}</b> 手<b>${state.hand.length}</b> マナ<b>${state.manaZone.length}</b></div>
           ${vs ? `<div class="dg-full-state mine">VS: ${escapeHtml(vs.activePlayer === 'p1' ? `P1 (${vs.p1DeckName})` : `P2 (${vs.p2DeckName})`)} のターン</div>` : ol ? `<div class="dg-full-state ${isMyTurn ? 'mine' : 'opponent'}">${isMyTurn ? 'あなたのターン' : '相手のターン'}</div>` : '<div class="dg-full-state solo">一人回し</div>'}}
           ${olEff ? `<span class="dg-v2-match">${escapeHtml(myName)} vs ${escapeHtml(oppName)}</span>` : ''}
+          ${onlineStatusText ? `<span class="dg-v2-match">${escapeHtml(onlineStatusText)}</span>` : ''}
         </div>
         <div class="dg-v2-head-actions">
           <button onclick="drawDesktopCard()" class="dg-btn draw ${_desktopNeedDrawGuide ? 'guide' : ''}">ドロー</button>
@@ -1808,6 +1831,15 @@ function renderDesktopGame() {
             </div>
           </div>
 
+          <div class="dg-v2-row opp-extra">
+            <span class="dg-v2-label">EX<br><b>${getZoneCount(opp.hyperZone) + getZoneCount(opp.grZone) + getZoneCount(opp.specialZone)}</b></span>
+            <div class="dg-v2-cards">
+              <span class="dg-zone-hint">Hyper</span>${renderOpponentPublicZone(opp.hyperZone, 'hyper')}
+              <span class="dg-zone-hint">GR</span>${renderOpponentPublicZone(opp.grZone, 'gr')}
+              <span class="dg-zone-hint">Special</span>${renderOpponentPublicZone(opp.specialZone, 'special')}
+            </div>
+          </div>
+
           <div class="dg-v2-sep"></div>
           ` : ''}
 
@@ -1861,6 +1893,15 @@ function renderDesktopGame() {
               <span class="dg-v2-pile-name">墓地</span>
               <span class="dg-v2-pile-cnt">${state.graveyard.length}</span>
             </button>
+          </div>
+
+          <div class="dg-v2-row my-extra">
+            <span class="dg-v2-label">EX<br><b>${state.hyperZone.length + state.grZone.length + state.specialZone.length}</b></span>
+            <div class="dg-v2-cards">
+              <span class="dg-zone-hint">Hyper</span>${state.hyperZone.length ? state.hyperZone.map((c, i) => renderChip(c, 'hyper', i)).join('') : '<div class="dg-zone-empty">0</div>'}
+              <span class="dg-zone-hint">GR</span>${state.grZone.length ? state.grZone.map((c, i) => renderChip(c, 'gr', i)).join('') : '<div class="dg-zone-empty">0</div>'}
+              <span class="dg-zone-hint">Special</span>${state.specialZone.length ? state.specialZone.map((c, i) => renderChip(c, 'special', i)).join('') : '<div class="dg-zone-empty">0</div>'}
+            </div>
           </div>
 
           <div class="dg-v2-row my-hand">
@@ -2463,6 +2504,25 @@ function getDesktopCardZoneActions(sourceZone, sourceCard) {
       move('山札ボトムへ', 'deck', 'bottom'),
       { kind: 'sep' },
       { kind: 'deckAll', label: '山札を全部見る' }
+    );
+  }
+
+  const externalTargets = [
+    move('Move to Hyper Zone', 'hyperZone'),
+    move('Move to GR Zone', 'grZone'),
+    move('Move to Special Zone', 'specialZone')
+  ];
+  if (!['hyperZone', 'grZone', 'specialZone'].includes(sourceZone) && sourceZone !== 'deck') {
+    actions.push({ kind: 'sep' }, ...externalTargets);
+  }
+  if (['hyperZone', 'grZone', 'specialZone'].includes(sourceZone)) {
+    actions.push(
+      move('Move to Hand', 'hand'),
+      move('Move to Battle', 'battleZone'),
+      move('Move to Mana', 'manaZone'),
+      move('Move to Grave', 'graveyard', 'top', true),
+      move('Move to Deck top', 'deck', 'top'),
+      move('Move to Deck bottom', 'deck', 'bottom')
     );
   }
 
@@ -4848,7 +4908,7 @@ function startDesktopOnlineGame() {
   if (window.GameController) {
     window.GameController.startOnlineMatch(window._ol.p);
   } else {
-    window._olOpponent = { hand: 5, battleZone: 0, manaZone: 0, shields: 5, deckRevealZone: 0, revealedZone: 0, deck: 30, graveyard: 0 };
+    window._olOpponent = { hand: 5, battleZone: 0, manaZone: 0, shields: 5, deckRevealZone: 0, revealedZone: 0, hyperZone: 0, grZone: 0, specialZone: 0, deck: 30, graveyard: 0 };
     // p1 のみ先攻をランダム決定。p2 は最初の opponent_state で active を受け取る。
     if (window._ol.p === 'p1') {
       window._olCurrentPlayer = Math.random() < 0.5 ? 1 : 2;
@@ -4896,6 +4956,8 @@ function olStartEventListenerDesktop() {
   es.addEventListener('opponent_state', (e) => {
     if (!window._ol || window._ol.room !== room) return;
 
+    window._ol.connectionStatus = 'connected';
+    window._ol.lastSeenAt = Date.now();
     window._ol.reconnectAttempt = 0;
     let data; try { data = JSON.parse(e.data); } catch { return; }
     if (!shouldApplyRemotePayloadDesktop(data)) return;
@@ -4927,6 +4989,8 @@ function olStartEventListenerDesktop() {
   es.addEventListener('turn_end', (e) => {
     if (!window._ol || window._ol.room !== room) return;
 
+    window._ol.connectionStatus = 'connected';
+    window._ol.lastSeenAt = Date.now();
     window._ol.reconnectAttempt = 0;
     let data; try { data = JSON.parse(e.data); } catch { return; }
     if (!shouldApplyRemotePayloadDesktop(data)) return;
@@ -4960,6 +5024,8 @@ function olStartEventListenerDesktop() {
   es.addEventListener('chat_message', (e) => {
     if (!window._ol || window._ol.room !== room) return;
 
+    window._ol.connectionStatus = 'connected';
+    window._ol.lastSeenAt = Date.now();
     window._ol.reconnectAttempt = 0;
     let data; try { data = JSON.parse(e.data); } catch { return; }
     appendDesktopChatMessage(data.name || 'Player', data.msg || '', data.p || '');
@@ -5003,7 +5069,9 @@ function olStartEventListenerDesktop() {
 
     if (!window._ol || window._ol.room !== room) return;
 
+    window._ol.connectionStatus = 'reconnecting';
     window._ol.reconnectAttempt = (window._ol.reconnectAttempt || 0) + 1;
+    renderDesktopGame();
     if (window._ol.reconnectAttempt < 3) {
       const delay = Math.pow(2, window._ol.reconnectAttempt) * 1000;
       if (_olReconnectTimerDesktop) clearTimeout(_olReconnectTimerDesktop);

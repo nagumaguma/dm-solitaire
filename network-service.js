@@ -46,15 +46,66 @@ const NetworkService = {
     return `${String(q || '').trim()}::${Number(page) || 1}`;
   },
 
+  _toKatakana(text) {
+    return String(text || '').replace(/[\u3041-\u3096]/g, (ch) =>
+      String.fromCharCode(ch.charCodeAt(0) + 0x60)
+    );
+  },
+
+  normalizeSearchQuery(q) {
+    const half = String(q || '').replace(/[\uFF01-\uFF5E]/g, (ch) =>
+      String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)
+    ).replace(/\u3000/g, ' ');
+
+    return this._toKatakana(half.normalize('NFKC'))
+      .replace(/[\u300A\u300B\u300C\u300D\u300E\u300F\u3010\u3011\uFF3B\uFF3D\[\]\uFF08\uFF09()]/g, ' ')
+      .replace(/[\u30FB\uFF65]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  },
+
+  compactSearchQuery(q) {
+    return this.normalizeSearchQuery(q).replace(/[\s\/\uFF0F\-\u30FB\uFF65]+/g, '');
+  },
+
+  getSearchQueryVariants(q) {
+    const base = this.normalizeSearchQuery(q);
+    if (!base) return [];
+
+    const variants = [];
+    const add = (value) => {
+      const text = String(value || '').trim();
+      if (!text || variants.includes(text)) return;
+      variants.push(text);
+    };
+
+    add(base);
+    add(this.compactSearchQuery(base));
+
+    const slashParts = base.split(/[\/\uFF0F]/).map((part) => part.trim()).filter(Boolean);
+    for (const part of slashParts) {
+      add(part);
+      add(this.compactSearchQuery(part));
+    }
+
+    const tokens = base.split(/[\s,\u3001]+/).map((part) => part.trim()).filter(Boolean);
+    for (const token of tokens) {
+      if (token.length >= 2) add(token);
+    }
+
+    return variants.slice(0, 8);
+  },
+
   _deckCacheKey(username, deckName) {
     return `${String(username || '').trim()}::${String(deckName || '').trim()}`;
   },
 
-  _setSearchCache(key, cards, total = null) {
+  _setSearchCache(key, cards, total = null, source = '') {
     const totalNumber = Number(total);
     this._searchCache.set(key, {
       items: cards,
       total: Number.isFinite(totalNumber) ? totalNumber : null,
+      source: String(source || ''),
       at: Date.now()
     });
 
@@ -787,54 +838,46 @@ const NetworkService = {
    */
   async searchCardsWithMeta(q, page = 1) {
     try {
-      const keyword = String(q || '').trim();
+      const rawKeyword = String(q || '').trim();
       const pageNumber = Number(page) || 1;
-      if (!keyword) {
-        return { cards: [], total: 0, page: pageNumber };
-      }
-
-      const cacheKey = this._searchCacheKey(keyword, pageNumber);
-      const cached = this._searchCache.get(cacheKey);
-      if (cached && (Date.now() - cached.at) < this._searchCacheTtlMs) {
-        const cachedTotal = Number(cached.total);
-        return {
-          cards: Array.isArray(cached.items) ? cached.items : [],
-          total: Number.isFinite(cachedTotal) ? cachedTotal : 0,
-          page: pageNumber
-        };
-      }
+      const variants = this.getSearchQueryVariants(rawKeyword);
+      const keyword = variants[0] || '';
+      if (!keyword) return { cards: [], total: 0, page: pageNumber };
 
       const base = this.getApiBase();
-      const query = `q=${encodeURIComponent(keyword)}&page=${pageNumber}`;
-      const res = await fetch(`${base}/search?${query}`, {
-        signal: this._abortSignal(10000)
-      });
+      for (let i = 0; i < variants.length; i += 1) {
+        const candidate = variants[i];
+        const cacheKey = this._searchCacheKey(candidate, pageNumber);
+        const cached = this._searchCache.get(cacheKey);
+        if (cached && (Date.now() - cached.at) < this._searchCacheTtlMs) {
+          const cachedCards = Array.isArray(cached.items) ? cached.items : [];
+          const cachedTotal = Number(cached.total);
+          if (cachedCards.length || i === variants.length - 1) {
+            return { cards: cachedCards, total: Number.isFinite(cachedTotal) ? cachedTotal : 0, page: pageNumber, query: candidate, originalQuery: rawKeyword, source: String(cached.source || '') };
+          }
+        }
 
-      if (!res.ok) {
-        console.warn('検索失敗:', res.status);
-        return { cards: [], total: 0, page: pageNumber };
+        const query = `q=${encodeURIComponent(candidate)}&page=${pageNumber}`;
+        const res = await fetch(`${base}/search?${query}`, { signal: this._abortSignal(10000) });
+        if (!res.ok) { console.warn('search failed', res.status); continue; }
+        let data = {};
+        try { data = await res.json(); } catch { data = {}; }
+        const cards = Array.isArray(data.cards) ? data.cards : [];
+        const normalized = cards.map(card => this.normalizeCardData(card));
+        const total = Number(data.total);
+        const safeTotal = Number.isFinite(total) ? total : normalized.length;
+        this._setSearchCache(cacheKey, normalized, safeTotal, data.source);
+        if (normalized.length || i === variants.length - 1) {
+          return { cards: normalized, total: safeTotal, page: pageNumber, query: candidate, originalQuery: rawKeyword, source: String(data.source || '') };
+        }
       }
-
-      let data = {};
-      try { data = await res.json(); } catch { return { cards: [], total: 0, page: pageNumber }; }
-      const cards = Array.isArray(data.cards) ? data.cards : [];
-      const normalized = cards.map(card => this.normalizeCardData(card));
-      const total = Number(data.total);
-      const safeTotal = Number.isFinite(total) ? total : normalized.length;
-      this._setSearchCache(cacheKey, normalized, safeTotal);
-      return { cards: normalized, total: safeTotal, page: pageNumber };
+      return { cards: [], total: 0, page: pageNumber, query: keyword, originalQuery: rawKeyword };
     } catch (error) {
-      console.error('検索エラー:', error);
+      console.error('search error:', error);
       return { cards: [], total: 0, page: Number(page) || 1 };
     }
   },
 
-  /**
-   * カード検索
-   * @param {string} q - 検索クエリ
-   * @param {number} page - ページ番号
-   * @returns {Promise<Array>} 検索結果
-   */
   async searchCards(q, page = 1) {
     const result = await this.searchCardsWithMeta(q, page);
     return Array.isArray(result.cards) ? result.cards : [];

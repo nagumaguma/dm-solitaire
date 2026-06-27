@@ -941,6 +941,9 @@ function normalizeMobileOpponentState(rawState) {
     shields: Math.max(0, Number(src.shields) || 0),
     deckRevealZone: normalizeMobilePublicZone(src.deckRevealZone),
     revealedZone: normalizeMobilePublicZone(src.revealedZone),
+    hyperZone: normalizeMobilePublicZone(src.hyperZone),
+    grZone: normalizeMobilePublicZone(src.grZone),
+    specialZone: normalizeMobilePublicZone(src.specialZone),
     battleZone: normalizeMobilePublicZone(src.battleZone),
     manaZone: normalizeMobilePublicZone(src.manaZone),
     graveyard: normalizeMobilePublicZone(src.graveyard)
@@ -983,6 +986,9 @@ function buildMobilePublicState(state) {
     shields: state.shields.length,
     deckRevealZone: serializeMobilePublicCards(state.deckRevealZone),
     revealedZone: serializeMobilePublicCards(state.revealedZone),
+    hyperZone: serializeMobilePublicCards(state.hyperZone),
+    grZone: serializeMobilePublicCards(state.grZone),
+    specialZone: serializeMobilePublicCards(state.specialZone),
     battleZone: serializeMobilePublicCards(state.battleZone),
     manaZone: serializeMobilePublicCards(state.manaZone),
     graveyard: serializeMobilePublicCards(state.graveyard)
@@ -1193,6 +1199,25 @@ function getMobileCardZoneActions(sourceZone, sourceCard) {
       move('山札ボトムへ', 'deck', 'bottom'),
       { kind: 'sep' },
       { kind: 'deckAll', label: '山札を全部見る' }
+    );
+  }
+
+  const externalTargets = [
+    move('Move to Hyper Zone', 'hyperZone'),
+    move('Move to GR Zone', 'grZone'),
+    move('Move to Special Zone', 'specialZone')
+  ];
+  if (!['hyperZone', 'grZone', 'specialZone'].includes(sourceZone) && sourceZone !== 'deck') {
+    actions.push({ kind: 'sep' }, ...externalTargets);
+  }
+  if (['hyperZone', 'grZone', 'specialZone'].includes(sourceZone)) {
+    actions.push(
+      move('Move to Hand', 'hand'),
+      move('Move to Battle', 'battleZone'),
+      move('Move to Mana', 'manaZone'),
+      move('Move to Grave', 'graveyard', 'top', true),
+      move('Move to Deck top', 'deck', 'top'),
+      move('Move to Deck bottom', 'deck', 'bottom')
     );
   }
 
@@ -1902,7 +1927,7 @@ function initMobileUI() {
   engineMobile = new GameEngine();
   if (window.GameController) {
     _mobileSearchController = window.GameController.createSearchController({
-      searchFn: (keyword, page) => NetworkService.searchCards(keyword, page),
+      searchFn: (keyword, page) => NetworkService.searchCardsWithMeta(keyword, page),
       pageSize: 20
     });
   }
@@ -2156,14 +2181,15 @@ async function mobileSearchCards(q) {
 
     _mobileSearchState.loading = true;
     try {
-      const results = await NetworkService.searchCards(keyword, 1);
-      const pageItems = Array.isArray(results) ? results.slice(0, 20) : [];
+      const result = await NetworkService.searchCardsWithMeta(keyword, 1);
+      const pageItems = Array.isArray(result?.cards) ? result.cards : [];
       const normalizedItems = pageItems.map(c => NetworkService.normalizeCardData(c));
       // 非同期処理中にキーワードが変わっていたら破棄
       if (_mobileSearchState.query !== keyword) return;
       _mobileSearchState.page = 1;
       _mobileSearchState.items = normalizedItems;
-      _mobileSearchState.hasMore = pageItems.length >= 20;
+      _mobileSearchState.total = Number.isFinite(Number(result?.total)) ? Number(result.total) : normalizedItems.length;
+      _mobileSearchState.hasMore = _mobileSearchState.items.length < _mobileSearchState.total;
     } finally {
       if (_mobileSearchState.query === keyword) {
         _mobileSearchState.loading = false;
@@ -2177,7 +2203,7 @@ async function mobileSearchCards(q) {
 
   if (!_mobileSearchController) {
     _mobileSearchController = window.GameController.createSearchController({
-      searchFn: (kw, page) => NetworkService.searchCards(kw, page),
+      searchFn: (kw, page) => NetworkService.searchCardsWithMeta(kw, page),
       pageSize: 20
     });
   }
@@ -2216,14 +2242,15 @@ async function mobileSearchMore() {
     _mobileSearchState.loading = true;
     const nextPage = _mobileSearchState.page + 1;
     try {
-      const results = await NetworkService.searchCards(queryAtStart, nextPage);
-      const pageItems = Array.isArray(results) ? results.slice(0, 20) : [];
+      const result = await NetworkService.searchCardsWithMeta(queryAtStart, nextPage);
+      const pageItems = Array.isArray(result?.cards) ? result.cards : [];
       const normalizedItems = pageItems.map(c => NetworkService.normalizeCardData(c));
       // 非同期処理中にキーワードが変わっていたら破棄
       if (_mobileSearchState.query !== queryAtStart) return;
       _mobileSearchState.page = nextPage;
       _mobileSearchState.items = [..._mobileSearchState.items, ...normalizedItems];
-      _mobileSearchState.hasMore = pageItems.length >= 20;
+      _mobileSearchState.total = Number.isFinite(Number(result?.total)) ? Number(result.total) : normalizedItems.length;
+      _mobileSearchState.hasMore = _mobileSearchState.items.length < _mobileSearchState.total;
     } finally {
       if (_mobileSearchState.query === queryAtStart) _mobileSearchState.loading = false;
     }
@@ -2386,6 +2413,13 @@ function renderMobileSearchResults() {
     return;
   }
 
+  const total = Number(_mobileSearchState.total);
+  const hasTotal = Number.isFinite(total) && total > 0;
+  const source = String(_mobileSearchState.source || '').trim();
+  const summary = hasTotal
+    ? `<div class="ml-search-summary">${cards.length} / ${total}?${source ? ` ? ${escapeHtmlMobile(source)}` : ''}</div>`
+    : '';
+
   const rows = cards.map(card => {
     const payload = encodeURIComponent(JSON.stringify(card));
     const cost = getMobileCardCostLabel(card);
@@ -2417,7 +2451,7 @@ function renderMobileSearchResults() {
     ? `<button onclick="mobileSearchMore()" class="ml-more-btn" ${_mobileSearchState.loading ? 'disabled' : ''}>${_mobileSearchState.loading ? '読込中...' : 'もっと見る'}</button>`
     : '';
 
-  container.innerHTML = `${rows}${moreBtn}`;
+  container.innerHTML = `${summary}${rows}${moreBtn}`;
 }
 
 /**
@@ -2542,7 +2576,13 @@ function renderMobileGame() {
         ? 'manaZone'
         : (zoneClass === 'grave'
           ? 'graveyard'
-          : (zoneClass === 'revealed' ? 'revealedZone' : '')));
+          : (zoneClass === 'revealed'
+            ? 'revealedZone'
+            : (zoneClass === 'hyper'
+              ? 'hyperZone'
+              : (zoneClass === 'gr'
+                ? 'grZone'
+                : (zoneClass === 'special' ? 'specialZone' : ''))))));
     const isVsOpp = extra === 'vs-opp';
     const canMenu = idx >= 0 && !!sourceZone;
     const isOwnBoardCard = !isVsOpp && idx >= 0 && (sourceZone === 'battleZone' || sourceZone === 'manaZone');
@@ -2701,6 +2741,13 @@ function renderMobileGame() {
     <div class="mg-ls-row opp-bz">
       <div class="mg-ls-zone-cards">${oppBZHTML}</div>
     </div>
+    <div class="mg-ls-row opp-extra">
+      <div class="mg-ls-zone-cards">
+        <span class="mg-zone-hint">Hyper</span>${renderOpponentPublicZone(opp.hyperZone, 'hyper')}
+        <span class="mg-zone-hint">GR</span>${renderOpponentPublicZone(opp.grZone, 'gr')}
+        <span class="mg-zone-hint">Special</span>${renderOpponentPublicZone(opp.specialZone, 'special')}
+      </div>
+    </div>
     <div class="mg-ls-sep"></div>
   ` : '';
 
@@ -2757,6 +2804,13 @@ function renderMobileGame() {
           <div class="mg-ls-zone-cards">${myManaHTML}</div>
           <div class="mg-ls-pile grave" onclick="openMobileGraveyardModal()">
             <span class="mg-ls-pile-cnt">${state.graveyard.length}</span>
+          </div>
+        </div>
+        <div class="mg-ls-row my-extra">
+          <div class="mg-ls-zone-cards">
+            <span class="mg-zone-hint">Hyper</span>${state.hyperZone.length ? state.hyperZone.map((c, i) => renderChip(c, 'hyper', i)).join('') : '<div class="mg-zone-empty">0</div>'}
+            <span class="mg-zone-hint">GR</span>${state.grZone.length ? state.grZone.map((c, i) => renderChip(c, 'gr', i)).join('') : '<div class="mg-zone-empty">0</div>'}
+            <span class="mg-zone-hint">Special</span>${state.specialZone.length ? state.specialZone.map((c, i) => renderChip(c, 'special', i)).join('') : '<div class="mg-zone-empty">0</div>'}
           </div>
         </div>
         <div class="mg-ls-row my-hand">
@@ -4558,7 +4612,7 @@ function startMobileOnlineGame() {
   if (window.GameController) {
     window.GameController.startOnlineMatch(window._ol.p);
   } else {
-    window._olOpponent = { hand: 5, battleZone: 0, manaZone: 0, shields: 5, deckRevealZone: 0, revealedZone: 0, deck: 30, graveyard: 0 };
+    window._olOpponent = { hand: 5, battleZone: 0, manaZone: 0, shields: 5, deckRevealZone: 0, revealedZone: 0, hyperZone: 0, grZone: 0, specialZone: 0, deck: 30, graveyard: 0 };
     // p1 のみ先攻をランダム決定。p2 は最初の opponent_state で active を受け取る。
     if (window._ol.p === 'p1') {
       window._olCurrentPlayer = Math.random() < 0.5 ? 1 : 2;
@@ -4604,6 +4658,8 @@ function olStartEventListenerMobile() {
   es.addEventListener('opponent_state', (e) => {
     if (!window._ol || window._ol.room !== room) return;
 
+    window._ol.connectionStatus = 'connected';
+    window._ol.lastSeenAt = Date.now();
     window._ol.reconnectAttempt = 0;
     let data; try { data = JSON.parse(e.data); } catch { return; }
     if (!shouldApplyRemotePayloadMobile(data)) return;
@@ -4633,6 +4689,8 @@ function olStartEventListenerMobile() {
   es.addEventListener('turn_end', (e) => {
     if (!window._ol || window._ol.room !== room) return;
 
+    window._ol.connectionStatus = 'connected';
+    window._ol.lastSeenAt = Date.now();
     window._ol.reconnectAttempt = 0;
     let data; try { data = JSON.parse(e.data); } catch { return; }
     if (!shouldApplyRemotePayloadMobile(data)) return;
@@ -4665,6 +4723,8 @@ function olStartEventListenerMobile() {
   es.addEventListener('chat_message', (e) => {
     if (!window._ol || window._ol.room !== room) return;
 
+    window._ol.connectionStatus = 'connected';
+    window._ol.lastSeenAt = Date.now();
     window._ol.reconnectAttempt = 0;
     let data; try { data = JSON.parse(e.data); } catch { return; }
     appendMobileChatMessage(data.name || 'Player', data.msg || '', data.p || '');
@@ -4707,7 +4767,9 @@ function olStartEventListenerMobile() {
     es.close();
     if (!window._ol || window._ol.room !== room) return;
 
+    window._ol.connectionStatus = 'reconnecting';
     window._ol.reconnectAttempt = (window._ol.reconnectAttempt || 0) + 1;
+    renderMobileGame();
     if (window._ol.reconnectAttempt < 3) {
       if (_olReconnectTimerMobile) clearTimeout(_olReconnectTimerMobile);
       _olReconnectTimerMobile = setTimeout(olStartEventListenerMobile, Math.pow(2, window._ol.reconnectAttempt) * 1000);

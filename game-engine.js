@@ -4,6 +4,27 @@
  */
 
 class GameEngine {
+  static zoneMap() {
+    return {
+      hand: 'hand', battle: 'battleZone', battleZone: 'battleZone',
+      mana: 'manaZone', manaZone: 'manaZone', deck: 'deck',
+      shield: 'shields', shields: 'shields',
+      deckReveal: 'deckRevealZone', deckRevealZone: 'deckRevealZone',
+      revealed: 'revealedZone', revealedZone: 'revealedZone',
+      grave: 'graveyard', graveyard: 'graveyard',
+      hyper: 'hyperZone', hyperZone: 'hyperZone', hyperspatial: 'hyperZone', hyperspatialZone: 'hyperZone',
+      gr: 'grZone', grZone: 'grZone', special: 'specialZone', specialZone: 'specialZone'
+    };
+  }
+
+  _ensureExtraZones() {
+    if (!Array.isArray(this.state.hyperZone)) this.state.hyperZone = [];
+    if (!Array.isArray(this.state.grZone)) this.state.grZone = [];
+    if (!Array.isArray(this.state.specialZone)) this.state.specialZone = [];
+  }
+
+  _zoneMap() { return GameEngine.zoneMap(); }
+
   constructor() {
     this.state = {
       hand: [],
@@ -13,6 +34,9 @@ class GameEngine {
       shields: [],
       deckRevealZone: [],
       revealedZone: [],
+      hyperZone: [],
+      grZone: [],
+      specialZone: [],
       graveyard: [],
       turn: 1
     };
@@ -45,6 +69,9 @@ class GameEngine {
       shields: [],
       deckRevealZone: [],
       revealedZone: [],
+      hyperZone: [],
+      grZone: [],
+      specialZone: [],
       graveyard: [],
       turn: 1
     };
@@ -126,25 +153,11 @@ class GameEngine {
    * @returns {Array}
    */
   extractDeckTopCards(count = 1, targetZone = null, options = {}) {
+    this._ensureExtraZones();
     const n = Math.max(1, Math.floor(Number(count) || 1));
     if (!Array.isArray(this.state.deck) || this.state.deck.length === 0) return [];
 
-    const zoneMap = {
-      hand: 'hand',
-      battle: 'battleZone',
-      battleZone: 'battleZone',
-      mana: 'manaZone',
-      manaZone: 'manaZone',
-      deck: 'deck',
-      shield: 'shields',
-      shields: 'shields',
-      deckReveal: 'deckRevealZone',
-      deckRevealZone: 'deckRevealZone',
-      revealed: 'revealedZone',
-      revealedZone: 'revealedZone',
-      grave: 'graveyard',
-      graveyard: 'graveyard'
-    };
+    const zoneMap = this._zoneMap();
 
     const targetKey = targetZone ? zoneMap[targetZone] : null;
     if (targetZone && !targetKey) return [];
@@ -183,12 +196,7 @@ class GameEngine {
    * @param {number} cardIndex
    */
   tapCard(zone, cardIndex) {
-    const zoneMap = {
-      battle: 'battleZone',
-      mana: 'manaZone',
-      battleZone: 'battleZone',
-      manaZone: 'manaZone'
-    };
+    const zoneMap = this._zoneMap();
     const zoneKey = zoneMap[zone] || zone;
     const cards = this.state[zoneKey];
 
@@ -264,17 +272,8 @@ class GameEngine {
    * @param {string} fromZone - 'hand' | 'battle' | 'mana' | 'shields' | 'revealed'
    */
   moveToGraveyard(cardIdx = -1, fromZone = 'battle') {
-    const zoneMap = {
-      hand: 'hand',
-      battle: 'battleZone',
-      mana: 'manaZone',
-      shield: 'shields',
-      shields: 'shields',
-      deckReveal: 'deckRevealZone',
-      deckRevealZone: 'deckRevealZone',
-      revealed: 'revealedZone',
-      revealedZone: 'revealedZone'
-    };
+    this._ensureExtraZones();
+    const zoneMap = this._zoneMap();
     const zoneKey = zoneMap[fromZone];
     if (!zoneKey) return false;
 
@@ -347,21 +346,12 @@ class GameEngine {
   * @param {string} toZone - 'hand' | 'battle' | 'mana' | 'shields' | 'revealed'
    */
   returnFromGraveyard(cardIdx = -1, toZone = 'hand') {
+    this._ensureExtraZones();
     if (!Array.isArray(this.state.graveyard) || this.state.graveyard.length === 0) return false;
     if (!Array.isArray(this.state.deckRevealZone)) this.state.deckRevealZone = [];
     if (!Array.isArray(this.state.revealedZone)) this.state.revealedZone = [];
 
-    const zoneMap = {
-      hand: 'hand',
-      battle: 'battleZone',
-      mana: 'manaZone',
-      shield: 'shields',
-      shields: 'shields',
-      deckReveal: 'deckRevealZone',
-      deckRevealZone: 'deckRevealZone',
-      revealed: 'revealedZone',
-      revealedZone: 'revealedZone'
-    };
+    const zoneMap = this._zoneMap();
     const zoneKey = zoneMap[toZone];
     if (!zoneKey) return false;
 
@@ -398,25 +388,11 @@ class GameEngine {
    * @param {{position?: 'top'|'bottom'}} options
    */
   moveCardBetweenZones(fromZone, fromIndex, toZone, options = {}) {
+    this._ensureExtraZones();
     if (!Array.isArray(this.state.deckRevealZone)) this.state.deckRevealZone = [];
     if (!Array.isArray(this.state.revealedZone)) this.state.revealedZone = [];
 
-    const zoneMap = {
-      hand: 'hand',
-      battle: 'battleZone',
-      battleZone: 'battleZone',
-      mana: 'manaZone',
-      manaZone: 'manaZone',
-      deck: 'deck',
-      shield: 'shields',
-      shields: 'shields',
-      deckReveal: 'deckRevealZone',
-      deckRevealZone: 'deckRevealZone',
-      revealed: 'revealedZone',
-      revealedZone: 'revealedZone',
-      grave: 'graveyard',
-      graveyard: 'graveyard'
-    };
+    const zoneMap = this._zoneMap();
 
     const sourceKey = zoneMap[fromZone];
     const targetKey = zoneMap[toZone];
@@ -448,9 +424,13 @@ class GameEngine {
     } else if (targetKey === 'revealedZone') {
       card.faceUp = true;
       card.tapped = false;
+    } else if (targetKey === 'hyperZone' || targetKey === 'grZone' || targetKey === 'specialZone') {
+      if (card.faceUp !== undefined) delete card.faceUp;
+      card.tapped = false;
     } else {
       if (card.faceUp !== undefined) delete card.faceUp;
-      if (targetKey === 'battleZone' || targetKey === 'manaZone' || targetKey === 'hand') {
+      if (targetKey === 'battleZone' || targetKey === 'manaZone' || targetKey === 'hand'
+        || targetKey === 'hyperZone' || targetKey === 'grZone' || targetKey === 'specialZone') {
         card.tapped = false;
       }
     }
@@ -488,22 +468,8 @@ class GameEngine {
    * @param {number} targetIndex
    */
   insertCardUnderCard(fromZone, fromIndex, targetZone, targetIndex) {
-    const zoneMap = {
-      hand: 'hand',
-      battle: 'battleZone',
-      battleZone: 'battleZone',
-      mana: 'manaZone',
-      manaZone: 'manaZone',
-      deck: 'deck',
-      shield: 'shields',
-      shields: 'shields',
-      deckReveal: 'deckRevealZone',
-      deckRevealZone: 'deckRevealZone',
-      revealed: 'revealedZone',
-      revealedZone: 'revealedZone',
-      grave: 'graveyard',
-      graveyard: 'graveyard'
-    };
+    this._ensureExtraZones();
+    const zoneMap = this._zoneMap();
 
     const sourceKey = zoneMap[fromZone];
     const targetKey = zoneMap[targetZone];
@@ -581,6 +547,7 @@ class GameEngine {
    * 現在の状態を取得
    */
   getState() {
+    this._ensureExtraZones();
     return JSON.parse(JSON.stringify(this.state));
   }
 

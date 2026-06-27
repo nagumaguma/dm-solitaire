@@ -25,6 +25,7 @@ import string
 import sys
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -119,6 +120,7 @@ _decks_lock = threading.Lock()
 _rooms: dict[str, dict] = {}
 _rooms_lock = threading.Lock()
 ROOM_TTL = 6 * 3600  # 6 hours
+ROOM_QUEUE_MAX = int(os.environ.get("ROOM_QUEUE_MAX", "200"))
 
 
 def _gen_room_id() -> str:
@@ -132,15 +134,21 @@ def _gen_room_id() -> str:
 
 
 def _make_room(rid: str) -> dict:
+    now = time.time()
     return {
         'id': rid,
-        'p1': {'q': queue.Queue(), 'pub': None},
-        'p2': {'q': queue.Queue(), 'pub': None},
+        'p1': {'q': queue.Queue(maxsize=ROOM_QUEUE_MAX), 'pub': None},
+        'p2': {'q': queue.Queue(maxsize=ROOM_QUEUE_MAX), 'pub': None},
         'p1_name': '',
         'p2_name': '',
-        'created_at': time.time(),
+        'created_at': now,
+        'updated_at': now,
         'lock': threading.Lock(),
     }
+
+
+def _touch_room(room: dict):
+    room['updated_at'] = time.time()
 
 
 def _normalize_room_code(raw: str) -> str:
@@ -162,8 +170,26 @@ def _normalize_room_code(raw: str) -> str:
 
 
 def _push_event(room: dict, p: str, event: str, data: dict):
-    """Push an SSE event to a player's queue."""
-    room[p]['q'].put_nowait({'event': event, 'data': data})
+    """Push an SSE event to a player's queue, dropping oldest events if disconnected."""
+    _touch_room(room)
+    q = room[p]['q']
+    item = {'event': event, 'data': data}
+    try:
+        q.put_nowait(item)
+        return
+    except queue.Full:
+        pass
+
+    try:
+        q.get_nowait()
+    except queue.Empty:
+        pass
+
+    try:
+        q.put_nowait(item)
+    except queue.Full:
+        # If a racing writer filled it again, drop this transient update.
+        print(f"[rooms] dropped {event} event for {room.get('id', '?')}/{p}: queue full", file=sys.stderr, flush=True)
 
 
 def _clean_rooms():
@@ -173,7 +199,7 @@ def _clean_rooms():
         now = time.time()
         with _rooms_lock:
             to_del = [rid for rid, r in _rooms.items()
-                      if now - r['created_at'] > ROOM_TTL]
+                      if now - float(r.get('updated_at') or r.get('created_at') or 0) > ROOM_TTL]
             for rid in to_del:
                 del _rooms[rid]
         if to_del:
@@ -200,8 +226,30 @@ def _resolve_cache_db_path() -> str:
     return _REPO_DB
 
 CACHE_DB  = _resolve_cache_db_path()
+
+
+def _resolve_user_db_path() -> str:
+    """Resolve runtime DB path for profiles, decks, and fetched image blobs."""
+    explicit = os.environ.get("USER_DB_PATH", "").strip()
+    if explicit:
+        return explicit
+
+    volume_mount = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
+    if volume_mount:
+        return os.path.join(volume_mount, "dm_user.db")
+
+    if os.path.isdir("/data"):
+        return os.path.join("/data", "dm_user.db")
+
+    return os.path.join(_APP_DIR, "dm_user.db")
+
+
+USER_DB = _resolve_user_db_path()
 CACHE_TTL = 90 * 86400  # 90 days
 CACHE_TTL_NO_IMAGE = 10 * 60  # 10 minutes for incomplete card detail
+IMAGE_CACHE_TTL = 180 * 86400
+IMAGE_CACHE_MAX_BYTES = int(os.environ.get("IMAGE_CACHE_MAX_BYTES", str(256 * 1024 * 1024)))
+IMAGE_CACHE_MAX_ITEM_BYTES = int(os.environ.get("IMAGE_CACHE_MAX_ITEM_BYTES", str(8 * 1024 * 1024)))
 # Bump this when image extraction logic changes to force re-fetch of stale cached images.
 CACHE_IMG_VERSION = 2
 
@@ -237,6 +285,106 @@ def _verify_db_integrity():
         return False
 
 
+def _connect_user_db():
+    user_dir = os.path.dirname(USER_DB)
+    if user_dir:
+        os.makedirs(user_dir, exist_ok=True)
+    return sqlite3.connect(USER_DB)
+
+
+def _init_user_db():
+    print(f"[db] using USER_DB: {USER_DB}", flush=True)
+    con = _connect_user_db()
+    con.execute("PRAGMA journal_mode = WAL")
+    con.execute("PRAGMA synchronous = NORMAL")
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS profiles (
+            username TEXT PRIMARY KEY,
+            pin_hash TEXT NOT NULL,
+            pin_salt TEXT NOT NULL,
+            last_deck TEXT
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS decks (
+            username TEXT NOT NULL,
+            deck_name TEXT NOT NULL,
+            deck_data TEXT NOT NULL,
+            PRIMARY KEY (username, deck_name)
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS image_cache (
+            url TEXT PRIMARY KEY,
+            data BLOB NOT NULL,
+            content_type TEXT NOT NULL,
+            cached_at REAL NOT NULL
+        )
+    """)
+    con.execute("CREATE INDEX IF NOT EXISTS idx_image_cache_cached_at ON image_cache(cached_at)")
+    con.commit()
+    con.close()
+
+
+def _legacy_user_rows_exist() -> bool:
+    if not os.path.exists(CACHE_DB):
+        return False
+    con = None
+    try:
+        con = sqlite3.connect(CACHE_DB)
+        try:
+            profile_count = con.execute("SELECT COUNT(*) FROM profiles").fetchone()[0]
+        except Exception:
+            profile_count = 0
+        try:
+            deck_count = con.execute("SELECT COUNT(*) FROM decks").fetchone()[0]
+        except Exception:
+            deck_count = 0
+        return bool(profile_count or deck_count)
+    except Exception:
+        return False
+    finally:
+        if con:
+            con.close()
+
+
+def _migrate_user_rows_from_cache_db_if_needed():
+    """One-time best-effort migration from old mixed dm_cache.db to USER_DB."""
+    marker = f"{USER_DB}.migrated"
+    if os.path.exists(marker) or USER_DB == CACHE_DB or not _legacy_user_rows_exist():
+        return
+
+    src = dst = None
+    try:
+        src = sqlite3.connect(CACHE_DB)
+        dst = _connect_user_db()
+        for username, pin_hash, pin_salt, last_deck in src.execute(
+            "SELECT username, pin_hash, pin_salt, last_deck FROM profiles"
+        ).fetchall():
+            dst.execute(
+                "INSERT OR IGNORE INTO profiles (username, pin_hash, pin_salt, last_deck) VALUES (?, ?, ?, ?)",
+                (username, pin_hash, pin_salt, last_deck)
+            )
+        for username, deck_name, deck_data in src.execute(
+            "SELECT username, deck_name, deck_data FROM decks"
+        ).fetchall():
+            dst.execute(
+                "INSERT OR IGNORE INTO decks (username, deck_name, deck_data) VALUES (?, ?, ?)",
+                (username, deck_name, deck_data)
+            )
+        dst.commit()
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write(str(int(time.time())))
+        print("[db] migrated profiles/decks from CACHE_DB to USER_DB", flush=True)
+    except Exception as e:
+        print(f"[db] user migration warning: {e}", file=sys.stderr, flush=True)
+    finally:
+        if src:
+            src.close()
+        if dst:
+            dst.close()
+
+
 def _init_cache():
     _bootstrap_cache_db_if_needed()
     print(f"[db] using CACHE_DB: {CACHE_DB}", flush=True)
@@ -251,14 +399,6 @@ def _init_cache():
         )
     """)
     con.execute("""
-        CREATE TABLE IF NOT EXISTS profiles (
-            username TEXT PRIMARY KEY,
-            pin_hash TEXT NOT NULL,
-            pin_salt TEXT NOT NULL,
-            last_deck TEXT
-        )
-    """)
-    con.execute("""
         CREATE TABLE IF NOT EXISTS search_index (
             name       TEXT PRIMARY KEY,
             card_id    TEXT NOT NULL,
@@ -268,20 +408,70 @@ def _init_cache():
     """)
     con.execute("CREATE INDEX IF NOT EXISTS idx_search_name ON search_index(name)")
     con.execute("""
-        CREATE TABLE IF NOT EXISTS decks (
-            username TEXT NOT NULL,
-            deck_name TEXT NOT NULL,
-            deck_data TEXT NOT NULL,
-            PRIMARY KEY (username, deck_name)
+        CREATE TABLE IF NOT EXISTS card_index (
+            card_id      TEXT PRIMARY KEY,
+            name         TEXT NOT NULL,
+            name_norm    TEXT NOT NULL DEFAULT '',
+            name_compact TEXT NOT NULL DEFAULT '',
+            thumb        TEXT NOT NULL DEFAULT '',
+            civ          TEXT NOT NULL DEFAULT '',
+            card_type    TEXT NOT NULL DEFAULT '',
+            race         TEXT NOT NULL DEFAULT '',
+            rules_text   TEXT NOT NULL DEFAULT '',
+            cost         INTEGER NOT NULL DEFAULT 0,
+            power        INTEGER NOT NULL DEFAULT 0,
+            source       TEXT NOT NULL DEFAULT '',
+            updated_at   REAL NOT NULL
         )
     """)
+    con.execute("CREATE INDEX IF NOT EXISTS idx_card_index_name_compact ON card_index(name_compact)")
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS card_prints (
+            print_id   TEXT PRIMARY KEY,
+            card_id    TEXT NOT NULL,
+            name       TEXT NOT NULL,
+            set_code   TEXT NOT NULL DEFAULT '',
+            print_code TEXT NOT NULL DEFAULT '',
+            image_url  TEXT NOT NULL DEFAULT '',
+            source     TEXT NOT NULL DEFAULT '',
+            updated_at REAL NOT NULL
+        )
+    """)
+    con.execute("CREATE INDEX IF NOT EXISTS idx_card_prints_card_id ON card_prints(card_id)")
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS card_search_terms (
+            card_id    TEXT NOT NULL,
+            term       TEXT NOT NULL,
+            term_norm  TEXT NOT NULL,
+            field      TEXT NOT NULL,
+            weight     INTEGER NOT NULL DEFAULT 1,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (card_id, term_norm, field)
+        )
+    """)
+    con.execute("CREATE INDEX IF NOT EXISTS idx_card_search_terms_norm ON card_search_terms(term_norm)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_card_search_terms_card_id ON card_search_terms(card_id)")
+    try:
+        con.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS card_search_fts USING fts5(
+                card_id UNINDEXED,
+                name,
+                terms,
+                rules_text
+            )
+        """)
+    except sqlite3.OperationalError as e:
+        print(f"[db] FTS5 disabled for card search: {e}", file=sys.stderr, flush=True)
     con.commit()
     con.close()
     
     # Verify DB integrity
     _verify_db_integrity()
-    
-    # Load profiles and decks from DB into memory
+
+    _init_user_db()
+    _migrate_user_rows_from_cache_db_if_needed()
+
+    # Load profiles and decks from runtime DB into memory
     _load_from_db()
 
 
@@ -289,7 +479,7 @@ def _load_from_db():
     """Load profiles and decks from SQLite into memory on startup."""
     global _profiles, _decks
     try:
-        con = sqlite3.connect(CACHE_DB)
+        con = _connect_user_db()
         
         # Load profiles
         rows = con.execute("SELECT username, pin_hash, pin_salt, last_deck FROM profiles").fetchall()
@@ -322,7 +512,7 @@ def _load_from_db():
 def _save_profile_to_db(username: str, pin_hash: str, pin_salt: str, last_deck: str = ""):
     """Save or update profile in SQLite."""
     try:
-        con = sqlite3.connect(CACHE_DB)
+        con = _connect_user_db()
         con.execute(
             "INSERT OR REPLACE INTO profiles (username, pin_hash, pin_salt, last_deck) VALUES (?, ?, ?, ?)",
             (username, pin_hash, pin_salt, last_deck)
@@ -336,7 +526,7 @@ def _save_profile_to_db(username: str, pin_hash: str, pin_salt: str, last_deck: 
 def _save_deck_to_db(username: str, deck_name: str, deck_data: dict):
     """Save or update deck in SQLite."""
     try:
-        con = sqlite3.connect(CACHE_DB)
+        con = _connect_user_db()
         con.execute(
             "INSERT OR REPLACE INTO decks (username, deck_name, deck_data) VALUES (?, ?, ?)",
             (username, deck_name, json.dumps(deck_data, ensure_ascii=False))
@@ -350,12 +540,74 @@ def _save_deck_to_db(username: str, deck_name: str, deck_data: dict):
 def _delete_deck_from_db(username: str, deck_name: str):
     """Delete deck from SQLite."""
     try:
-        con = sqlite3.connect(CACHE_DB)
+        con = _connect_user_db()
         con.execute("DELETE FROM decks WHERE username = ? AND deck_name = ?", (username, deck_name))
         con.commit()
         con.close()
     except Exception as e:
         print(f"[db] delete deck error: {e}", file=sys.stderr, flush=True)
+
+
+def _image_cache_get(url: str):
+    con = None
+    try:
+        con = _connect_user_db()
+        row = con.execute(
+            "SELECT data, content_type, cached_at FROM image_cache WHERE url = ?", (url,)
+        ).fetchone()
+        if not row:
+            return None, None
+        data, content_type, cached_at = row
+        if (time.time() - float(cached_at or 0)) < IMAGE_CACHE_TTL:
+            return data, content_type
+        con.execute("DELETE FROM image_cache WHERE url = ?", (url,))
+        con.commit()
+    except Exception as e:
+        print(f"[img-cache] get error: {e}", file=sys.stderr, flush=True)
+    finally:
+        if con:
+            con.close()
+    return None, None
+
+
+def _prune_image_cache(con):
+    now = time.time()
+    con.execute("DELETE FROM image_cache WHERE cached_at < ?", (now - IMAGE_CACHE_TTL,))
+    total = con.execute("SELECT COALESCE(SUM(length(data)), 0) FROM image_cache").fetchone()[0] or 0
+    if total <= IMAGE_CACHE_MAX_BYTES:
+        return
+
+    rows = con.execute(
+        "SELECT url, length(data) FROM image_cache ORDER BY cached_at ASC"
+    ).fetchall()
+    for url, size in rows:
+        if total <= IMAGE_CACHE_MAX_BYTES:
+            break
+        con.execute("DELETE FROM image_cache WHERE url = ?", (url,))
+        total -= int(size or 0)
+
+
+def _image_cache_set(url: str, data: bytes, content_type: str):
+    if not data:
+        return
+    if len(data) > IMAGE_CACHE_MAX_ITEM_BYTES:
+        print(f"[img-cache] skipped oversized image: {len(data)} bytes", file=sys.stderr, flush=True)
+        return
+
+    con = None
+    try:
+        con = _connect_user_db()
+        con.execute(
+            "INSERT OR REPLACE INTO image_cache (url, data, content_type, cached_at) VALUES (?, ?, ?, ?)",
+            (url, data, content_type or "image/jpeg", time.time())
+        )
+        _prune_image_cache(con)
+        con.commit()
+    except Exception as e:
+        print(f"[img-cache] set error: {e}", file=sys.stderr, flush=True)
+    finally:
+        if con:
+            con.close()
 
 
 def _cache_ttl(data: dict) -> int:
@@ -401,8 +653,308 @@ def _cache_set(cid: str, data: dict):
         if con:
             con.close()
 
+    _upsert_card_search_index(cid, data, source="detail-cache")
+
 
 # ─── Wiki API fetch ────────────────────────────────────────────────────────────
+
+
+_SEARCH_DECORATION_RE = re.compile(r'[\u300A\u300B\u300C\u300D\u300E\u300F\u3010\u3011\uFF3B\uFF3D\[\]\uFF08\uFF09()]')
+_SEARCH_SPACE_RE = re.compile(r'[\s\u3000]+')
+_SEARCH_SPLIT_RE = re.compile(r'[\s\u3000/\uFF0F,\u3001\u30FB\uFF65]+')
+
+_CIV_SEARCH_ALIASES = {
+    "light": ["\u5149", "\u767d", "light"],
+    "water": ["\u6c34", "\u9752", "water"],
+    "dark": ["\u95c7", "\u9ed2", "dark", "darkness"],
+    "fire": ["\u706b", "\u8d64", "fire"],
+    "nature": ["\u81ea\u7136", "\u7dd1", "nature"],
+    "multi": ["\u591a\u8272", "\u30bc\u30ed", "\u7121\u8272", "\u30b8\u30e7\u30fc\u30ab\u30fc\u30ba", "multi", "zero", "colorless"],
+}
+
+_TYPE_SEARCH_ALIASES = {
+    "creature": ["\u30af\u30ea\u30fc\u30c1\u30e3\u30fc", "creature"],
+    "evolution": ["\u9032\u5316", "\u9032\u5316\u30af\u30ea\u30fc\u30c1\u30e3\u30fc", "evolution"],
+    "spell": ["\u546a\u6587", "spell"],
+    "crossgear": ["\u30af\u30ed\u30b9\u30ae\u30a2", "cross gear"],
+    "field": ["\u30d5\u30a3\u30fc\u30eb\u30c9", "field"],
+    "castle": ["\u57ce", "castle"],
+    "twinpact": ["\u30c4\u30a4\u30f3\u30d1\u30af\u30c8", "twinpact"],
+}
+
+
+def _fold_hiragana_to_katakana(text: str) -> str:
+    out = []
+    for ch in str(text or ""):
+        cp = ord(ch)
+        if 0x3041 <= cp <= 0x3096:
+            out.append(chr(cp + 0x60))
+        else:
+            out.append(ch)
+    return ''.join(out)
+
+
+def _search_norm_text(value) -> str:
+    text = unicodedata.normalize("NFKC", _norm_fw(str(value or "")))
+    text = _fold_hiragana_to_katakana(text)
+    text = _SEARCH_DECORATION_RE.sub(' ', text)
+    text = text.replace('\u30FB', ' ').replace('\uFF65', ' ')
+    return _SEARCH_SPACE_RE.sub(' ', text).strip().lower()
+
+
+def _search_compact_text(value) -> str:
+    text = _search_norm_text(value)
+    return re.sub(r'[\s/\uFF0F\-\u30FB\uFF65]+', '', text)
+
+
+def _search_query_needles(query: str) -> list[str]:
+    base = _search_norm_text(query)
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(v):
+        t = _search_compact_text(v)
+        if len(t) < 1 or t in seen:
+            return
+        seen.add(t)
+        out.append(t)
+
+    add(base)
+    for part in re.split(r'[/\uFF0F]', base):
+        add(part)
+    for token in _SEARCH_SPLIT_RE.split(base):
+        if len(token) >= 2:
+            add(token)
+    return out[:16]
+
+
+def _split_card_name_parts(name: str) -> list[str]:
+    clean = _SEARCH_DECORATION_RE.sub(' ', str(name or '')).strip()
+    parts: list[str] = []
+    for part in re.split(r'[/\uFF0F]', clean):
+        p = part.strip()
+        if p:
+            parts.append(p)
+    return parts
+
+
+def _as_int(value, default: int = 0) -> int:
+    try:
+        if value is None or value == "":
+            return default
+        return int(float(str(value).replace(',', '').strip()))
+    except Exception:
+        return default
+
+
+def _image_from_card_data(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
+    for key in ("imageUrl", "img", "thumb", "image", "image_url"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _add_term(terms: list[tuple[str, str, int]], field: str, value, weight: int):
+    text = _safe_text(value, maxlen=5000)
+    if not text:
+        return
+    norm = _search_compact_text(text)
+    if not norm:
+        return
+    terms.append((field, text, int(weight)))
+
+
+def _card_search_terms_from_data(data: dict) -> list[tuple[str, str, int]]:
+    terms: list[tuple[str, str, int]] = []
+    if not isinstance(data, dict):
+        return terms
+
+    name = data.get("name") or data.get("card_name") or data.get("title") or ""
+    name_en = data.get("nameEn") or data.get("name_en") or ""
+    _add_term(terms, "name", name, 120)
+    _add_term(terms, "name_compact", _search_compact_text(name), 115)
+    for face in _split_card_name_parts(str(name or "")):
+        _add_term(terms, "face", face, 105)
+        _add_term(terms, "face_compact", _search_compact_text(face), 102)
+    _add_term(terms, "name_en", name_en, 70)
+
+    civ = _search_norm_text(data.get("civilization") or data.get("civ") or "")
+    _add_term(terms, "civ", civ, 45)
+    for alias in _CIV_SEARCH_ALIASES.get(civ, []):
+        _add_term(terms, "civ", alias, 50)
+
+    card_type = _search_norm_text(data.get("type") or data.get("card_type") or "")
+    _add_term(terms, "type", card_type, 45)
+    for key, aliases in _TYPE_SEARCH_ALIASES.items():
+        if key == card_type or key in card_type:
+            for alias in aliases:
+                _add_term(terms, "type", alias, 50)
+
+    race = data.get("race") or ""
+    _add_term(terms, "race", race, 60)
+    for token in _SEARCH_SPLIT_RE.split(str(race or "")):
+        if len(token) >= 2:
+            _add_term(terms, "race", token, 58)
+
+    rules_text = data.get("text") or data.get("rules_text") or data.get("effect") or ""
+    _add_term(terms, "text", rules_text, 20)
+
+    dedup: dict[tuple[str, str], tuple[str, str, int]] = {}
+    for field, term, weight in terms:
+        norm = _search_compact_text(term)
+        key = (field, norm)
+        if not norm:
+            continue
+        prev = dedup.get(key)
+        if prev is None or weight > prev[2]:
+            dedup[key] = (field, term, weight)
+    return list(dedup.values())
+
+
+def _upsert_card_search_index(card_id: str, data: dict, source: str = ""):
+    cid = _safe_text(card_id, maxlen=240)
+    if cid.startswith("src:"):
+        cid = cid[4:]
+    if not cid or "|" in cid or not isinstance(data, dict):
+        return
+
+    con = None
+    try:
+        con = sqlite3.connect(CACHE_DB)
+        existing = con.execute(
+            "SELECT name, thumb, civ, card_type, race, rules_text, cost, power, source FROM card_index WHERE card_id = ?",
+            (cid,)
+        ).fetchone()
+
+        def old(idx: int, default=""):
+            return existing[idx] if existing and existing[idx] not in (None, "") else default
+
+        name = _safe_text(data.get("name") or data.get("card_name") or data.get("title") or old(0), maxlen=240)
+        if not name:
+            return
+        thumb = _safe_text(_image_from_card_data(data) or old(1), maxlen=1200)
+        civ = _safe_text(data.get("civilization") or data.get("civ") or old(2), maxlen=80)
+        card_type = _safe_text(data.get("type") or data.get("card_type") or old(3), maxlen=80)
+        race = _safe_text(data.get("race") or old(4), maxlen=1000)
+        rules_text = _safe_text(data.get("text") or data.get("rules_text") or data.get("effect") or old(5), maxlen=5000)
+        cost = _as_int(data.get("cost"), _as_int(old(6), 0))
+        power = _as_int(data.get("power"), _as_int(old(7), 0))
+        src = _safe_text(source or data.get("source") or old(8), maxlen=80)
+        now = time.time()
+
+        index_data = {
+            **data,
+            "name": name,
+            "thumb": thumb,
+            "img": thumb,
+            "imageUrl": thumb,
+            "civilization": civ,
+            "civ": civ,
+            "type": card_type,
+            "race": race,
+            "text": rules_text,
+            "cost": cost,
+            "power": power,
+        }
+        name_norm = _search_norm_text(name)
+        name_compact = _search_compact_text(name)
+
+        con.execute(
+            """
+            INSERT OR REPLACE INTO card_index
+                (card_id, name, name_norm, name_compact, thumb, civ, card_type, race, rules_text, cost, power, source, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (cid, name, name_norm, name_compact, thumb, civ, card_type, race, rules_text, cost, power, src, now)
+        )
+        con.execute(
+            "INSERT OR REPLACE INTO search_index (name, card_id, thumb, indexed_at) VALUES (?, ?, ?, ?)",
+            (name, cid, thumb, now)
+        )
+        con.execute("DELETE FROM card_search_terms WHERE card_id = ?", (cid,))
+        term_rows = _card_search_terms_from_data(index_data)
+        for field, term, weight in term_rows:
+            con.execute(
+                """
+                INSERT OR REPLACE INTO card_search_terms
+                    (card_id, term, term_norm, field, weight, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (cid, term, _search_compact_text(term), field, int(weight), now)
+            )
+
+        try:
+            con.execute("DELETE FROM card_search_fts WHERE card_id = ?", (cid,))
+            con.execute(
+                "INSERT INTO card_search_fts (card_id, name, terms, rules_text) VALUES (?, ?, ?, ?)",
+                (cid, name, " ".join(term for _, term, _ in term_rows), rules_text)
+            )
+        except sqlite3.OperationalError:
+            pass
+
+        con.commit()
+    except Exception as e:
+        print(f"[search-index] upsert warning: {e}", file=sys.stderr, flush=True)
+    finally:
+        if con:
+            con.close()
+
+
+def _upsert_search_results(cards: list[dict], source: str = ""):
+    for card in cards or []:
+        if not isinstance(card, dict):
+            continue
+        cid = _safe_text(card.get("sourceId") or card.get("id") or card.get("card_id"), maxlen=240)
+        if not cid:
+            name = _safe_text(card.get("name") or card.get("title"), maxlen=240)
+            cid = f"dmwiki_{name}" if name else ""
+        if cid:
+            _upsert_card_search_index(cid, card, source=source)
+
+
+def _backfill_search_index_from_legacy(limit: int = 20000):
+    con = None
+    rows = []
+    try:
+        con = sqlite3.connect(CACHE_DB)
+        rows = con.execute(
+            """
+            SELECT s.name, s.card_id, s.thumb
+              FROM search_index s
+             WHERE NOT EXISTS (
+                   SELECT 1 FROM card_search_terms t WHERE t.card_id = s.card_id
+             )
+             LIMIT ?
+            """,
+            (max(1, int(limit or 1)),)
+        ).fetchall()
+    except Exception as e:
+        print(f"[search-index] legacy backfill scan warning: {e}", file=sys.stderr, flush=True)
+    finally:
+        if con:
+            con.close()
+
+    for name, cid, thumb in rows:
+        _upsert_card_search_index(cid, {"name": name, "thumb": thumb}, source="legacy-search-index")
+    if rows:
+        print(f"[search-index] backfilled {len(rows)} legacy rows", flush=True)
+
+
+def _merge_search_cards(primary: list[dict], secondary: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for card in (primary or []) + (secondary or []):
+        if not isinstance(card, dict):
+            continue
+        key = _search_compact_text(card.get("name") or "") or _safe_text(card.get("id"), maxlen=240)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        merged.append(card)
+    return merged
 
 def wiki_get(params: dict) -> dict | None:
     params["format"] = "json"
@@ -553,32 +1105,31 @@ def search_cards(query: str, page: int = 1) -> tuple[list[dict], int]:
         total = d.get("query", {}).get("searchinfo", {}).get("totalhits", 0)
         return hits, total
 
-    # Japanese queries → local index first (instant), fall back to dmwiki.net
+    # Japanese queries ? enriched local index first; dmwiki is used only to fill gaps.
     if is_jp_query:
         PAGE_SIZE = 10
-        cache_key = _norm_fw(query).replace(" ", "")
+        cache_key = _search_compact_text(query)
 
-        # 1. メモリキャッシュ確認
         if cache_key in _dmwiki_cache:
             all_cards = _dmwiki_cache[cache_key]
             start = (page - 1) * PAGE_SIZE
             return all_cards[start:start + PAGE_SIZE], len(all_cards)
 
-        # 2. ローカル search_index を検索（HTTP 不要、高速）
         local_results = search_local(query)
-        if local_results:
-            if len(_dmwiki_cache) >= DMWIKI_CACHE_MAX:
-                _dmwiki_cache.pop(next(iter(_dmwiki_cache)))
-            _dmwiki_cache[cache_key] = local_results
-            start = (page - 1) * PAGE_SIZE
-            return local_results[start:start + PAGE_SIZE], len(local_results)
+        results = local_results
 
-        # 3. ローカルになければ dmwiki.net へフォールバック
-        results = search_cards_dmwiki(query)
+        # When the local index is shallow, fill the first page from dmwiki and index it.
+        if not results or (page == 1 and len(results) < PAGE_SIZE):
+            remote_results = search_cards_dmwiki(query)
+            if remote_results:
+                results = _merge_search_cards(results, remote_results)
+
         if results:
+            _upsert_search_results(results, source="search")
             if len(_dmwiki_cache) >= DMWIKI_CACHE_MAX:
                 _dmwiki_cache.pop(next(iter(_dmwiki_cache)))
             _dmwiki_cache[cache_key] = results
+
         all_cards = _dmwiki_cache.get(cache_key, [])
         start = (page - 1) * PAGE_SIZE
         return all_cards[start:start + PAGE_SIZE], len(all_cards)
@@ -611,6 +1162,7 @@ def search_cards(query: str, page: int = 1) -> tuple[list[dict], int]:
         })
 
     if cards:
+        _upsert_search_results(cards, source="fandom")
         if len(_en_search_cache) >= EN_SEARCH_CACHE_MAX:
             _en_search_cache.pop(next(iter(_en_search_cache)))
         _en_search_cache[_en_cache_key] = (cards, totalhits, time.time())
@@ -888,35 +1440,129 @@ def _ja_insert_spaces(q: str) -> str:
 
 
 def search_local(query: str) -> list[dict]:
-    """ローカル search_index から部分一致検索する。dmwiki への HTTP 不要。"""
-    nq = _norm_fw(query).replace(" ", "")
-    if not nq:
+    """Search the local enriched card index. No dmwiki HTTP is needed."""
+    needles = _search_query_needles(query)
+    if not needles:
         return []
+
+    def match_score(term_norm: str, field: str, weight: int) -> int:
+        term = str(term_norm or "")
+        if not term:
+            return 0
+        field_bonus = {
+            "name": 1200,
+            "name_compact": 1100,
+            "face": 1000,
+            "face_compact": 980,
+            "name_en": 650,
+            "race": 450,
+            "type": 380,
+            "civ": 380,
+            "text": 120,
+        }.get(field, 100)
+        best = 0
+        for needle in needles:
+            if len(needle) < 2 and field not in ("civ", "type"):
+                continue
+            if needle == term:
+                score = 10000
+            elif len(needle) >= 2 and term.startswith(needle):
+                score = 7000
+            elif len(needle) >= 2 and needle in term:
+                score = 4300
+            elif field != "text" and len(term) >= 2 and term in needle:
+                score = 2600
+            else:
+                score = 0
+            if score:
+                best = max(best, score + field_bonus + int(weight or 0))
+        return best
+
     try:
         con = sqlite3.connect(CACHE_DB)
-        # LIKE は大文字小文字を区別しないが全角は区別するため Python 側でフィルタ
         rows = con.execute(
+            """
+            SELECT t.card_id, t.term_norm, t.field, t.weight,
+                   c.name, c.thumb, c.civ, c.card_type, c.race, c.rules_text, c.cost, c.power, c.source
+              FROM card_search_terms t
+              JOIN card_index c ON c.card_id = t.card_id
+            """
+        ).fetchall()
+        con.close()
+    except Exception as e:
+        print(f"[search-index] local search warning: {e}", file=sys.stderr, flush=True)
+        rows = []
+
+    matches: dict[str, dict] = {}
+    for card_id, term_norm, field, weight, name, thumb, civ, card_type, race, rules_text, cost, power, source in rows:
+        score = match_score(term_norm, field, weight)
+        if not score:
+            continue
+        cid = str(card_id or "")
+        entry = matches.get(cid)
+        if entry is None:
+            entry = {
+                "id": cid,
+                "name": name,
+                "thumb": thumb or "",
+                "img": thumb or "",
+                "imageUrl": thumb or "",
+                "civilization": civ or "",
+                "civ": civ or "",
+                "type": card_type or "",
+                "race": race or "",
+                "text": rules_text or "",
+                "cost": cost or 0,
+                "power": power or 0,
+                "source": source or "local-index",
+                "matchFields": set(),
+                "_score": 0,
+            }
+            matches[cid] = entry
+        entry["_score"] = max(int(entry.get("_score") or 0), score)
+        entry["matchFields"].add(field)
+
+    if matches:
+        results = list(matches.values())
+        for item in results:
+            if not item.get("thumb"):
+                cached = _cache_get(str(item.get("id") or ""))
+                if cached and cached.get("_cache_img_version", 1) >= CACHE_IMG_VERSION:
+                    img = _image_from_card_data(cached)
+                    item["thumb"] = img
+                    item["img"] = img
+                    item["imageUrl"] = img
+            item["matchFields"] = sorted(item.get("matchFields") or [])
+        results.sort(key=lambda c: (-int(c.get("_score") or 0), len(str(c.get("name") or "")), str(c.get("name") or "")))
+        for item in results:
+            item.pop("_score", None)
+        return results
+
+    # Fallback for databases created before the enriched tables existed.
+    try:
+        con = sqlite3.connect(CACHE_DB)
+        legacy_rows = con.execute(
             "SELECT name, card_id, thumb FROM search_index",
         ).fetchall()
         con.close()
     except Exception:
         return []
+
     results = []
     seen: set[str] = set()
-    for name, card_id, thumb in rows:
-        if name in seen:
+    for name, card_id, thumb in legacy_rows:
+        norm_name = _search_compact_text(name)
+        if not norm_name or norm_name in seen:
             continue
-        if nq not in _norm_fw(name).replace(" ", ""):
+        if not any((needle == norm_name) or (len(needle) >= 2 and needle in norm_name) for needle in needles):
             continue
-        seen.add(name)
-        # thumb は既存 card_cache にあればそちらを優先（最新バージョンのみ）
+        seen.add(norm_name)
         if not thumb:
             cached = _cache_get(card_id)
             if cached and cached.get("_cache_img_version", 1) >= CACHE_IMG_VERSION:
-                thumb = str(cached.get("img") or cached.get("thumb") or "").strip()
-        results.append({"id": card_id, "name": name, "thumb": thumb})
+                thumb = _image_from_card_data(cached)
+        results.append({"id": card_id, "name": name, "thumb": thumb, "img": thumb, "imageUrl": thumb, "source": "legacy-search-index"})
     return results
-
 
 def search_cards_dmwiki(query: str) -> list[dict]:
     """Search dmwiki.net page titles for cards matching query (partial ok)."""
@@ -949,7 +1595,7 @@ def search_cards_dmwiki(query: str) -> list[dict]:
             cached = _cache_get(card_id)
             if cached:
                 thumb = str(cached.get("img") or cached.get("thumb") or "").strip()
-            cards.append({"id": card_id, "name": clean, "thumb": thumb})
+            cards.append({"id": card_id, "name": clean, "thumb": thumb, "source": "dmwiki"})
         return cards
 
     # First try: page-title-only search (fast, precise)
@@ -988,6 +1634,7 @@ def search_cards_dmwiki(query: str) -> list[dict]:
         _cache_set(c["id"], detail)
         break
 
+    _upsert_search_results(cards, source="dmwiki")
     return cards
 
 
@@ -1907,12 +2554,19 @@ IMG_FETCH_RETRIES = 2
 
 
 def fetch_binary(url: str):
+    cached_data, cached_type = _image_cache_get(url)
+    if cached_data is not None:
+        return cached_data, cached_type or "image/jpeg", 200
+
     last_error = None
     for attempt in range(IMG_FETCH_RETRIES + 1):
         req = urllib.request.Request(url, headers={**WIKI_HEADERS, "Accept": "image/*"})
         try:
             with urllib.request.urlopen(req, timeout=IMG_FETCH_TIMEOUT) as r:
-                return r.read(), r.headers.get("Content-Type", "image/jpeg"), 200
+                data = r.read()
+                ctype = r.headers.get("Content-Type", "image/jpeg")
+                _image_cache_set(url, data, ctype)
+                return data, ctype, 200
         except urllib.error.HTTPError as e:
             last_error = e
             code = int(getattr(e, "code", 0) or 0)
@@ -2095,6 +2749,7 @@ class Handler(BaseHTTPRequestHandler):
             if not room:
                 return self._json({"error": "room not found"}, 404)
             with room['lock']:
+                _touch_room(room)
                 if room['p2_name']:
                     return self._json({"error": "room is full"}, 409)
                 room['p2_name'] = _sanitize_username(data.get("name", ""), maxlen=20) or "Player 2"
@@ -2121,6 +2776,7 @@ class Handler(BaseHTTPRequestHandler):
             allowed = _ALLOWED_TRANSIENT_FIELDS if atype in _TRANSIENT else _ALLOWED_STATE_FIELDS
             clean_data = {k: v for k, v in data.items() if k in allowed}
             with room['lock']:
+                _touch_room(room)
                 if atype not in _TRANSIENT:
                     room[p]['pub'] = clean_data
                 if atype == "turn_end":
@@ -2147,6 +2803,7 @@ class Handler(BaseHTTPRequestHandler):
             player_name = room['p1_name'] if p == 'p1' else room['p2_name']
             op = "p2" if p == "p1" else "p1"
             with room['lock']:
+                _touch_room(room)
                 _push_event(room, op, 'chat_message', {'p': p, 'name': player_name, 'msg': msg})
             self._json({"ok": True})
 
@@ -2399,6 +3056,8 @@ class Handler(BaseHTTPRequestHandler):
                 room = _rooms.get(rid)
             if not room or player not in ("p1", "p2"):
                 return self._json({"error": "room not found"}, 404)
+            with room['lock']:
+                _touch_room(room)
             self._sse_stream(room, player)
 
         # /deck/list, /deck/names, /deck/get, /deck/fetch are POST-only to keep PIN out of URL
@@ -2416,7 +3075,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "page must be an integer"}, 400)
             page = max(1, page)
             cards, total = search_cards(q, page)
-            self._json({"cards": cards, "query": q, "page": page, "total": total})
+            sources = sorted({str(c.get("source") or "").strip() for c in cards if isinstance(c, dict) and c.get("source")})
+            source = sources[0] if len(sources) == 1 else ("mixed" if sources else "")
+            self._json({"cards": cards, "query": q, "page": page, "total": total, "source": source})
 
         # /detail?id=...  (prefix "dmwiki_" = dmwiki.net)
         # /detail?name=... (dmwiki card name fallback)
