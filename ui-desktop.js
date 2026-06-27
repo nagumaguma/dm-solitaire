@@ -1775,9 +1775,9 @@ function renderDesktopGame() {
                 ? (opp.handCards || []).map((c, i) => renderChip(c, 'hand', i, 'vs-opp')).join('')
                 : renderDesktopBackCards(Number(opp.hand ?? 0))}
             </div>
-            ${!vs ? `<div class="dg-v2-row-side">
+            <div class="dg-v2-row-side">
               <button class="dg-handdiscard-btn" onclick="openDesktopHandDiscardMenu()" title="ハンデス">ハンデス</button>
-            </div>` : ''}
+            </div>
           </div>
 
           <div class="dg-v2-row opp-mana">
@@ -2037,7 +2037,67 @@ function setDesktopCardTapped(zone, idx, tapped) {
   renderDesktopGame();
 }
 
+function openDesktopVsHandDiscardMenu() {
+  const oppEngine = getVsOppEngine();
+  const hand = oppEngine?.state?.hand;
+  if (!Array.isArray(hand) || !hand.length) {
+    showDesktopToast('相手の手札がありません', 'warn');
+    return;
+  }
+  const el = document.getElementById('dmHandDiscardModal');
+  if (!el) return;
+  const bodyEl = document.getElementById('dmHandDiscardBody');
+  if (bodyEl) bodyEl.classList.remove('mobile');
+  document.getElementById('dmHandDiscardTitle').textContent = 'ハンデス（疑似対戦）';
+  const getCiv = (card) => {
+    const c = String(card?.civ || card?.civilization || '').toLowerCase();
+    if (c.includes('fire') || c.includes('火')) return 'fire';
+    if (c.includes('water') || c.includes('水')) return 'water';
+    if (c.includes('light') || c.includes('光')) return 'light';
+    if (c.includes('darkness') || c.includes('dark') || c.includes('闇')) return 'dark';
+    if (c.includes('nature') || c.includes('自然')) return 'nature';
+    return 'multi';
+  };
+  document.getElementById('dmHandDiscardContent').innerHTML = `
+    <div class="dm-hd-card-list">
+      ${hand.map((c, i) => `
+        <div class="dm-hd-card ${getCiv(c)}" onclick="executeDesktopVsDiscard(${i})">
+          <div class="dm-hd-card-name">${escapeHtml(c?.name || 'CARD')}</div>
+          <div class="dm-hd-card-cost">コスト: ${c?.cost ?? '-'}</div>
+        </div>
+      `).join('')}
+    </div>
+    <div style="text-align:center;margin-top:8px">
+      <button class="dm-hd-cancel" onclick="closeHandDiscardModal()">キャンセル</button>
+    </div>
+  `;
+  el.classList.add('open');
+}
+
+function executeDesktopVsDiscard(index) {
+  closeHandDiscardModal();
+  const oppEngine = getVsOppEngine();
+  const hand = oppEngine?.state?.hand;
+  if (!Array.isArray(hand) || index < 0 || index >= hand.length) {
+    showDesktopToast('対象カードが見つかりません', 'warn');
+    return;
+  }
+  if (typeof oppEngine._saveState === 'function') oppEngine._saveState();
+  const removed = hand.splice(index, 1);
+  if (!removed.length) return;
+  const card = removed[0];
+  if (!oppEngine.state.graveyard) oppEngine.state.graveyard = [];
+  oppEngine.state.graveyard.unshift(card);
+  showDesktopToast(`「${card?.name || 'CARD'}」を墓地に送りました`, 'info', 2000);
+  _vsRefreshOpponentView();
+  renderDesktopGame();
+}
+
 function openDesktopHandDiscardMenu() {
+  if (window._vs) {
+    openDesktopVsHandDiscardMenu();
+    return;
+  }
   if (!window._ol) return;
   if (!canActDesktopOnline()) {
     showDesktopToast('相手のターンです', 'warn');
@@ -4986,7 +5046,7 @@ function shouldApplyRemotePayloadDesktop(payload) {
 
   const seq = Number(payload?.seq || 0);
   const last = Number(window._ol.remoteSeq || 0);
-  if (seq < last) return false;
+  if (seq <= last) return false;
 
   window._ol.remoteSeq = seq;
   return true;
@@ -5015,9 +5075,12 @@ function olSendActionDesktop(actionType) {
   let activePlayer;
   if (actionType === 'turn_end') {
     activePlayer = window._ol.p === 'p1' ? 'p2' : 'p1';
+  } else if (window._olCurrentPlayer === 1) {
+    activePlayer = 'p1';
+  } else if (window._olCurrentPlayer === 2) {
+    activePlayer = 'p2';
   } else {
-    // state 送信時は _olCurrentPlayer ベースで active を決定（先攻ランダム対応）
-    activePlayer = window._olCurrentPlayer === 1 ? 'p1' : 'p2';
+    activePlayer = null; // unknown first player - receiver should not update their state
   }
   const payload = {
     room: window._ol.room,

@@ -263,7 +263,8 @@
       deck: 30,
       graveyard: 0
     };
-    const current = playerTag === 'p1' ? 1 : 2;
+    // p1 randomly decides who goes first; p2 defers to p1's initial state broadcast.
+    const current = playerTag === 'p1' ? (Math.random() < 0.5 ? 1 : 2) : null;
 
     if (global.AppState) {
       global.AppState.patch({
@@ -324,17 +325,27 @@
     };
   }
 
-  function buildActionPayload(engineState, onlineState, actionType) {
+  function buildActionPayload(engineState, onlineState, actionType, currentPlayer) {
     const s = engineState;
     const p = onlineState;
     const publicState = buildPublicState(s);
+    let active;
+    if (actionType === 'turn_end') {
+      active = p.p === 'p1' ? 'p2' : 'p1';
+    } else if (currentPlayer === 1) {
+      active = 'p1';
+    } else if (currentPlayer === 2) {
+      active = 'p2';
+    } else {
+      active = null; // unknown first player - receiver should not update their state
+    }
     return {
       room: p.room,
       p: p.p,
       type: actionType,
       seq: nextOnlineSeq(p),
       turn: s.turn,
-      active: actionType === 'turn_end' ? (p.p === 'p1' ? 'p2' : 'p1') : p.p,
+      active,
       p1: p.p === 'p1' ? publicState : null,
       p2: p.p === 'p2' ? publicState : null
     };
@@ -360,9 +371,10 @@
 
   function sendOnlineAction(engine, actionType) {
     const onlineState = global.AppState ? global.AppState.get('_ol') : global._ol;
+    const currentPlayer = global.AppState ? global.AppState.get('_olCurrentPlayer') : global._olCurrentPlayer;
     if (!onlineState || !engine || !engine.state) return;
 
-    const payload = buildActionPayload(engine.state, onlineState, actionType);
+    const payload = buildActionPayload(engine.state, onlineState, actionType, currentPlayer);
     NetworkService.sendAction(payload);
   }
 
