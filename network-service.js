@@ -613,6 +613,33 @@ const NetworkService = {
     return (typeof window !== 'undefined' && window.DM_API_BASE) || window.location.origin;
   },
 
+  async checkApiStatus(timeoutMs = 3000) {
+    const base = this.getApiBase();
+    try {
+      const res = await fetch(`${base}/ping`, {
+        cache: 'no-store',
+        signal: this._abortSignal(timeoutMs)
+      });
+      const data = await this._readJsonSafe(res);
+      return {
+        ok: res.ok && !data?.error,
+        base,
+        status: res.status,
+        data,
+        message: res.ok ? 'API connected' : (data?.error || `API ping failed (${res.status})`)
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        base,
+        status: 0,
+        data: {},
+        error,
+        message: error?.message || 'API ping failed'
+      };
+    }
+  },
+
   /**
    * タイムアウト付き AbortSignal（AbortSignal.timeout 未対応環境用）
    * @param {number} ms
@@ -907,7 +934,14 @@ const NetworkService = {
       return { cards: [], total: 0, page: pageNumber, query: keyword, originalQuery: rawKeyword };
     } catch (error) {
       console.error('search error:', error);
-      return { cards: [], total: 0, page: Number(page) || 1 };
+      return {
+        cards: [],
+        total: 0,
+        page: Number(page) || 1,
+        error: 'api_unreachable',
+        message: error?.message || 'search request failed',
+        base: this.getApiBase()
+      };
     }
   },
 

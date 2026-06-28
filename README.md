@@ -433,8 +433,23 @@ CREATE TABLE decks (
 # ポート変更
 PORT=8765
 
-# ベースURL（デプロイ時）
-BASE_URL=https://nagumaguma.github.io/dm-solitaire
+# ベースURL（バックエンドの公開URL。/img プロキシURL生成に使用）
+BASE_URL=https://dm-solitaire-production.up.railway.app
+```
+
+`BASE_URL` 未設定時も、Railway/Render/Heroku 系の公開URL環境変数や
+`X-Forwarded-Proto` / `Host` から可能な範囲で自動推定します。
+
+フロント側の API 接続先を一時的に差し替える場合:
+
+```text
+https://nagumaguma.github.io/dm-solitaire/index.html?api=https://YOUR-BACKEND.example.com
+```
+
+差し替えはブラウザの `localStorage` に保存されます。解除する場合:
+
+```text
+https://nagumaguma.github.io/dm-solitaire/index.html?clearApi=1
 ```
 
 ---
@@ -557,6 +572,30 @@ Procfile:
 web: python dm-proxy-server.py
 
 PORT は自動割り当て使用
+```
+
+バックエンドの環境変数:
+
+```bash
+BASE_URL=https://dm-solitaire-production.up.railway.app
+```
+
+デプロイ後の簡易チェック:
+
+```bash
+npm run prod:check
+```
+
+任意の URL を確認する場合:
+
+```bash
+DM_PROD_APP_URL=https://nagumaguma.github.io/dm-solitaire/index.html DM_PROD_API_BASE=https://dm-solitaire-production.up.railway.app npm run prod:check
+```
+
+検索APIまで含めて確認する場合:
+
+```bash
+DM_PROD_CHECK_SEARCH=1 npm run prod:check
 ```
 
 ---

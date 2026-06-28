@@ -18,7 +18,7 @@ const _mobileSearchHydrateCooldownUntil = new Map();
 const MOBILE_SEARCH_HYDRATE_NO_IMAGE_COOLDOWN_MS = 45 * 1000;
 const MOBILE_SEARCH_HYDRATE_ERROR_COOLDOWN_MS = 8 * 1000;
 let _mobileSearchHydrateToken = null;
-let _mobileSearchState = { query: '', page: 0, items: [], hasMore: false, loading: false };
+let _mobileSearchState = { query: '', page: 0, items: [], hasMore: false, loading: false, error: null };
 let _mobileZoneMenuState = null;
 let _mobileZoneMenuLongPressTimer = null;
 let _vsOppTargetMobile = false;
@@ -1022,11 +1022,13 @@ function renderMobileChatMessages() {
 
   const log = ensureMobileChatLog();
   box.innerHTML = log.map((entry) => {
+    const system = entry.p === 'sys' || String(entry.name || '').toUpperCase() === 'SYSTEM';
     const mine = entry.p && window._ol && entry.p === window._ol.p;
-    const roleClass = mine ? 'mine' : 'other';
+    const roleClass = system ? 'system' : (mine ? 'mine' : 'other');
+    const displayName = system ? 'SYSTEM' : (entry.name || 'LOG');
     return `
       <div class="mg-chat-item ${roleClass}">
-        <div class="mg-chat-name">${escapeHtmlMobile(entry.name || 'Player')}</div>
+        <div class="mg-chat-name">${escapeHtmlMobile(displayName)}</div>
         <div class="mg-chat-text">${escapeHtmlMobile(entry.msg || '')}</div>
       </div>
     `;
@@ -1042,25 +1044,20 @@ function appendMobileChatMessage(name, msg, p = '') {
   renderMobileChatMessages();
 }
 
+function getMobileOnlinePlayerName(player = window._ol?.p) {
+  if (!window._ol) return 'LOG';
+  return player === 'p1'
+    ? (window._ol.p1Name || 'Player 1')
+    : (window._ol.p2Name || 'Player 2');
+}
+
 function toggleMobileChatPanel() {
   _mobileChatOpen = !_mobileChatOpen;
   renderMobileGame();
 }
 
 async function sendMobileChat() {
-  if (!window._ol) return;
-
-  const input = document.getElementById('mobile-chat-input');
-  const msg = (input?.value || '').trim();
-  if (!msg) return;
-
-  input.value = '';
-  const myName = window._ol.p === 'p1' ? (window._ol.p1Name || 'Player 1') : (window._ol.p2Name || 'Player 2');
-  appendMobileChatMessage(myName, msg, window._ol.p);
-  const ok = await NetworkService.sendChat(window._ol.room, window._ol.p, msg);
-  if (!ok) {
-    appendMobileChatMessage('SYSTEM', 'メッセージ送信に失敗しました。', 'sys');
-  }
+  appendMobileChatMessage('SYSTEM', 'チャット送信は廃止しました。操作ログのみ表示します。', 'sys');
 }
 
 function sendMobileOnlineActionLog(message) {
@@ -1071,9 +1068,18 @@ function sendMobileOnlineActionLog(message) {
   const msg = String(message || '').trim();
   if (!room || !player || !msg) return;
 
-  NetworkService.sendChat(room, player, msg).catch((err) => {
-    console.warn('send mobile online action log error', err);
-  });
+  appendMobileChatMessage(getMobileOnlinePlayerName(player), msg, player);
+
+  NetworkService.sendChat(room, player, msg)
+    .then((ok) => {
+      if (!ok) {
+        appendMobileChatMessage('SYSTEM', '操作ログの送信に失敗しました。', 'sys');
+      }
+    })
+    .catch((err) => {
+      console.warn('send mobile online action log error', err);
+      appendMobileChatMessage('SYSTEM', '操作ログの送信に失敗しました。', 'sys');
+    });
 }
 
 function onMobileChatKeyDown(event) {
@@ -1095,7 +1101,9 @@ function canActMobileOnline() {
 function getMobileZoneLabel(zoneKey) {
   const labels = {
     hand: '\u624b\u672d',
+    battle: '\u30d0\u30c8\u30eb\u30be\u30fc\u30f3',
     battleZone: '\u30d0\u30c8\u30eb\u30be\u30fc\u30f3',
+    mana: '\u30de\u30ca\u30be\u30fc\u30f3',
     manaZone: '\u30de\u30ca\u30be\u30fc\u30f3',
     shields: '\u30b7\u30fc\u30eb\u30c9',
     revealedZone: '\u516c\u958b\u30be\u30fc\u30f3',
@@ -1307,9 +1315,14 @@ function moveMobileCardBetweenZones(fromZone, fromIndex, toZone, position = 'top
   }
 
   const fromLabel = getMobileZoneLabel(fromZone);
-  const toLabel = getMobileZoneLabel(toZone);
+  const toLabel = toZone === 'deck'
+    ? `${getMobileZoneLabel(toZone)}${options.position === 'bottom' ? '下' : '上'}`
+    : getMobileZoneLabel(toZone);
   appendMobileGameLog(`${fromLabel} → ${toLabel}`);
-  if (window._ol) olSendActionMobile('state');
+  if (window._ol) {
+    sendMobileOnlineActionLog(`【操作ログ】${fromLabel} → ${toLabel}`);
+    olSendActionMobile('state');
+  }
   if (window._vs) _vsRefreshOpponentViewMobile();
   renderMobileGame();
 }
@@ -2186,19 +2199,32 @@ async function mobileSearchCards(q) {
     if (!container) return;
 
     if (!keyword) {
-      _mobileSearchState = { query: '', page: 0, items: [], hasMore: false, loading: false };
+      _mobileSearchState = { query: '', page: 0, items: [], hasMore: false, loading: false, error: null };
       container.innerHTML = '';
       return;
     }
 
     if (keyword !== _mobileSearchState.query) {
-      _mobileSearchState = { query: keyword, page: 0, items: [], hasMore: false, loading: false };
+      _mobileSearchState = { query: keyword, page: 0, items: [], hasMore: false, loading: false, error: null };
     }
     if (_mobileSearchState.loading) return;
 
     _mobileSearchState.loading = true;
     try {
       const result = await NetworkService.searchCardsWithMeta(keyword, 1);
+      if (result?.error) {
+        _mobileSearchState = {
+          query: keyword,
+          page: 1,
+          items: [],
+          total: 0,
+          hasMore: false,
+          loading: false,
+          error: result
+        };
+        renderMobileSearchResults();
+        return;
+      }
       const pageItems = Array.isArray(result?.cards) ? result.cards : [];
       const normalizedItems = pageItems.map(c => NetworkService.normalizeCardData(c));
       // 非同期処理中にキーワードが変わっていたら破棄
@@ -2207,6 +2233,7 @@ async function mobileSearchCards(q) {
       _mobileSearchState.items = normalizedItems;
       _mobileSearchState.total = Number.isFinite(Number(result?.total)) ? Number(result.total) : normalizedItems.length;
       _mobileSearchState.hasMore = _mobileSearchState.items.length < _mobileSearchState.total;
+      _mobileSearchState.error = null;
     } finally {
       if (_mobileSearchState.query === keyword) {
         _mobileSearchState.loading = false;
@@ -2232,13 +2259,13 @@ async function mobileSearchCards(q) {
 
   const keyword = String(q || '').trim();
   if (!keyword) {
-    _mobileSearchState = { query: '', page: 0, items: [], hasMore: false, loading: false };
+    _mobileSearchState = { query: '', page: 0, items: [], hasMore: false, loading: false, error: null };
     container.innerHTML = '';
     return;
   }
 
   // ローディング表示（即時フィードバック）
-  _mobileSearchState = { ..._mobileSearchState, query: keyword, loading: true };
+  _mobileSearchState = { ..._mobileSearchState, query: keyword, loading: true, error: null };
   renderMobileSearchResults();
 
   _mobileSearchState = await _mobileSearchController.search(q);
@@ -2260,6 +2287,16 @@ async function mobileSearchMore() {
     const nextPage = _mobileSearchState.page + 1;
     try {
       const result = await NetworkService.searchCardsWithMeta(queryAtStart, nextPage);
+      if (result?.error) {
+        _mobileSearchState = {
+          ..._mobileSearchState,
+          hasMore: false,
+          loading: false,
+          error: result
+        };
+        renderMobileSearchResults();
+        return;
+      }
       const pageItems = Array.isArray(result?.cards) ? result.cards : [];
       const normalizedItems = pageItems.map(c => NetworkService.normalizeCardData(c));
       // 非同期処理中にキーワードが変わっていたら破棄
@@ -2268,6 +2305,7 @@ async function mobileSearchMore() {
       _mobileSearchState.items = [..._mobileSearchState.items, ...normalizedItems];
       _mobileSearchState.total = Number.isFinite(Number(result?.total)) ? Number(result.total) : normalizedItems.length;
       _mobileSearchState.hasMore = _mobileSearchState.items.length < _mobileSearchState.total;
+      _mobileSearchState.error = null;
     } finally {
       if (_mobileSearchState.query === queryAtStart) _mobileSearchState.loading = false;
     }
@@ -2365,6 +2403,11 @@ function renderMobileSearchResults() {
 
   const cards = _mobileSearchState.items || [];
   if (!cards.length) {
+    if (_mobileSearchState.error) {
+      const base = _mobileSearchState.error.base || (typeof NetworkService !== 'undefined' && NetworkService.getApiBase ? NetworkService.getApiBase() : '');
+      container.innerHTML = `<div class="ml-search-empty">API未接続: ${escapeHtmlMobile(base)} の検索に失敗しました。</div>`;
+      return;
+    }
     container.innerHTML = '<div class="ml-search-empty">検索結果なし</div>';
     return;
   }
@@ -2464,6 +2507,7 @@ async function startMobileGame(deckName) {
 function renderMobileGame() {
   const state = engineMobile.getState();
   const revealedZoneCards = Array.isArray(state.revealedZone) ? state.revealedZone : [];
+  const deckRevealZoneCards = Array.isArray(state.deckRevealZone) ? state.deckRevealZone : [];
 
   if (_mobileUnderInsertState) {
     const sourceCards = state[_mobileUnderInsertState.fromZone];
@@ -2594,6 +2638,22 @@ function renderMobileGame() {
       </div>
     `;
   };
+
+  const renderPublicPreviewChip = (card) => {
+    const cost = Number.isFinite(Number(card?.cost)) ? Number(card.cost) : '-';
+    const power = card?.power ? String(card.power) : '';
+    const shortName = getMobileCardShortName(card?.name, 8);
+    const imageUrl = getMobileCardImageUrl(card);
+    return `
+      <div class="mg-card-chip revealed ${imageUrl ? 'has-image' : ''}" title="${escapeHtmlMobile(card?.name || '')}">
+        ${imageUrl
+          ? `<img src="${escapeHtmlMobile(imageUrl)}" alt="${escapeHtmlMobile(card?.name || 'CARD')}" class="mg-card-chip-img" loading="lazy" decoding="async" onerror="handleMobileCardImageError(this)">`
+          : `<div class="mg-card-cost">${escapeHtmlMobile(String(cost))}</div>
+        <div class="mg-card-name">${escapeHtmlMobile(shortName)}</div>
+        <div class="mg-card-power">${escapeHtmlMobile(power)}</div>`}
+      </div>
+    `;
+  };
   
   // Build HTML sections
   const myNum2 = olEff?.p === 'p1' ? 1 : 2;
@@ -2663,6 +2723,7 @@ function renderMobileGame() {
   }).join('');
 
   const hasRevealed = state.revealedZone.length > 0;
+  const hasDeckReveal = deckRevealZoneCards.length > 0;
   const revealedHTML = state.revealedZone.map((c, i) => `
     <div class="mg-ls-revealed-wrap">
       ${renderChip(c, 'revealed', i)}
@@ -2671,6 +2732,11 @@ function renderMobileGame() {
         <button class="mg-ls-rev-act" onclick="moveMobileCardBetweenZones('revealedZone',${i},'battleZone','top')">BZ</button>
         <button class="mg-ls-rev-act red" onclick="moveMobileCardBetweenZones('revealedZone',${i},'graveyard','top')">墓</button>
       </div>
+    </div>`).join('');
+  const deckRevealHTML = deckRevealZoneCards.map((c) => `
+    <div class="mg-ls-revealed-wrap">
+      ${renderPublicPreviewChip(c)}
+      <button class="mg-ls-rev-act" onclick="openMobileDeckRevealModal('public')">処理</button>
     </div>`).join('');
 
   const deckTopActions = `oncontextmenu="openMobileCardZoneMenu(event,'deck',0)"
@@ -2721,7 +2787,7 @@ function renderMobileGame() {
       <button class="mg-rbn-btn" onclick="returnMobileFromGraveyard('hand')">墓地→手札</button>
       ${(window._ol || vs) ? `<button class="mg-rbn-btn" onclick="openMobileHandDiscardMenu()">ハンデス</button>` : ''}
       ${!window._ol && !vs ? `<button class="mg-rbn-btn" onclick="undoMobileGame()">やり直し</button>` : ''}
-      <button class="mg-rbn-btn" onclick="renderMobileDeckList()">戻る</button>
+      <button class="mg-rbn-btn" onclick="${window._ol ? 'mobileOnlineBackToDeckList()' : 'renderMobileDeckList()'}">戻る</button>
     </div>
   ` : '';
 
@@ -2751,6 +2817,7 @@ function renderMobileGame() {
           <div class="mg-ls-zone-cards">${myBZHTML}</div>
         </div>
         ${hasRevealed ? `<div class="mg-ls-row my-revealed"><div class="mg-ls-zone-cards">${revealedHTML}</div></div>` : ''}
+        ${hasDeckReveal ? `<div class="mg-ls-row my-revealed"><div class="mg-ls-zone-cards">${deckRevealHTML}</div></div>` : ''}
         <div class="mg-ls-row my-shield">
           <div class="mg-ls-zone-cards">${myShieldHTML}</div>
           <div class="mg-ls-pile deck" ${deckTopActions}>
@@ -2802,19 +2869,15 @@ function renderMobileGame() {
 
       ${window._ol ? `
       <div class="mg-chat-wrap">
-        <button class="mg-chat-toggle" onclick="toggleMobileChatPanel()">${_mobileChatOpen ? '✕' : 'チャット'}</button>
+        <button class="mg-chat-toggle" onclick="toggleMobileChatPanel()">${_mobileChatOpen ? '✕' : 'ログ'}</button>
         <div class="mg-chat-panel ${_mobileChatOpen ? 'open' : ''}">
-          <div class="mg-chat-log" id="mgChatLog">
+          <div class="mg-chat-messages" id="mobile-chat-messages">
             ${(window._olChatLogMobile || []).map(m =>
               `<div class="mg-chat-msg ${m.p === window._ol?.p ? 'mine' : (m.p === 'sys' ? 'sys' : 'opp')}">
                 <span class="mg-chat-name">${escapeHtmlMobile(m.name)}</span>
                 <span class="mg-chat-text">${escapeHtmlMobile(m.msg)}</span>
               </div>`
             ).join('')}
-          </div>
-          <div class="mg-chat-input-row">
-            <input id="mgChatInput" class="mg-chat-input" type="text" placeholder="メッセージ..." maxlength="100">
-            <button class="mg-chat-send" onclick="sendMobileChat()">送信</button>
           </div>
         </div>
       </div>
@@ -3586,7 +3649,10 @@ function playMobileSelectedCard(zone) {
     : engineMobile.playCard(card, zone);
   if (!ok) return;
   _mobileSelectedHandIdx = null;
-  if (window._ol) olSendActionMobile('state');
+  if (window._ol) {
+    sendMobileOnlineActionLog(`【操作ログ】${getMobileZoneLabel('hand')} → ${getMobileZoneLabel(zone)}`);
+    olSendActionMobile('state');
+  }
   renderMobileGame();
 }
 
@@ -3648,7 +3714,10 @@ function drawMobileCard() {
   if (!ok) return;
   _mobileNeedDrawGuide = false;
   appendMobileGameLog('ドロー');
-  if (window._ol) olSendActionMobile('state');
+  if (window._ol) {
+    sendMobileOnlineActionLog('【操作ログ】ドローしました');
+    olSendActionMobile('state');
+  }
   renderMobileGame();
 }
 
@@ -3671,6 +3740,7 @@ function turnMobileEnd() {
   _mobileSelectedHandIdx = null;
   appendMobileGameLog('ターン終了');
   if (window._ol) {
+    sendMobileOnlineActionLog('【システム】ターンを終了しました');
     olSendActionMobile('turn_end');
   } else {
     showMobileTurnNotification('次のターンです。まずはドロー');
@@ -4144,9 +4214,13 @@ async function openMobileVsSetup() {
     showMobileToast('先にデッキを選択してください', 'warn');
     return;
   }
+  const account = AuthService.getCurrentAccount();
   const allNames = (Array.isArray(window._serverDeckNames) ? window._serverDeckNames : [])
     .slice()
     .sort((a, b) => String(a).localeCompare(String(b), 'ja'));
+  if ((!account || account.isGuest || !account.pin) && !allNames.includes(p1DeckName)) {
+    allNames.unshift(p1DeckName);
+  }
 
   const optionsHtml = allNames.map(n =>
     `<option value="${escapeHtmlMobile(n)}">${escapeHtmlMobile(n)}</option>`
@@ -4461,11 +4535,36 @@ function olCancelMobileWait() {
   renderMobileDeckList();
 }
 
+function mobileOnlineBackToDeckList() {
+  if (_olReconnectTimerMobile) {
+    clearTimeout(_olReconnectTimerMobile);
+    _olReconnectTimerMobile = null;
+  }
+
+  if (window._ol && window._ol.eventSource) {
+    window._ol.eventSource.close();
+    window._ol.eventSource = null;
+  }
+
+  if (window.GameController) {
+    window.GameController.clearOnlineSession();
+  } else {
+    window._ol = null;
+    window._olDeckData = null;
+    window._olOpponent = null;
+    window._olCurrentPlayer = null;
+  }
+
+  window._olDeckName = null;
+  _mobileChatOpen = false;
+  renderMobileDeckList();
+}
+
 async function olJoinRoomMobile() {
   const deckName = window._olDeckName;
   const roomCodeInput = document.getElementById('mobile-ol-room-code');
-  const code = (window.NetworkService && typeof window.NetworkService.normalizeRoomCode === 'function')
-    ? window.NetworkService.normalizeRoomCode(roomCodeInput?.value || '')
+  const code = (typeof NetworkService !== 'undefined' && typeof NetworkService.normalizeRoomCode === 'function')
+    ? NetworkService.normalizeRoomCode(roomCodeInput?.value || '')
     : (roomCodeInput?.value || '').trim().toUpperCase().slice(0, 6);
   if (roomCodeInput && code && roomCodeInput.value !== code) {
     roomCodeInput.value = code;

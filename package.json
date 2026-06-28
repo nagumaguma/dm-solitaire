@@ -4,7 +4,10 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "test:search-image": "playwright test tests/search-image.spec.js"
+    "test": "playwright test",
+    "test:search-image": "playwright test tests/search-image.spec.js",
+    "test:dm-operation-ui": "playwright test tests/dm-operation-ui.spec.js",
+    "prod:check": "node scripts/prod-smoke.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0"

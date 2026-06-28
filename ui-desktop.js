@@ -52,12 +52,14 @@ let _desktopSearchState = {
   items: [],
   total: 0,
   hasMore: false,
-  loading: false
+  loading: false,
+  error: null
 };
 let _desktopSearchServerState = {
   query: '',
   total: 0,
   serverPageSize: 0,
+  error: null,
   pages: new Map()
 };
 
@@ -797,6 +799,10 @@ function renderDesktopSearchResults() {
   const totalPages = hasTotal
     ? Math.max(1, Math.ceil(total / DESKTOP_SEARCH_PAGE_SIZE))
     : null;
+  const searchError = _desktopSearchState.error;
+  const emptyLabel = searchError
+    ? `API未接続: ${searchError.base || (typeof NetworkService !== 'undefined' && NetworkService.getApiBase ? NetworkService.getApiBase() : '')} の検索に失敗しました。`
+    : (_desktopSearchState.loading ? '検索中...' : '該当カードが見つかりません。');
 
   const gridHtml = items.length
     ? `
@@ -833,7 +839,7 @@ function renderDesktopSearchResults() {
         }).join('')}
       </div>
     `
-    : `<div class="dl-search-empty">${_desktopSearchState.loading ? '検索中...' : '該当カードが見つかりません。'}</div>`;
+    : `<div class="dl-search-empty">${escapeHtml(emptyLabel)}</div>`;
 
   const loadingLabel = _desktopSearchState.loading ? ' | 読み込み中' : '';
   const prevDisabled = _desktopSearchState.loading || page <= 1 ? 'disabled' : '';
@@ -889,6 +895,7 @@ function resetDesktopSearchServerState(query = '') {
     query,
     total: 0,
     serverPageSize: 0,
+    error: null,
     pages: new Map()
   };
 }
@@ -898,12 +905,18 @@ async function fetchDesktopServerSearchPage(query, page, token) {
     resetDesktopSearchServerState(query);
   }
 
-  if (_desktopSearchServerState.pages.has(page)) {
+  if (!_desktopSearchServerState.error && _desktopSearchServerState.pages.has(page)) {
     return _desktopSearchServerState.pages.get(page) || [];
   }
 
   const result = await NetworkService.searchCardsWithMeta(query, page);
   if (token !== _desktopSearchRequestToken) return [];
+  if (result?.error) {
+    _desktopSearchServerState.error = result;
+    _desktopSearchServerState.pages.set(page, []);
+    return [];
+  }
+  _desktopSearchServerState.error = null;
 
   const cards = Array.isArray(result?.cards) ? result.cards : [];
   const hydrated = await hydrateDesktopSearchCards(cards);
@@ -968,7 +981,8 @@ async function resolveDesktopSearchUiPage(query, uiPage, token) {
   return {
     items,
     total: safeTotal,
-    hasMore
+    hasMore,
+    error: _desktopSearchServerState.error || null
   };
 }
 
@@ -1191,11 +1205,13 @@ function renderDesktopChatMessages() {
 
   const log = ensureDesktopChatLog();
   box.innerHTML = log.map((entry) => {
+    const system = entry.p === 'sys' || String(entry.name || '').toUpperCase() === 'SYSTEM';
     const mine = entry.p && window._ol && entry.p === window._ol.p;
-    const roleClass = mine ? 'mine' : 'other';
+    const roleClass = system ? 'system' : (mine ? 'mine' : 'other');
+    const displayName = system ? 'SYSTEM' : (entry.name || 'LOG');
     return `
       <div class="dg-chat-item ${roleClass}">
-        <div class="dg-chat-name">${escapeHtml(entry.name || 'Player')}</div>
+        <div class="dg-chat-name">${escapeHtml(displayName)}</div>
         <div class="dg-chat-text">${escapeHtml(entry.msg || '')}</div>
       </div>
     `;
@@ -1211,20 +1227,15 @@ function appendDesktopChatMessage(name, msg, p = '') {
   renderDesktopChatMessages();
 }
 
+function getDesktopOnlinePlayerName(player = window._ol?.p) {
+  if (!window._ol) return 'LOG';
+  return player === 'p1'
+    ? (window._ol.p1Name || 'Player 1')
+    : (window._ol.p2Name || 'Player 2');
+}
+
 async function sendDesktopChat() {
-  if (!window._ol) return;
-
-  const input = document.getElementById('desktop-chat-input');
-  const msg = (input?.value || '').trim();
-  if (!msg) return;
-
-  input.value = '';
-  const myName = window._ol.p === 'p1' ? (window._ol.p1Name || 'Player 1') : (window._ol.p2Name || 'Player 2');
-  appendDesktopChatMessage(myName, msg, window._ol.p);
-  const ok = await NetworkService.sendChat(window._ol.room, window._ol.p, msg);
-  if (!ok) {
-    appendDesktopChatMessage('SYSTEM', 'メッセージ送信に失敗しました。', 'sys');
-  }
+  appendDesktopChatMessage('SYSTEM', 'チャット送信は廃止しました。操作ログのみ表示します。', 'sys');
 }
 
 function sendDesktopOnlineActionLog(message) {
@@ -1235,9 +1246,18 @@ function sendDesktopOnlineActionLog(message) {
   const msg = String(message || '').trim();
   if (!room || !player || !msg) return;
 
-  NetworkService.sendChat(room, player, msg).catch((err) => {
-    console.warn('send online action log error', err);
-  });
+  appendDesktopChatMessage(getDesktopOnlinePlayerName(player), msg, player);
+
+  NetworkService.sendChat(room, player, msg)
+    .then((ok) => {
+      if (!ok) {
+        appendDesktopChatMessage('SYSTEM', '操作ログの送信に失敗しました。', 'sys');
+      }
+    })
+    .catch((err) => {
+      console.warn('send online action log error', err);
+      appendDesktopChatMessage('SYSTEM', '操作ログの送信に失敗しました。', 'sys');
+    });
 }
 
 function onDesktopChatKeyDown(event) {
@@ -1513,7 +1533,7 @@ async function desktopSearchCards(q, page = 1) {
   if (!keyword) {
     _desktopSearchRequestToken += 1;
     resetDesktopSearchServerState('');
-    _desktopSearchState = { query: '', page: 0, items: [], total: 0, hasMore: false, loading: false };
+    _desktopSearchState = { query: '', page: 0, items: [], total: 0, hasMore: false, loading: false, error: null };
     const resultsEl = document.getElementById('desktop-search-results');
     if (resultsEl) resultsEl.innerHTML = '';
     return;
@@ -1531,7 +1551,8 @@ async function desktopSearchCards(q, page = 1) {
     items: [],
     total: Number(_desktopSearchState.total) || 0,
     hasMore: false,
-    loading: true
+    loading: true,
+    error: null
   };
   renderDesktopSearchResults();
 
@@ -1547,7 +1568,8 @@ async function desktopSearchCards(q, page = 1) {
       items: resolved.items,
       total: resolved.total,
       hasMore: resolved.hasMore,
-      loading: false
+      loading: false,
+      error: resolved.error || null
     };
   } catch (error) {
     if (token !== _desktopSearchRequestToken) return;
@@ -1558,7 +1580,12 @@ async function desktopSearchCards(q, page = 1) {
       items: [],
       total: 0,
       hasMore: false,
-      loading: false
+      loading: false,
+      error: {
+        error: 'search_failed',
+        message: error?.message || 'search failed',
+        base: typeof NetworkService !== 'undefined' && NetworkService.getApiBase ? NetworkService.getApiBase() : ''
+      }
     };
   }
 
@@ -1614,6 +1641,7 @@ function renderDesktopGame() {
   closeDesktopHandPicker();
   const state = engine.getState();
   const revealedZoneCards = Array.isArray(state.revealedZone) ? state.revealedZone : [];
+  const deckRevealZoneCards = Array.isArray(state.deckRevealZone) ? state.deckRevealZone : [];
 
   if (_desktopUnderInsertState) {
     const sourceCards = state[_desktopUnderInsertState.fromZone];
@@ -1635,6 +1663,8 @@ function renderDesktopGame() {
   const headerTurnClass = olEff ? (isMyTurn ? 'mine-turn' : 'opponent-turn') : 'solo-turn';
   const myName = olEff ? (olEff.p === 'p1' ? (olEff.p1Name || 'P1') : (olEff.p2Name || 'P2')) : '自分';
   const oppName = olEff ? (olEff.p === 'p1' ? (olEff.p2Name || 'P2') : (olEff.p1Name || 'P1')) : '相手';
+  const backAction = ol ? 'desktopOnlineBackToDeckList()' : 'renderDesktopDeckList()';
+  const shieldBreakLabel = _desktopSelectedShieldIdx === null ? 'シールド破壊' : `シールド破壊 (${_desktopSelectedShieldIdx + 1})`;
 
   const onlineStatusText = '';
   const getZoneCount = (zone) => Array.isArray(zone) ? zone.length : Math.max(0, Number(zone) || 0);
@@ -1731,6 +1761,22 @@ function renderDesktopGame() {
     `;
   };
 
+  const renderPublicPreviewChip = (card) => {
+    const cost = Number.isFinite(Number(card?.cost)) ? Number(card.cost) : '-';
+    const power = card?.power ? String(card.power) : '';
+    const shortName = getDesktopCardShortName(card?.name || '', 8);
+    const imageUrl = getDesktopCardImageUrl(card);
+    return `
+      <div class="dg-card-chip revealed ${imageUrl ? 'has-image' : ''}" title="${escapeHtml(card?.name || '')}">
+        ${imageUrl
+          ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(card?.name || 'CARD')}" class="dg-card-chip-img" loading="lazy" decoding="async" onerror="handleDesktopCardImageError(this)">`
+          : `<div class="dg-card-cost">${escapeHtml(String(cost))}</div>
+        <div class="dg-card-name">${escapeHtml(shortName)}</div>
+        <div class="dg-card-power">${escapeHtml(power)}</div>`}
+      </div>
+    `;
+  };
+
   const deckTopIndex = Math.max(0, state.deck.length - 1);
   const graveTopIndex = Math.max(0, state.graveyard.length - 1);
   const hasDeckCard = state.deck.length > 0;
@@ -1752,6 +1798,7 @@ function renderDesktopGame() {
           <button onclick="moveDesktopDeckTopTo('manaZone')" class="dg-btn deck-mana">\u5c71\u4e0a\u2192\u30de\u30ca</button>
           <button onclick="moveDesktopDeckTopTo('graveyard')" class="dg-btn deck-grave">\u5c71\u4e0a\u2192\u5893\u5730</button>
           <button onclick="moveDesktopDeckTopTo('shields')" class="dg-btn deck-shield">\u5c71\u4e0a\u2192\u30b7\u30fc\u30eb\u30c9</button>
+          <button onclick="breakDesktopShield()" class="dg-btn shield-break">${shieldBreakLabel}</button>
           <div class="dg-n-control">
             <span class="dg-n-label">n</span>
             <input type="number" id="desktop-deck-n-input" class="dg-n-input" min="1" max="40" value="${_desktopDeckNValue}" oninput="setDesktopDeckNValue(this.value)">
@@ -1761,7 +1808,7 @@ function renderDesktopGame() {
           <button onclick="openDesktopDeckAllModal()" class="dg-btn deck-all">\u5c71\u672d\u5168\u90e8\u898b\u308b</button>
           <button onclick="untapAllDesktopMana()" class="dg-btn mana-untap">\u30de\u30ca\u5168\u30a2\u30f3\u30bf\u30c3\u30d7</button>
           ${!window._ol ? `<button onclick="undoDesktopGame()" class="dg-btn undo">やり直し</button>` : ''}
-          <button onclick="renderDesktopDeckList()" class="dg-btn back">戻る</button>
+          <button onclick="${backAction}" class="dg-btn back">戻る</button>
         </div>
       </div>
 
@@ -1924,16 +1971,27 @@ function renderDesktopGame() {
             </div>
           </div>
           ` : ''}
+          ${deckRevealZoneCards.length ? `
+          <div class="dg-v2-row my-revealed">
+            <span class="dg-v2-label">山札公開<br><b>${deckRevealZoneCards.length}</b></span>
+            <div class="dg-v2-cards">
+              ${deckRevealZoneCards.map((c) => `
+                <div class="dg-revealed-item">
+                  ${renderPublicPreviewChip(c)}
+                  <div class="dg-revealed-actions">
+                    <button type="button" class="dg-revealed-btn hand" onclick="openDesktopDeckRevealModal('public')">処理</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          ` : ''}
         </div>
 
         ${ol && !vs ? `
           <div class="dg-v2-chat">
-            <div class="dg-chat-title">チャット</div>
+            <div class="dg-chat-title">操作ログ</div>
             <div id="desktop-chat-messages" class="dg-chat-messages"></div>
-            <div class="dg-chat-input-row">
-              <input id="desktop-chat-input" type="text" maxlength="200" placeholder="メッセージ" onkeydown="onDesktopChatKeyDown(event)" class="dg-chat-input">
-              <button onclick="sendDesktopChat()" class="dg-chat-send">送信</button>
-            </div>
           </div>
         ` : ''}
       </div>
@@ -2384,7 +2442,9 @@ function canActDesktopOnline() {
 function getDesktopZoneLabel(zoneKey) {
   const labels = {
     hand: '\u624b\u672d',
+    battle: '\u30d0\u30c8\u30eb\u30be\u30fc\u30f3',
     battleZone: '\u30d0\u30c8\u30eb\u30be\u30fc\u30f3',
+    mana: '\u30de\u30ca\u30be\u30fc\u30f3',
     manaZone: '\u30de\u30ca\u30be\u30fc\u30f3',
     shields: '\u30b7\u30fc\u30eb\u30c9',
     revealedZone: '\u516c\u958b\u30be\u30fc\u30f3',
@@ -2592,7 +2652,13 @@ function moveDesktopCardBetweenZones(fromZone, fromIndex, toZone, position = 'to
     return;
   }
 
-  if (window._ol) olSendActionDesktop('state');
+  if (window._ol) {
+    const toLabel = toZone === 'deck'
+      ? `${getDesktopZoneLabel(toZone)}${options.position === 'bottom' ? '下' : '上'}`
+      : getDesktopZoneLabel(toZone);
+    sendDesktopOnlineActionLog(`【操作ログ】${getDesktopZoneLabel(fromZone)} → ${toLabel}`);
+    olSendActionDesktop('state');
+  }
   if (window._vs) _vsRefreshOpponentView();
   renderDesktopGame();
 }
@@ -2878,7 +2944,10 @@ function playDesktopCard(idx, zone) {
     ? window.GameController.playCardByHandIndex(engine, idx, zone)
     : engine.playCard(engine.state.hand[idx], zone);
   if (!ok) return;
-  if (window._ol) olSendActionDesktop('state');
+  if (window._ol) {
+    sendDesktopOnlineActionLog(`【操作ログ】${getDesktopZoneLabel('hand')} → ${getDesktopZoneLabel(zone)}`);
+    olSendActionDesktop('state');
+  }
   renderDesktopGame();
 }
 
@@ -2915,7 +2984,10 @@ function dropDesktopCard(event, zone) {
     ? window.GameController.playCardByHandIndex(engine, _currentDragIdx, zone)
     : engine.playCard(engine.state.hand[_currentDragIdx], zone);
   if (ok) {
-    if (window._ol) olSendActionDesktop('state');
+    if (window._ol) {
+      sendDesktopOnlineActionLog(`【操作ログ】${getDesktopZoneLabel('hand')} → ${getDesktopZoneLabel(zone)}`);
+      olSendActionDesktop('state');
+    }
     renderDesktopGame();
   }
   
@@ -2933,7 +3005,10 @@ function drawDesktopCard() {
     : engine.drawCard();
   if (!ok) return;
   _desktopNeedDrawGuide = false;
-  if (window._ol) olSendActionDesktop('state');
+  if (window._ol) {
+    sendDesktopOnlineActionLog('【操作ログ】ドローしました');
+    olSendActionDesktop('state');
+  }
   renderDesktopGame();
 }
 
@@ -2954,6 +3029,7 @@ function turnDesktopEnd() {
   _desktopNeedDrawGuide = !window._ol;
   _desktopSelectedShieldIdx = null;
   if (window._ol) {
+    sendDesktopOnlineActionLog('【システム】ターンを終了しました');
     olSendActionDesktop('turn_end');
   } else {
     showDesktopTurnNotification('次のターンです。まずはドロー');
@@ -4163,9 +4239,13 @@ async function openDesktopVsSetup() {
     showDesktopToast('先にデッキを選択してください', 'warn');
     return;
   }
+  const account = AuthService.getCurrentAccount();
   const allNames = (Array.isArray(window._serverDeckNames) ? window._serverDeckNames : [])
     .slice()
     .sort((a, b) => String(a).localeCompare(String(b), 'ja'));
+  if ((!account || account.isGuest || !account.pin) && !allNames.includes(p1DeckName)) {
+    allNames.unshift(p1DeckName);
+  }
 
   const optionsHtml = allNames.map(n =>
     `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`
@@ -4348,8 +4428,8 @@ function desktopOnlineGetSelected() {
   const nameInput = document.getElementById('desktop-online-player-name');
   const deckSelect = document.getElementById('desktop-online-deck-select');
   const codeInput = document.getElementById('desktop-online-room-code');
-  const normalizedRoomCode = (window.NetworkService && typeof window.NetworkService.normalizeRoomCode === 'function')
-    ? window.NetworkService.normalizeRoomCode(codeInput?.value || '')
+  const normalizedRoomCode = (typeof NetworkService !== 'undefined' && typeof NetworkService.normalizeRoomCode === 'function')
+    ? NetworkService.normalizeRoomCode(codeInput?.value || '')
     : (codeInput?.value || '').trim().toUpperCase().slice(0, 6);
   return {
     playerName: (nameInput?.value || 'Player').trim().slice(0, 20),

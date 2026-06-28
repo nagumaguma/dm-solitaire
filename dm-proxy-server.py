@@ -33,10 +33,69 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
 PORT     = int(os.environ.get("PORT", 8765))
-BASE_URL = os.environ.get("BASE_URL", f"http://localhost:{PORT}")
 APP_BUILD = os.environ.get("APP_BUILD", "2026-03-19-imgfix")
 WIKI_API = "https://duelmasters.fandom.com/api.php"
 WIKI_HEADERS = {"User-Agent": "DMSolitaireTool/1.0 (local proxy)"}
+
+_request_context = threading.local()
+
+def _normalize_public_base_url(value: str) -> str:
+    """Normalize a public app origin for absolute API/proxy URLs."""
+    raw = str(value or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    if not raw.startswith(("http://", "https://")):
+        raw = f"https://{raw}"
+    return raw
+
+
+def _configured_public_base_url() -> str:
+    """Resolve a deployment-provided public origin when available."""
+    for key in ("BASE_URL", "PUBLIC_BASE_URL", "RAILWAY_PUBLIC_DOMAIN", "RAILWAY_STATIC_URL", "RENDER_EXTERNAL_URL"):
+        base = _normalize_public_base_url(os.environ.get(key, ""))
+        if base:
+            return base
+
+    heroku_app = str(os.environ.get("HEROKU_APP_NAME", "")).strip()
+    if heroku_app:
+        return f"https://{heroku_app}.herokuapp.com"
+    return ""
+
+
+_CONFIGURED_BASE_URL = _configured_public_base_url()
+BASE_URL = _CONFIGURED_BASE_URL or f"http://localhost:{PORT}"
+
+
+def _base_url_from_request(handler=None) -> str:
+    """Infer the current public origin from reverse-proxy headers."""
+    if handler is None:
+        return ""
+    host = (handler.headers.get("X-Forwarded-Host") or handler.headers.get("Host") or "").strip()
+    if not host:
+        return ""
+    proto = (handler.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+    if proto not in ("http", "https"):
+        host_lower = host.lower()
+        proto = "http" if (
+            host_lower.startswith("localhost")
+            or host_lower.startswith("127.0.0.1")
+            or host_lower.startswith("[::1]")
+        ) else "https"
+    return _normalize_public_base_url(f"{proto}://{host}")
+
+
+def _current_base_url() -> str:
+    if _CONFIGURED_BASE_URL:
+        return _CONFIGURED_BASE_URL
+    request_base = getattr(_request_context, "base_url", "")
+    return request_base or BASE_URL
+
+
+def _proxy_image_url(raw_url: str) -> str:
+    url = str(raw_url or "").strip()
+    if not url:
+        return ""
+    return f"{_current_base_url()}/img?url={urllib.parse.quote(url, safe='')}"
 
 _dmwiki_cache: dict[str, list[dict]] = {}   # normalized_query → all matched cards
 DMWIKI_CACHE_MAX = 500
@@ -1782,7 +1841,7 @@ def _official_proxy_image_url(raw_url: str) -> str:
         return ""
     if not (url.startswith("http://") or url.startswith("https://")):
         url = OFFICIAL_BASE + url
-    return f"{BASE_URL}/img?url={urllib.parse.quote(url, safe='')}"
+    return _proxy_image_url(url)
 
 
 def _official_search_pairs(html: str) -> list[tuple[str, str]]:
@@ -2270,7 +2329,7 @@ def _img_from_dmwiki_html(html: str) -> str:
             continue  # skip pack/set images
         rel = re.sub(r'&thumbnail(?:=[^&"]*)?', '', url)
         full_url = f"{DMWIKI_BASE}/{rel}"
-        return f"{BASE_URL}/img?url={urllib.parse.quote(full_url, safe='')}"
+        return _proxy_image_url(full_url)
     # nolink images: <img src="?plugin=ref..."> without anchor wrapper
     for m in re.finditer(
         r'<img[^>]+src="(\?plugin=ref[^"]*\.(?:jpg|jpeg|png)[^"]*)"',
@@ -2281,7 +2340,7 @@ def _img_from_dmwiki_html(html: str) -> str:
             continue
         rel = re.sub(r'&thumbnail(?:=[^&"]*)?', '', url)
         full_url = f"{DMWIKI_BASE}/{rel}"
-        return f"{BASE_URL}/img?url={urllib.parse.quote(full_url, safe='')}"
+        return _proxy_image_url(full_url)
     return ""
 
 
@@ -2307,7 +2366,7 @@ def _img_from_dmwiki_attach(page_name: str) -> str:
             continue
         rel = re.sub(r'&thumbnail(?:=[^&\"]*)?', '', url)
         full_url = f"{DMWIKI_BASE}/{rel}"
-        return f"{BASE_URL}/img?url={urllib.parse.quote(full_url, safe='')}"
+        return _proxy_image_url(full_url)
     # Pattern 2: PukiWiki attach list links (?cmd=attach&...&file=xxx.jpg&pcmd=open)
     for m in re.finditer(
         r'href="(\?cmd=attach[^"]*&file=[^"&]*\.(?:jpg|jpeg|png)[^"]*)"',
@@ -2320,7 +2379,7 @@ def _img_from_dmwiki_attach(page_name: str) -> str:
             if _PACK_FNAME_RE.match(fn):
                 continue
         full_url = f"{DMWIKI_BASE}/{url}"
-        return f"{BASE_URL}/img?url={urllib.parse.quote(full_url, safe='')}"
+        return _proxy_image_url(full_url)
     return ""
 
 
@@ -2735,6 +2794,7 @@ class Handler(BaseHTTPRequestHandler):
     # ── POST handler ──────────────────────────────────────────────────────────
 
     def do_POST(self):
+        _request_context.base_url = _base_url_from_request(self)
         try:
             self._do_post_impl()
         except Exception as e:
@@ -2743,6 +2803,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "internal server error"}, 500)
             except Exception:
                 pass
+        finally:
+            _request_context.base_url = ""
 
     def _do_post_impl(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -3045,6 +3107,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def do_GET(self):
+        _request_context.base_url = _base_url_from_request(self)
         try:
             self._do_get_impl()
         except Exception as e:
@@ -3053,6 +3116,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "internal server error"}, 500)
             except Exception:
                 pass
+        finally:
+            _request_context.base_url = ""
 
     def _do_get_impl(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -3063,7 +3128,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # /ping
         if parsed.path == "/ping":
-            self._json({"status": "ok", "port": PORT, "source": "dmwiki", "build": APP_BUILD})
+            self._json({"status": "ok", "port": PORT, "source": "dmwiki", "build": APP_BUILD, "baseUrl": _current_base_url()})
 
         # /test/rate-limit-status (for debugging)
         elif parsed.path == "/test/rate-limit-status":

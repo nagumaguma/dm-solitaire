@@ -185,6 +185,30 @@
       display: block;
     }
 
+    .api-status {
+      margin: 0 0 14px;
+      padding: 8px 10px;
+      border: 1px solid #d8d0c6;
+      border-radius: 4px;
+      background: #f7f4ef;
+      color: #6f6257;
+      font-size: 0.78rem;
+      line-height: 1.35;
+      word-break: break-all;
+    }
+
+    .api-status.ok {
+      background: #edf6ef;
+      border-color: #b9d3bf;
+      color: #416d49;
+    }
+
+    .api-status.warn {
+      background: #f8ece7;
+      border-color: #dfbeb0;
+      color: #8a5643;
+    }
+
     /* ゲーム画面 */
     #app-desktop,
     #app-mobile {
@@ -4454,6 +4478,7 @@
     .dg-btn.deck-mana { background: #5e8b66; }
     .dg-btn.deck-grave { background: #8b615e; }
     .dg-btn.deck-shield { background: #7d7298; }
+    .dg-btn.shield-break { background: #7466a6; }
     .dg-btn.deck-reveal { background: #b9682f; }
     .dg-btn.deck-peek { background: #5f7286; }
     .dg-btn.deck-all { background: #3f6d86; }
@@ -6919,6 +6944,9 @@
       background: rgba(20,16,12,0.95);
       border-top: 1px solid #4a3a2a;
       padding: 2px 4px;
+      max-height: 45dvh;
+      overflow-y: auto;
+      overscroll-behavior: contain;
     }
     .mg-root.ls-active .mg-ribbon-main {
       display: flex;
@@ -6966,6 +6994,10 @@
       padding: 3px 0 2px;
       border-top: 1px solid #3a2a1a;
       margin-top: 2px;
+      max-height: calc(45dvh - 32px);
+      opacity: 1;
+      overflow-y: auto;
+      pointer-events: auto;
     }
 
     /* Game log overlay */
@@ -7001,6 +7033,7 @@
   <div class="auth-box">
     <h1>DM Solitaire</h1>
     <p class="subtitle">デュエマの一人回し＆オンライン対戦ツール</p>
+    <div id="api-status" class="api-status">API: 確認中...</div>
 
     <div class="auth-tabs">
       <div class="auth-tab active" onclick="switchAuthTab('login')">ログイン</div>
@@ -7047,6 +7080,37 @@
   // API ベースURL（明示設定がなければ環境で自動選択）
   (function setApiBaseDefault() {
     if (window.DM_API_BASE) return;
+    const params = new URLSearchParams(window.location.search || '');
+    const apiParam = String(params.get('api') || params.get('apiBase') || '').trim();
+    if (apiParam) {
+      const normalizedApi = apiParam.replace(/\/+$/, '');
+      window.DM_API_BASE = normalizedApi;
+      try {
+        localStorage.setItem('dm_api_base_override', normalizedApi);
+      } catch (error) {
+        console.warn('[DM] API override could not be saved:', error);
+      }
+      console.info('[DM] API base override:', window.DM_API_BASE);
+      return;
+    }
+    if (params.has('clearApi')) {
+      try {
+        localStorage.removeItem('dm_api_base_override');
+      } catch (error) {
+        console.warn('[DM] API override could not be cleared:', error);
+      }
+    } else {
+      try {
+        const savedApi = String(localStorage.getItem('dm_api_base_override') || '').trim().replace(/\/+$/, '');
+        if (savedApi) {
+          window.DM_API_BASE = savedApi;
+          console.info('[DM] API base override:', window.DM_API_BASE);
+          return;
+        }
+      } catch (error) {
+        console.warn('[DM] API override could not be loaded:', error);
+      }
+    }
     const host = String(window.location.hostname || '').toLowerCase();
     const isLocal = window.location.protocol === 'file:'
       || host === 'localhost'
@@ -7124,6 +7188,38 @@
     document.getElementById('auth-screen').classList.add('active');
     document.getElementById('app-desktop').classList.remove('active');
     document.getElementById('app-mobile').classList.remove('active');
+    refreshApiStatus();
+  }
+
+  function setApiStatusMessage(message, statusClass = '') {
+    const el = document.getElementById('api-status');
+    if (!el) return;
+    el.className = `api-status ${statusClass}`.trim();
+    el.textContent = message;
+  }
+
+  async function refreshApiStatus() {
+    if (typeof NetworkService === 'undefined' || typeof NetworkService.checkApiStatus !== 'function') {
+      return { ok: false, base: window.DM_API_BASE || '', message: 'NetworkService unavailable' };
+    }
+
+    const base = NetworkService.getApiBase();
+    setApiStatusMessage(`API: ${base} / 確認中...`);
+    const result = await NetworkService.checkApiStatus(3000);
+    if (result.ok) {
+      const build = result.data?.build ? ` / ${result.data.build}` : '';
+      setApiStatusMessage(`API: ${result.base} / 接続OK${build}`, 'ok');
+    } else {
+      setApiStatusMessage(`API未接続: ${result.base} / /ping 失敗 (${result.message})`, 'warn');
+    }
+    return result;
+  }
+
+  async function ensureApiReachableForAuth() {
+    const status = await refreshApiStatus();
+    if (status.ok) return true;
+    showError(`API未接続です。${status.base || 'API'} の /ping を確認してください。`);
+    return false;
   }
 
   /**
@@ -7188,6 +7284,8 @@
       return;
     }
 
+    if (!(await ensureApiReachableForAuth())) return;
+
     const result = await AuthService.login(username, pin);
     if (result.success) {
       await showGameUI({ username, pin });
@@ -7213,6 +7311,8 @@
       showError('PINが一致しません');
       return;
     }
+
+    if (!(await ensureApiReachableForAuth())) return;
 
     const result = await AuthService.register(username, pin);
     if (result.success) {
@@ -7314,6 +7414,13 @@ function escapeHtmlShared(str) {
   return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function getUnderCardsEngine(isMobile) {
+  if (isMobile) {
+    return (typeof engineMobile !== 'undefined' && engineMobile) ? engineMobile : window.engineMobile;
+  }
+  return (typeof engine !== 'undefined' && engine) ? engine : window.engine;
+}
+
 function closeUnderCardsModal() {
   const el = document.getElementById('dmUnderModal');
   if (el) el.classList.remove('open');
@@ -7323,7 +7430,7 @@ function closeUnderCardsModal() {
 function renderUnderCardsModal() {
   const state = window._underModalState;
   if (!state) return;
-  const eng = state.isMobile ? window.engineMobile : window.engine;
+  const eng = getUnderCardsEngine(state.isMobile);
   const topCard = eng?.state?.[state.zone]?.[state.idx];
   if (!topCard || !Array.isArray(topCard.underCards)) { closeUnderCardsModal(); return; }
   const under = topCard.underCards;
@@ -7365,7 +7472,7 @@ function renderUnderCardsModal() {
 function moveFromUnderModal(underIdx, toZone, position) {
   const state = window._underModalState;
   if (!state) return;
-  const eng = state.isMobile ? window.engineMobile : window.engine;
+  const eng = getUnderCardsEngine(state.isMobile);
   const { zone, idx } = state;
 
   const topCard = eng?.state?.[zone]?.[idx];

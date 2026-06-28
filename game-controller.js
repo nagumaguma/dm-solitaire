@@ -59,6 +59,15 @@
       return Array.isArray(remote) ? remote : null;
     }
 
+    const editing = getDeckEditingState();
+    if (
+      String(editing.deckName || '') === String(deckName || '') &&
+      Array.isArray(editing.cards) &&
+      editing.cards.length
+    ) {
+      return cloneCards(editing.cards);
+    }
+
     return null;
   }
 
@@ -402,7 +411,8 @@
       total: 0,
       hasMore: false,
       loading: false,
-      source: ''
+      source: '',
+      error: null
     });
 
     let state = emptyState();
@@ -417,7 +427,8 @@
         total: state.total,
         hasMore: state.hasMore,
         loading: state.loading,
-        source: state.source
+        source: state.source,
+        error: state.error
       };
     }
 
@@ -469,12 +480,24 @@
           page: Number(result?.page) || nextPage,
           items: append ? [...state.items, ...safePageItems] : safePageItems,
           total: hasTotal ? resultTotal : combinedCount,
-          hasMore: hasTotal ? combinedCount < resultTotal : fallbackHasMore,
+          hasMore: result?.error ? false : (hasTotal ? combinedCount < resultTotal : fallbackHasMore),
           loading: false,
-          source: String(result?.source || '')
+          source: String(result?.source || ''),
+          error: result?.error ? result : null
         };
       } catch (err) {
-        if (thisRequest === requestId) state.loading = false;
+        if (thisRequest === requestId) {
+          state = {
+            ...state,
+            loading: false,
+            hasMore: false,
+            error: {
+              error: 'search_failed',
+              message: err?.message || 'search request failed',
+              base: typeof NetworkService !== 'undefined' && NetworkService.getApiBase ? NetworkService.getApiBase() : ''
+            }
+          };
+        }
         console.warn('search request failed', err);
       }
 
