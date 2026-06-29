@@ -329,7 +329,7 @@
       deck: state.deck.length,
       shields: state.shields.length,
       deckRevealZone: serializePublicCards(state.deckRevealZone),
-      revealedZone: serializePublicCards(state.revealedZone),
+      revealedZone: serializePublicCards((state.revealedZone || []).filter((c) => !c || !c._breaking)),
       hyperZone: serializePublicCards(state.hyperZone),
       grZone: serializePublicCards(state.grZone),
       specialZone: serializePublicCards(state.specialZone),

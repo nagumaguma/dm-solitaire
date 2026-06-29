@@ -6471,6 +6471,91 @@
 
     .dg-v2-pile-btn.has-image .dg-v2-pile-name { display: none; }
 
+    .dg-v2-pile-btn.ex {
+      background: linear-gradient(160deg, #e9e2f3 0%, #cfc1e6 100%);
+      border-color: #b3a0cf;
+      color: #4a3a6e;
+    }
+
+    /* 対戦画面 右ログ欄 */
+    .dg-side-log {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      flex: 1 1 auto;
+    }
+    .dg-side-log-list {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding-right: 2px;
+      scrollbar-width: thin;
+    }
+    .dg-side-log-entry {
+      font-size: 0.72rem;
+      line-height: 1.35;
+      color: #4c3a28;
+      padding: 2px 4px;
+      border-bottom: 1px solid rgba(150, 120, 90, 0.14);
+      word-break: break-word;
+    }
+    .dg-side-log-empty {
+      color: #9a897a;
+      font-size: 0.74rem;
+      padding: 4px;
+    }
+    .dg-side-chat {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      flex: 0 0 auto;
+      max-height: 45%;
+      border-top: 1px solid #ddccb6;
+      padding-top: 6px;
+      gap: 4px;
+    }
+
+    /* 超次元/GR パイルのモーダル内 移動ボタン */
+    .dm-ex-item-actions { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+    .dm-ex-act {
+      border: 1px solid #c9b393;
+      background: #fbf4ea;
+      color: #5d4228;
+      border-radius: 5px;
+      padding: 4px 7px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .dm-ex-act:hover { background: #f1e4d2; }
+    .dm-ex-act.red { color: #9c5f68; border-color: #d8b3bb; }
+
+    /* シールド ブレイクモーダル */
+    .dm-break-modal { position: fixed; inset: 0; z-index: 3200; display: none; align-items: center; justify-content: center; }
+    .dm-break-modal.open { display: flex; }
+    .dm-break-backdrop { position: absolute; inset: 0; background: rgba(30, 20, 12, 0.45); }
+    .dm-break-body {
+      position: relative; background: #fbf6ee; border: 1px solid #d8c4a8; border-radius: 14px;
+      box-shadow: 0 16px 40px rgba(50, 32, 16, 0.3); padding: 16px 18px; max-width: 90vw;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .dm-break-head { font-size: 0.95rem; font-weight: 700; color: #5d4228; text-align: center; }
+    .dm-break-cards { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: 70vw; }
+    .dm-break-card {
+      width: 120px; aspect-ratio: 5/7; border-radius: 8px; border: 1px solid #c4b4ac; background: #ebe0dc;
+      overflow: hidden; cursor: pointer; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 3px 8px rgba(60,40,20,0.18);
+    }
+    .dm-break-card-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .dm-break-card-name { font-size: 0.78rem; color: #3d4a44; text-align: center; padding: 6px; }
+    .dm-break-foot { display: flex; justify-content: space-between; gap: 16px; }
+    .dm-break-btn { border: none; border-radius: 7px; padding: 9px 16px; font-size: 0.85rem; font-weight: 700; cursor: pointer; color: #fff; }
+    .dm-break-btn.back { background: #8a7f6e; }
+    .dm-break-btn.hand { background: #3e875f; }
+
     .dg-v2-pile-name {
       font-size: 0.58rem;
       font-weight: 800;

@@ -20,6 +20,93 @@ let _desktopZoneMenuState = null;
 let _desktopZoneMenuGlobalBound = false;
 let _vsOppTarget = false;
 
+// ── ゲームログ（対戦画面の右パネルに流す） ──────────────────────────────
+let _desktopGameLog = [];
+function appendDesktopGameLog(msg) {
+  const turn = (typeof engine !== 'undefined' && engine?.state?.turn) ?? '?';
+  const text = String(msg || '').trim();
+  if (!text) return;
+  _desktopGameLog.push(`T${turn} ${text}`);
+  if (_desktopGameLog.length > 60) _desktopGameLog.shift();
+}
+function clearDesktopGameLog() {
+  _desktopGameLog = [];
+}
+
+// ── 超次元/GR パイルの中身モーダル ─────────────────────────────────────
+let _desktopExModalZone = null;
+function openDesktopExPileModal(zoneKey) {
+  if (!['hyperZone', 'grZone', 'specialZone'].includes(zoneKey)) return;
+  _desktopExModalZone = zoneKey;
+  renderDesktopExPileModal();
+}
+function closeDesktopExPileModal() {
+  _desktopExModalZone = null;
+  const modal = document.getElementById('desktop-ex-modal');
+  if (modal) modal.classList.remove('open');
+}
+function moveDesktopExCard(idx, toZone, position) {
+  const zoneKey = _desktopExModalZone;
+  if (!zoneKey) return;
+  moveDesktopCardBetweenZones(zoneKey, Number(idx), toZone, position || 'top');
+  if (Array.isArray(engine?.state?.[zoneKey]) && engine.state[zoneKey].length) {
+    renderDesktopExPileModal();
+  } else {
+    closeDesktopExPileModal();
+  }
+}
+function renderDesktopExPileModal() {
+  const zoneKey = _desktopExModalZone;
+  if (!zoneKey) return;
+  const cards = Array.isArray(engine?.state?.[zoneKey]) ? engine.state[zoneKey] : [];
+  if (!cards.length) { closeDesktopExPileModal(); return; }
+
+  let modal = document.getElementById('desktop-ex-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'desktop-ex-modal';
+    modal.className = 'dm-grave-modal';
+    modal.innerHTML = `
+      <div class="dm-grave-backdrop" onclick="closeDesktopExPileModal()"></div>
+      <div class="dm-grave-body">
+        <div class="dm-grave-head">
+          <div class="dm-grave-title" id="desktop-ex-title"></div>
+          <button class="dm-grave-close" onclick="closeDesktopExPileModal()">閉じる</button>
+        </div>
+        <div id="desktop-ex-list" class="dm-grave-list"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+
+  const titleEl = document.getElementById('desktop-ex-title');
+  if (titleEl) titleEl.textContent = `${getDesktopZoneLabel(zoneKey)} (${cards.length})`;
+
+  const list = document.getElementById('desktop-ex-list');
+  if (list) {
+    list.innerHTML = cards.map((card, i) => {
+      const cost = Number.isFinite(Number(card?.cost)) ? Number(card.cost) : '-';
+      const power = card?.power ? String(card.power) : '-';
+      return `
+        <div class="dm-grave-item">
+          <div class="dm-grave-item-no">${i + 1}</div>
+          <div class="dm-grave-item-main">
+            <div class="dm-grave-item-name">${escapeHtml(card?.name || 'カード')}</div>
+            <div class="dm-grave-item-meta">コスト ${escapeHtml(String(cost))} / パワー ${escapeHtml(String(power))}</div>
+          </div>
+          <div class="dm-ex-item-actions">
+            <button class="dm-ex-act" onclick="moveDesktopExCard(${i}, 'battleZone')">バトル</button>
+            <button class="dm-ex-act" onclick="moveDesktopExCard(${i}, 'hand')">手札</button>
+            <button class="dm-ex-act" onclick="moveDesktopExCard(${i}, 'manaZone')">マナ</button>
+            <button class="dm-ex-act red" onclick="moveDesktopExCard(${i}, 'graveyard')">墓地</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+  modal.classList.add('open');
+}
+
 function getVsOppEngine() {
   const vs = window._vs;
   if (!vs) return engine;
@@ -1620,6 +1707,7 @@ async function startDesktopGame(deckName) {
   }
   _desktopSelectedShieldIdx = null;
   _desktopUnderInsertState = null;
+  clearDesktopGameLog();
   _desktopDeckPeekPrivateCards = [];
   _desktopDeckRevealModalState = {
     mode: 'public',
@@ -1728,12 +1816,15 @@ function renderDesktopGame() {
     ].filter(Boolean).join(' ');
 
     const onClickAttr = isOwnBoardCard
-      ? `onclick="onDesktopBoardCardClick('${sourceZone}', ${idx})"`
+      ? `onclick="onDesktopBoardCardClick(event, '${sourceZone}', ${idx})"`
       : (isVsOppBoardCard ? `onclick="onDesktopVsOppBoardCardClick('${sourceZone}', ${idx})"` : '');
+    const _ctxIsTap = (sourceZone === 'battleZone' || sourceZone === 'manaZone');
     const contextMenuAttr = (!isOpponentCard && idx >= 0 && sourceZone)
       ? (isVsOpp
         ? `oncontextmenu="openDesktopVsOppZoneMenu(event, '${sourceZone}', ${idx})"`
-        : `oncontextmenu="openDesktopCardZoneMenu(event, '${sourceZone}', ${idx})"`)
+        : (_ctxIsTap
+          ? `oncontextmenu="onDesktopBoardCardContext(event, '${sourceZone}', ${idx})"`
+          : `oncontextmenu="openDesktopCardZoneMenu(event, '${sourceZone}', ${idx})"`))
       : '';
 
     const directUnderCount = Array.isArray(card?.underCards) ? Math.min(card.underCards.length, 3) : 0;
@@ -1792,21 +1883,8 @@ function renderDesktopGame() {
           ${olEff ? `<span class="dg-v2-match">${escapeHtml(myName)} vs ${escapeHtml(oppName)}</span>` : ''}
           ${onlineStatusText ? `<span class="dg-v2-match">${escapeHtml(onlineStatusText)}</span>` : ''}
         </div>
-        <div class="dg-v2-head-actions">
-          <button onclick="drawDesktopCard()" class="dg-btn draw ${_desktopNeedDrawGuide ? 'guide' : ''}">\u30c9\u30ed\u30fc</button>
-          <button onclick="turnDesktopEnd()" class="dg-btn end">\u30bf\u30fc\u30f3\u7d42\u4e86</button>
-          <button onclick="moveDesktopDeckTopTo('manaZone')" class="dg-btn deck-mana">\u5c71\u4e0a\u2192\u30de\u30ca</button>
-          <button onclick="moveDesktopDeckTopTo('graveyard')" class="dg-btn deck-grave">\u5c71\u4e0a\u2192\u5893\u5730</button>
-          <button onclick="moveDesktopDeckTopTo('shields')" class="dg-btn deck-shield">\u5c71\u4e0a\u2192\u30b7\u30fc\u30eb\u30c9</button>
-          <button onclick="breakDesktopShield()" class="dg-btn shield-break">${shieldBreakLabel}</button>
-          <div class="dg-n-control">
-            <span class="dg-n-label">n</span>
-            <input type="number" id="desktop-deck-n-input" class="dg-n-input" min="1" max="40" value="${_desktopDeckNValue}" oninput="setDesktopDeckNValue(this.value)">
-          </div>
-          <button onclick="drawDesktopDeckCardsToPublic()" class="dg-btn deck-reveal">N\u679a\u516c\u958b</button>
-          <button onclick="drawDesktopDeckCardsToPrivate()" class="dg-btn deck-peek">N\u679a\u898b\u308b</button>
-          <button onclick="openDesktopDeckAllModal()" class="dg-btn deck-all">\u5c71\u672d\u5168\u90e8\u898b\u308b</button>
-          <button onclick="untapAllDesktopMana()" class="dg-btn mana-untap">\u30de\u30ca\u5168\u30a2\u30f3\u30bf\u30c3\u30d7</button>
+                <div class="dg-v2-head-actions">
+          <button onclick="turnDesktopEnd()" class="dg-btn end">ターン終了</button>
           ${!window._ol ? `<button onclick="undoDesktopGame()" class="dg-btn undo">やり直し</button>` : ''}
           <button onclick="${backAction}" class="dg-btn back">戻る</button>
         </div>
@@ -1823,6 +1901,14 @@ function renderDesktopGame() {
               ${vs
                 ? (opp.handCards || []).map((c, i) => renderChip(c, 'hand', i, 'vs-opp')).join('')
                 : renderDesktopBackCards(Number(opp.hand ?? 0))}
+            </div>
+            <div class="dg-v2-pile-btn ex" style="pointer-events:none">
+              <span class="dg-v2-pile-name">超次元</span>
+              <span class="dg-v2-pile-cnt">${getZoneCount(opp.hyperZone)}</span>
+            </div>
+            <div class="dg-v2-pile-btn ex" style="pointer-events:none">
+              <span class="dg-v2-pile-name">GR</span>
+              <span class="dg-v2-pile-cnt">${getZoneCount(opp.grZone)}</span>
             </div>
             <div class="dg-v2-row-side">
               <button class="dg-handdiscard-btn" onclick="openDesktopHandDiscardMenu()" title="ハンデス">ハンデス</button>
@@ -1857,14 +1943,6 @@ function renderDesktopGame() {
             </div>
           </div>
 
-          <div class="dg-v2-row opp-extra">
-            <span class="dg-v2-label">EX<br><b>${getZoneCount(opp.hyperZone) + getZoneCount(opp.grZone) + getZoneCount(opp.specialZone)}</b></span>
-            <div class="dg-v2-cards">
-              <span class="dg-zone-hint">Hyper</span>${renderOpponentPublicZone(opp.hyperZone, 'hyper')}
-              <span class="dg-zone-hint">GR</span>${renderOpponentPublicZone(opp.grZone, 'gr')}
-              <span class="dg-zone-hint">Special</span>${renderOpponentPublicZone(opp.specialZone, 'special')}
-            </div>
-          </div>
 
           <div class="dg-v2-sep"></div>
           ` : ''}
@@ -1885,8 +1963,8 @@ function renderDesktopGame() {
                 const underCount = getDesktopUnderCardCount(c);
                 return `
                   <div class="dg-card-chip shield ${c?.faceUp ? 'faceup' : ''} ${imageUrl && c?.faceUp ? 'has-image' : ''} ${underCount > 0 ? 'has-under' : ''} ${_desktopSelectedShieldIdx === i ? 'selected' : ''} ${_desktopUnderInsertState ? 'stack-target' : ''}"
-                    onclick="onDesktopShieldCardClick(${i})"
-                    oncontextmenu="openDesktopCardZoneMenu(event, 'shields', ${i})"
+                    onclick="onDesktopShieldCardClick(event, ${i})"
+                    oncontextmenu="onDesktopShieldContext(event, ${i})"
                     title="${escapeHtml(c?.faceUp ? (c.name || 'シールド') : 'シールド')}"
                     data-zone="shields" data-index="${i}">
                     ${underCount > 0 ? `<div class="dg-under-stack" aria-hidden="true">${renderDesktopUnderLayers(underCount)}</div><div class="dg-under-count">+${underCount}</div>` : ''}
@@ -1900,7 +1978,7 @@ function renderDesktopGame() {
               }).join('') : '<div class="dg-zone-empty">空</div>'}
             </div>
             <button type="button" class="dg-v2-pile-btn deck"
-              onclick="openDesktopDeckTopMenu(event)" oncontextmenu="openDesktopDeckTopMenu(event)" title="山札">
+              onclick="openDesktopDeckTopMenu(event)" oncontextmenu="onDesktopDeckContext(event)" title="山札">
               <span class="dg-v2-pile-name">山札</span>
               <span class="dg-v2-pile-cnt">${state.deck.length}</span>
             </button>
@@ -1913,7 +1991,7 @@ function renderDesktopGame() {
             </div>
             <button type="button" class="dg-v2-pile-btn grave ${graveTopImage ? 'has-image' : ''}"
               onclick="openDesktopGraveyardModal()"
-              ${state.graveyard.length ? `oncontextmenu="openDesktopCardZoneMenu(event, 'graveyard', ${graveTopIndex})"` : ''}
+              ${state.graveyard.length ? `oncontextmenu="onDesktopGraveContext(event)"` : ''}
               title="墓地">
               ${graveTopImage ? `<img src="${escapeHtml(graveTopImage)}" alt="墓地トップ" class="dg-v2-pile-thumb" loading="lazy" decoding="async" onerror="handleDesktopCardImageError(this)">` : ''}
               <span class="dg-v2-pile-name">墓地</span>
@@ -1921,14 +1999,6 @@ function renderDesktopGame() {
             </button>
           </div>
 
-          <div class="dg-v2-row my-extra">
-            <span class="dg-v2-label">EX<br><b>${state.hyperZone.length + state.grZone.length + state.specialZone.length}</b></span>
-            <div class="dg-v2-cards">
-              <span class="dg-zone-hint">Hyper</span>${state.hyperZone.length ? state.hyperZone.map((c, i) => renderChip(c, 'hyper', i)).join('') : '<div class="dg-zone-empty">0</div>'}
-              <span class="dg-zone-hint">GR</span>${state.grZone.length ? state.grZone.map((c, i) => renderChip(c, 'gr', i)).join('') : '<div class="dg-zone-empty">0</div>'}
-              <span class="dg-zone-hint">Special</span>${state.specialZone.length ? state.specialZone.map((c, i) => renderChip(c, 'special', i)).join('') : '<div class="dg-zone-empty">0</div>'}
-            </div>
-          </div>
 
           <div class="dg-v2-row my-hand">
             <span class="dg-v2-label">手札<br><b>${state.hand.length}</b></span>
@@ -1939,7 +2009,7 @@ function renderDesktopGame() {
                 const imageUrl = getDesktopCardImageUrl(c);
                 return `
                   <div class="dg-card-chip hand ${imageUrl ? 'has-image' : ''}" draggable="true"
-                    onclick="selectDesktopHandCard(${i}, event)"
+                    onclick="openDesktopCardZoneMenu(event, 'hand', ${i})"
                     oncontextmenu="openDesktopCardZoneMenu(event, 'hand', ${i})"
                     ondragstart="dragDesktopCard(event, ${i})"
                     ondragend="dragDesktopCardEnd()"
@@ -1953,6 +2023,14 @@ function renderDesktopGame() {
                 `;
               }).join('') : '<div class="dg-zone-empty">空</div>'}
             </div>
+            <button type="button" class="dg-v2-pile-btn ex" onclick="openDesktopExPileModal('hyperZone')" title="超次元ゾーン">
+              <span class="dg-v2-pile-name">超次元</span>
+              <span class="dg-v2-pile-cnt">${state.hyperZone.length}</span>
+            </button>
+            <button type="button" class="dg-v2-pile-btn ex" onclick="openDesktopExPileModal('grZone')" title="GRデッキ">
+              <span class="dg-v2-pile-name">GR</span>
+              <span class="dg-v2-pile-cnt">${state.grZone.length}</span>
+            </button>
           </div>
 
           ${revealedZoneCards.length ? `
@@ -1988,12 +2066,20 @@ function renderDesktopGame() {
           ` : ''}
         </div>
 
-        ${ol && !vs ? `
-          <div class="dg-v2-chat">
-            <div class="dg-chat-title">操作ログ</div>
+                <div class="dg-v2-chat">
+          <div class="dg-side-log">
+            <div class="dg-chat-title">ログ</div>
+            <div class="dg-side-log-list" id="desktop-game-log">
+              ${_desktopGameLog.length ? _desktopGameLog.slice().reverse().map(e => `<div class="dg-side-log-entry">${escapeHtml(e)}</div>`).join('') : '<div class="dg-side-log-empty">—</div>'}
+            </div>
+          </div>
+          ${ol && !vs ? `
+          <div class="dg-side-chat">
+            <div class="dg-chat-title">チャット</div>
             <div id="desktop-chat-messages" class="dg-chat-messages"></div>
           </div>
-        ` : ''}
+          ` : ''}
+        </div>
       </div>
 
     </div>
@@ -2002,55 +2088,7 @@ function renderDesktopGame() {
   if (ol) renderDesktopChatMessages();
   renderDesktopDeckRevealModal();
   renderDesktopDeckAllModal();
-}
-
-function selectDesktopHandCard(idx, event) {
-  if (window._ol && !canActDesktopOnline()) {
-    showDesktopToast('\u76f8\u624b\u306e\u30bf\u30fc\u30f3\u3067\u3059', 'warn');
-    return;
-  }
-
-  const index = Number(idx);
-  const hand = engine?.state?.hand;
-  if (!Array.isArray(hand) || !Number.isInteger(index) || !hand[index]) return;
-
-  if (event) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-
-  closeDesktopCardZoneMenu();
-  closeDesktopHandPicker();
-
-  const picker = document.createElement('div');
-  picker.id = 'desktop-hand-picker';
-  picker.className = 'dg-hand-picker';
-  picker.innerHTML = `
-    <button type="button" onclick="playDesktopCard(${index}, 'battle')">\u624b\u672d \u2192 \u30d0\u30c8\u30eb\u30be\u30fc\u30f3</button>
-    <button type="button" onclick="playDesktopCard(${index}, 'mana')">\u624b\u672d \u2192 \u30de\u30ca\u30be\u30fc\u30f3</button>
-    <button type="button" onclick="closeDesktopHandPicker(); moveDesktopCardBetweenZones('hand', ${index}, 'graveyard', 'top')">\u624b\u672d \u2192 \u5893\u5730</button>
-    <button type="button" onclick="closeDesktopHandPicker(); moveDesktopCardBetweenZones('hand', ${index}, 'shields', 'top')">\u624b\u672d \u2192 \u30b7\u30fc\u30eb\u30c9\u8ffd\u52a0</button>
-    <button type="button" onclick="closeDesktopHandPicker(); moveDesktopCardBetweenZones('hand', ${index}, 'deck', 'top')">\u624b\u672d \u2192 \u5c71\u672d\u4e0a</button>
-    <button type="button" onclick="closeDesktopHandPicker(); moveDesktopCardBetweenZones('hand', ${index}, 'deck', 'bottom')">\u624b\u672d \u2192 \u5c71\u672d\u4e0b</button>
-    <button type="button" onclick="closeDesktopHandPicker(); openDesktopCardDetailFromZone('hand', ${index})">\u30ab\u30fc\u30c9\u8a73\u7d30</button>
-    <button type="button" class="cancel" onclick="closeDesktopHandPicker()">\u9589\u3058\u308b</button>
-  `;
-
-  document.body.appendChild(picker);
-
-  const rect = event?.currentTarget?.getBoundingClientRect?.();
-  const pickerRect = picker.getBoundingClientRect();
-  const rawLeft = rect ? rect.left : (window.innerWidth / 2 - pickerRect.width / 2);
-  const rawTop = rect ? (rect.bottom + 6) : (window.innerHeight / 2 - pickerRect.height / 2);
-  const left = Math.max(8, Math.min(rawLeft, window.innerWidth - pickerRect.width - 8));
-  const top = Math.max(8, Math.min(rawTop, window.innerHeight - pickerRect.height - 8));
-
-  picker.style.left = `${left}px`;
-  picker.style.top = `${top}px`;
-
-  setTimeout(() => {
-    document.addEventListener('click', closeDesktopHandPicker, { once: true });
-  }, 0);
+  if (_desktopBreakOpen) renderDesktopBreakModal();
 }
 
 function closeDesktopHandPicker() {
@@ -2058,7 +2096,116 @@ function closeDesktopHandPicker() {
   if (picker) picker.remove();
 }
 
-function onDesktopBoardCardClick(zone, idx) {
+function onDesktopBoardCardContext(event, zone, idx) {
+  if (event) { event.preventDefault(); event.stopPropagation(); }
+  tapDesktopCard(zone, idx);
+}
+function onDesktopShieldContext(event, idx) {
+  if (event) { event.preventDefault(); event.stopPropagation(); }
+  breakDesktopShieldToModal(idx);
+}
+function onDesktopDeckContext(event) {
+  if (event) { event.preventDefault(); event.stopPropagation(); }
+  drawDesktopCard();
+}
+function onDesktopGraveContext(event) {
+  if (event) { event.preventDefault(); event.stopPropagation(); }
+  openDesktopGraveyardModal();
+}
+
+// ── シールド ブレイクモーダル ───────────────────────────────────────────
+let _desktopBreakOpen = false;
+function breakDesktopShieldToModal(shieldIndex) {
+  if (window._ol && !canActDesktopOnline()) { showDesktopToast('相手のターンです', 'warn'); return; }
+  closeDesktopCardZoneMenu();
+  const idx = Number(shieldIndex);
+  const shields = engine?.state?.shields;
+  if (!Array.isArray(shields) || !shields[idx]) { showDesktopToast('シールドがありません', 'warn'); return; }
+  const res = window.GameController
+    ? window.GameController.breakShield(engine, idx)
+    : { ok: !!engine.breakShield(idx), card: (engine.state.revealedZone || []).slice(-1)[0] || null };
+  if (!res || !res.ok) { showDesktopToast('シールドをブレイクできません', 'warn'); return; }
+  const rz = engine.state.revealedZone || [];
+  const card = res.card || rz[rz.length - 1];
+  if (card) card._breaking = true;
+  _desktopBreakOpen = true;
+  _desktopSelectedShieldIdx = null;
+  appendDesktopGameLog('シールドをブレイク');
+  if (window._ol) {
+    sendDesktopOnlineActionLog('【システム】相手がシールドをブレイク中');
+    olSendActionDesktop('state');
+  }
+  renderDesktopGame();
+}
+function closeDesktopBreakModal() {
+  _desktopBreakOpen = false;
+  const modal = document.getElementById('desktop-break-modal');
+  if (modal) modal.classList.remove('open');
+}
+function getDesktopBreakingCards() {
+  const rz = engine?.state?.revealedZone;
+  if (!Array.isArray(rz)) return [];
+  const out = [];
+  rz.forEach((c, i) => { if (c && c._breaking) out.push({ card: c, index: i }); });
+  return out;
+}
+function resolveDesktopBreakAll(toZone) {
+  let guard = 0;
+  while (guard++ < 60) {
+    const b = getDesktopBreakingCards();
+    if (!b.length) break;
+    const { index, card } = b[0];
+    if (card) {
+      delete card._breaking;
+      if (toZone === 'shields') { card.faceUp = false; card.tapped = false; }
+    }
+    moveDesktopCardBetweenZones('revealedZone', index, toZone, 'top');
+  }
+  closeDesktopBreakModal();
+  renderDesktopGame();
+}
+function ensureDesktopBreakModal() {
+  let modal = document.getElementById('desktop-break-modal');
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.id = 'desktop-break-modal';
+  modal.className = 'dm-break-modal';
+  modal.innerHTML = `
+    <div class="dm-break-backdrop"></div>
+    <div class="dm-break-body">
+      <div class="dm-break-head">ブレイクしたシールド</div>
+      <div id="desktop-break-cards" class="dm-break-cards"></div>
+      <div class="dm-break-foot">
+        <button class="dm-break-btn back" onclick="resolveDesktopBreakAll('shields')">もとに戻す</button>
+        <button class="dm-break-btn hand" onclick="resolveDesktopBreakAll('hand')">手札に加える</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  return modal;
+}
+function renderDesktopBreakModal() {
+  const breaking = getDesktopBreakingCards();
+  if (!breaking.length) { closeDesktopBreakModal(); return; }
+  const modal = ensureDesktopBreakModal();
+  const wrap = document.getElementById('desktop-break-cards');
+  if (wrap) {
+    wrap.innerHTML = breaking.map(({ card, index }) => {
+      const imageUrl = getDesktopCardImageUrl(card);
+      const name = escapeHtml(card?.name || 'カード');
+      return `
+        <div class="dm-break-card" onclick="openDesktopCardZoneMenu(event, 'revealedZone', ${index})" oncontextmenu="openDesktopCardZoneMenu(event, 'revealedZone', ${index})" title="${name}">
+          ${imageUrl
+            ? `<img src="${escapeHtml(imageUrl)}" alt="${name}" class="dm-break-card-img" loading="lazy" decoding="async" onerror="handleDesktopCardImageError(this)">`
+            : `<div class="dm-break-card-name">${name}</div>`}
+        </div>
+      `;
+    }).join('');
+  }
+  modal.classList.add('open');
+}
+
+function onDesktopBoardCardClick(event, zone, idx) {
   if (_desktopUnderInsertState) {
     const sameSource = _desktopUnderInsertState.fromZone === zone
       && _desktopUnderInsertState.fromIndex === idx;
@@ -2073,10 +2220,10 @@ function onDesktopBoardCardClick(zone, idx) {
     return;
   }
 
-  tapDesktopCard(zone, idx);
+  openDesktopCardZoneMenu(event, zone, idx);
 }
 
-function onDesktopShieldCardClick(idx) {
+function onDesktopShieldCardClick(event, idx) {
   if (_desktopUnderInsertState) {
     const sameSource = _desktopUnderInsertState.fromZone === 'shields'
       && _desktopUnderInsertState.fromIndex === idx;
@@ -2091,7 +2238,7 @@ function onDesktopShieldCardClick(idx) {
     return;
   }
 
-  selectDesktopShield(idx);
+  openDesktopCardZoneMenu(event, 'shields', idx);
 }
 
 function setDesktopCardTapped(zone, idx, tapped) {
@@ -2424,6 +2571,7 @@ function breakDesktopShield() {
   }
 
   _desktopSelectedShieldIdx = null;
+  appendDesktopGameLog('シールドをブレイク');
   showDesktopToast('公開中に移動しました。手札に加えるか、トリガー使用を選んでください', 'info', 2800);
   if (window._ol) olSendActionDesktop('state');
   renderDesktopGame();
@@ -2494,6 +2642,7 @@ function getDesktopCardZoneActions(sourceZone, sourceCard) {
       move('\u624b\u672d \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
     sep();
+    actions.push({ kind: 'detail', label: 'カード詳細' });
     addUnderControls();
   } else if (sourceZone === 'battleZone') {
     actions.push(
@@ -2521,6 +2670,7 @@ function getDesktopCardZoneActions(sourceZone, sourceCard) {
     addUnderControls();
   } else if (sourceZone === 'shields') {
     actions.push(
+      { kind: 'break', label: 'ブレイク' },
       { kind: 'flip', label: sourceCard?.faceUp ? '\u88cf\u5411\u304d\u306b\u623b\u3059' : '\u8868\u5411\u304d\u306b\u3059\u308b/\u78ba\u8a8d\u6e08\u307f\u306b\u3059\u308b', faceUp: !sourceCard?.faceUp },
       move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u624b\u672d', 'hand'),
       move('\u30b7\u30fc\u30eb\u30c9 \u2192 \u516c\u958b\u30be\u30fc\u30f3\uff08\u30d6\u30ec\u30a4\u30af\uff09', 'revealedZone'),
@@ -2642,6 +2792,7 @@ function moveDesktopCardBetweenZones(fromZone, fromIndex, toZone, position = 'to
     return;
   }
 
+  const movedName = _eng()?.state?.[fromZone]?.[fromIndex]?.name || 'カード';
   const options = { position: position === 'bottom' ? 'bottom' : 'top' };
   const ok = window.GameController
     ? window.GameController.moveCardBetweenZones(_eng(), fromZone, fromIndex, toZone, options)
@@ -2652,11 +2803,12 @@ function moveDesktopCardBetweenZones(fromZone, fromIndex, toZone, position = 'to
     return;
   }
 
+  const toLabelLog = toZone === 'deck'
+    ? `${getDesktopZoneLabel(toZone)}${options.position === 'bottom' ? '下' : '上'}`
+    : getDesktopZoneLabel(toZone);
+  appendDesktopGameLog(`${getDesktopCardShortName(movedName, 10)} : ${getDesktopZoneLabel(fromZone)}→${toLabelLog}`);
   if (window._ol) {
-    const toLabel = toZone === 'deck'
-      ? `${getDesktopZoneLabel(toZone)}${options.position === 'bottom' ? '下' : '上'}`
-      : getDesktopZoneLabel(toZone);
-    sendDesktopOnlineActionLog(`【操作ログ】${getDesktopZoneLabel(fromZone)} → ${toLabel}`);
+    sendDesktopOnlineActionLog(`【操作ログ】${getDesktopZoneLabel(fromZone)} → ${toLabelLog}`);
     olSendActionDesktop('state');
   }
   if (window._vs) _vsRefreshOpponentView();
@@ -2709,6 +2861,7 @@ function untapAllDesktopMana() {
     return;
   }
 
+  appendDesktopGameLog('マナを全アンタップ');
   if (window._ol) olSendActionDesktop('state');
   renderDesktopGame();
 }
@@ -2869,6 +3022,17 @@ function openDesktopCardZoneMenu(event, sourceZone, sourceIndex) {
       `;
     }
 
+    if (action.kind === 'break') {
+      return `
+        <button
+          type="button"
+          class="${className}"
+          onclick="closeDesktopCardZoneMenu(); breakDesktopShieldToModal(${idx})">
+          ${escapeHtml(action.label)}
+        </button>
+      `;
+    }
+
     if (action.kind === 'deckAll') {
       return `
         <button
@@ -2940,10 +3104,12 @@ function playDesktopCard(idx, zone) {
     return;
   }
 
+  const playedName = engine?.state?.hand?.[idx]?.name || 'カード';
   const ok = window.GameController
     ? window.GameController.playCardByHandIndex(engine, idx, zone)
     : engine.playCard(engine.state.hand[idx], zone);
   if (!ok) return;
+  appendDesktopGameLog(`${getDesktopCardShortName(playedName, 10)} を${getDesktopZoneLabel(zone)}へ`);
   if (window._ol) {
     sendDesktopOnlineActionLog(`【操作ログ】${getDesktopZoneLabel('hand')} → ${getDesktopZoneLabel(zone)}`);
     olSendActionDesktop('state');
@@ -3005,6 +3171,7 @@ function drawDesktopCard() {
     : engine.drawCard();
   if (!ok) return;
   _desktopNeedDrawGuide = false;
+  appendDesktopGameLog('ドロー');
   if (window._ol) {
     sendDesktopOnlineActionLog('【操作ログ】ドローしました');
     olSendActionDesktop('state');
@@ -3028,6 +3195,7 @@ function turnDesktopEnd() {
   if (!ok) return;
   _desktopNeedDrawGuide = !window._ol;
   _desktopSelectedShieldIdx = null;
+  appendDesktopGameLog('— ターン終了 —');
   if (window._ol) {
     sendDesktopOnlineActionLog('【システム】ターンを終了しました');
     olSendActionDesktop('turn_end');
@@ -4940,6 +5108,7 @@ function startDesktopOnlineGame() {
   }
   _desktopSelectedShieldIdx = null;
   _desktopUnderInsertState = null;
+  clearDesktopGameLog();
   _desktopDeckPeekPrivateCards = [];
   _desktopDeckRevealModalState = {
     mode: 'public',
