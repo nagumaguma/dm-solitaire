@@ -1,619 +1,136 @@
 # DM マルチプレイ一人回し
 
-> DM マルチプレイ一人回しツール はファンコンテンツ・ポリシーに沿った非公式のファンコンテンツです。ウィザーズ社の認可/許諾は得ていません。題材の一部に、ウィザーズ・オブ・ザ・コースト社の財産を含んでいます。©Wizards of the Coast LLC.
+> 非公式のファンコンテンツです。ウィザーズ社の認可・許諾は得ていません。題材の一部にウィザーズ・オブ・ザ・コースト社の財産を含みます。©Wizards of the Coast LLC.
 
----
+デュエル・マスターズのデッキを試して、友達とオンライン対戦できる手動シミュレーターです。
 
-**デュエルマスターズのデッキを試して、友達とオンライン対戦できるツール**
+- **一人回し** — デッキのテスト環境（シールド5枚＋初期手札5枚で開始）
+- **オンライン対戦** — 6桁ルームコードでリアルタイム対戦（SSE）
+- **カード検索** — 公式カードDB由来の画像つき。同名カードは**イラスト違いをバージョン選択**可能
+- **アカウント** — デッキをクラウド保存（PIN認証、複数端末で同期）
 
-- **一人回し** - デッキテスト環境
-- **マルチプレイ** - リアルタイムオンライン対戦（６文字ルームコード）
-- **アカウント** - デッキをクラウド保存、複数デバイス間で同期
-- **セキュア** - PIN による暗号化認証、rate limiting
+## 公開URL
 
----
+- アプリ（フロント）: https://nagumaguma.github.io/dm-solitaire/
+- API（バックエンド）: https://dm-solitaire-production.up.railway.app/ping
 
-## クイックスタート（おすすめ）
+推奨ブラウザ: Chrome / Edge / Safari 最新版。PC/SPは画面幅で自動切替。
 
-### オンライン版（推奨 - インストール不要）
+## 構成
 
-ブラウザでアクセスするだけ（自動デバイス判定: PC/SP）：
+静的フロントエンド（バニラJS・ビルドなし）と、Python標準ライブラリのみのプロキシサーバーの2層。
 
-🔗 **https://nagumaguma.github.io/dm-solitaire/index.html**
+| 層 | 配信先 | 反映方法 |
+|---|---|---|
+| フロント（HTML/JS/CSS） | GitHub Pages（`main` ブランチ直下） | `git push origin main` |
+| API（検索・認証・デッキ・対戦・画像） | Railway | `railway up` |
 
-推奨: Chrome / Edge / Safari 最新版
-
----
-
-### ローカル版（開発・テスト用）
-
-#### 1. Python バックエンド起動
-
-```bash
-git clone https://github.com/[USER]/dm-solitaire.git
-cd dm-solitaire
-python dm-proxy-server.py
-```
-
-サーバー起動メッセージ:
-```
-[db] integrity check: OK
-[db] Loaded X profiles, Y decks
-[DM Proxy] Starting on http://localhost:8765
-```
-
-#### 2. ローカルサーバー起動（フロントエンド）
-
-**方法A: Python簡易サーバー**
-```bash
-python -m http.server 8000
-```
-
-**方法B: Node.js（任意）**
-```bash
-npx http-server
-```
-
-#### 3. ブラウザで開く
-
-**http://localhost:8000/index.html**
-
-または直接ファイル開く:
-```
-file:///C:/Users/user/OneDrive/デスクトップ/VM/index.html
-```
-
-> ⚠️ **注意**: ローカル API は `http://localhost:8765` の Python サーバーを前提とです。
-
----
+フロントは API ベースURLをホスト名で自動判定（ローカルは `http://localhost:8765`、それ以外は Railway）。`?api=` で一時上書き、`?clearApi=1` で解除。
 
 ## ファイル構成
 
 ```
-index.html              📄 エントリーポイント（デバイス判定）
-game-engine.js          🎮 Game Engine（ゲームロジック・UI無依存）
-auth-service.js         🔐 認証・セッション管理
-network-service.js      🌐 サーバー通信（API呼び出し）
-ui-desktop.js           💻 PC版UI（3カラムレイアウト）
-ui-mobile.js            📱 SP版UI（1カラムレイアウト）
-dm-proxy-server.py      🐍 バックエンド（Python BaseHTTPRequestHandler）
-_archive/               📦 古いバージョン
+index.html          単一エントリ。認証画面＋PC/SP振り分け＋共有モーダル（大半がCSS）
+game-engine.js      GameEngine：UI非依存のゲームロジック・undo履歴
+auth-service.js     AuthService：sessionStorageベース認証
+network-service.js  NetworkService：検索/詳細/ルーム/SSE/デッキ通信
+app-state.js        AppState：中央状態ストア
+game-controller.js  GameController：エンジン操作＋オンライン同期の共有ロジック
+ui-desktop.js       PC版UI（デッキ編集・対局・オンライン）
+ui-mobile.js        SP版UI（同上のモバイル版）
+dm-proxy-server.py  バックエンド（BaseHTTPRequestHandler / SQLite）
+crawl_official.py   公式カードDBクロール（カード名・画像・イラスト違いを取得）
+recover_missing.py  取りこぼし印刷の回収
+_archive/           旧版HTML（参照用）
 ```
 
-#### 3. ローカルサーバーのデフォルト設定
+`dm_cache.db`（カードキャッシュ）と `dm_user.db`（プロフィール/デッキ/画像）はローカル生成のデータで、Gitには含めません。
 
-API ベース URL は `index.html` 読み込み前に `window.DM_API_BASE` で変更可能です（未設定時は `http://localhost:8765`）。
+## カードデータの仕組み
 
-```javascript
-window.DM_API_BASE = 'http://localhost:8765';  // デフォルト（デプロイ時に上書き可）
-```
+カード名・画像・イラスト違いの正本は **公式カードDB（dm.takaratomy.co.jp）** を巡回して得ます。
 
-別ポートで起動する場合：
+- 公式サイトは Railway（国外IP）から地理ブロックされるため、**日本国内のローカル環境で先に全カードを `dm_cache.db` へ焼き込み**、本番は実行時に公式へアクセスしない（cache-only）方式です。
+- これにより、間違ったカード画像を出さず、冠詞付きカード（例「蒼き団長 ドギラゴン剣」）も正しく解決できます。
+- 同名カードは全印刷（イラスト違い）を保持し、カード詳細でバージョンを選べます。
+
+### カードデータの月次更新
+
+新カードが出たら、ローカル（日本IP）で増分クロール → デプロイするだけです。
 
 ```bash
-PORT=9999 python dm-proxy-server.py
+# Windows の場合、HTTPS検証用にCAバンドルを指定
+$env:SSL_CERT_FILE = (python -c "import certifi; print(certifi.where())")
+
+python crawl_official.py     # 増分（初回のみ全件、約1.5時間）。--force で全再構築
+railway up                   # 焼き込んだ dm_cache.db ごとデプロイ
 ```
 
----
+`crawl_official.py` は公式の全印刷を列挙し、未取得分だけ取得します。公式側が中身を持たない空枠は `crawl_skip` テーブルで自動スキップします。取りこぼしが出た場合は `recover_missing.py` で回収できます。
 
-## 使い方
+## ローカル開発
 
-### 1. デッキを作る
-
-```
-デッキ管理 → 新規作成 → カード検索・追加 → 40枚完成
-```
-
-- カード名で検索（例：「ボルメテウス」）
-- 枚数を指定して追加
-- デッキ名を付けて保存
-
-### 2. 一人回しモード
-
-```
-デッキ一覧でデッキを選択 → ▶ START → ゲーム開始
-```
-
-シールド5枚 + 初期手札5枚でゲーム開始
-
-### 3. マルチプレイ（友達と対戦）
-
-**ルームを作る側:**
-```
-デッキ一覧でデッキを選択 → 🌐 オンライン → プレイヤー名入力 → ルームを作成 → 表示された6文字コードを友達に伝える
-```
-
-**参加する側:**
-```
-デッキを選択 → 🌐 オンライン → プレイヤー名・ルームコード（6文字）入力 → 参加する
-```
-
-相手の手札・バトル・マナ・シールド枚数がリアルタイムで表示され、ターン終了で相手に通知されます
-
-### 4. アカウント作成（デッキクラウド保存）
-
-```
-ログイン → 新規登録 → ユーザー名 + 4桁PIN
-```
-
-その後：
-
-- **デッキ保存**: クラウドボタンでデッキをクラウドに保存
-- **同期**: 別PCでログイン → デッキを自動利用可能
-- **セキュア**: PIN は暗号化（誰も平文で見えない）
-
----
-
-## 基本操作
-
-| 操作 | 効果 |
-|---|---|
-| **左クリック** | カードをタップ / アンタップ |
-| **右クリック** | カードメニュー（移動・破壊など） |
-| **ボタン群** | ドロー・ターン終了・チャット |
-| **相手操作** | アニメーション + ログで表示 |
-
-**マルチプレイ時:**
-- 相手のアクション → 画面上にリアルタイム表示
-- 接続が切れた → 自動再接続 (3回まで)
-- 通信タイムアウト → 10秒待機 → キャンセル可能
-
----
-
-## デバイス別
-
-| デバイス | ファイル | 特徴 |
-|---|---|---|
-| **PC** | `dm-solitaire-web.html` | キーボード対応、`prompt()` ダイアログ |
-| **スマホ** | `dm-solitaire-sp.html` | タッチ最適化、モーダル UI |
-
-両方同じアカウントで利用可能（デッキ自動同期）
-
----
-
-## デッキ管理
-
-### ローカル保存（デフォルト）
-
-- デッキデータはブラウザに自動保存
-- 同じブラウザなら永続化
-- 別ブラウザ/PC には見えない
-
-### クラウド保存（おすすめ）
-
-```
-ログイン → デッキ選択 → ☁️ 画面で保存 → 別PCでログイン → デッキ自動表示
-```
-
-**利点:**
-- 複数デバイス間で同期
-- ブラウザキャッシュ削除しても消えない (サーバー保存)
-- デッキ名で管理
-
-**セキュリティ:**
-- PIN は PBKDF2-SHA256 で 100,000 回ハッシュ化
-- サーバーには PIN は保存されない（ハッシュのみ）
-- sessionStorage 使用（ブラウザ閉じたら自動ログアウト）
-
-### バックアップ（クラシック方法）
-
-```
-デッキ管理 → 書き出し(JSON) → PCに保存
-```
-
-復元時：
-```
-デッキ管理 → 読み込み → 保存したJSONを選択
-```
-
----
-
-## マルチプレイ詳細
-
-### ルームシステム
-
-- 6文字ランダムコード生成
-- TTL: 10分（誰も接続してなければ自動削除）
-- 最大2人（P1/P2）
-- リアルタイムSSE通信
-
-### 接続フロー
-
-```
-P1: ルーム作成 → コード発行 → イベント待機
-P2: コード入力 → POST /room/join → P1に通知
-P1: P2参加を受け取り → ゲーム開始
-```
-
-### 操作同期
-
-各ターン:
-1. P1 が操作 → `POST /room/action` 送信
-2. P2 が `GET /events` で受け取り
-3. 画面にアニメーション表示
-4. ターン終了 → P2 ターン
-
-**ネットワークエラー時:**
-- 最大3回自動再接続（指数バックオフ）
-- 接続失敗 → ロビーに戻る
-
-### レート制限
-
-不正アクセス防止:
-- **15リクエスト/5分/IP**
-- 超過時 → 429 Too Many Requests
-
----
-
-## ローカル実行
-
-ダウンロードして自分のサーバーで運用する場合：
-
-### 依存関係
-
-```
-python 3.8+
-sqlite3 (Python 同梱)
-```
-
-### セットアップ
+依存は Python 3.10+（標準ライブラリのみ）。
 
 ```bash
-# リポジトリクローン
-git clone https://github.com/[USER]/dm-solitaire.git
+git clone https://github.com/nagumaguma/dm-solitaire.git
 cd dm-solitaire
 
-# Python サーバー起動
+# 1. バックエンド起動（http://localhost:8765）
 python dm-proxy-server.py
+
+# 2. フロントを開く（別ターミナル）
+python -m http.server 8000
+# → http://localhost:8000/index.html
 ```
 
-サーバー起動メッセージ:
-```
-[db] integrity check: OK
-[db] Loaded X profiles, Y decks
-[DM Proxy] Starting on http://localhost:8765
-```
+`dm_cache.db` はGit管理外なので、初回はカード検索結果が空になることがあります。ローカルで検索画像を出すには上記の `crawl_official.py` を一度実行してください。
 
-### ブラウザアクセス
+## デプロイ
 
-```
-file:///path/to/dm-solitaire-web.html
-```
+### フロント（GitHub Pages）
 
-**URL の `PROXY` をローカルに指す場合:**
-
-HTML 内の設定行を編集:
-```javascript
-const PROXY = 'http://localhost:8765';  // デフォルト
-```
-
-### PORT 変更
+`main` ブランチへ push すると、Pages が自動で反映します。
 
 ```bash
-PORT=9999 python dm-proxy-server.py
+git push origin main
 ```
 
----
+### バックエンド（Railway）
 
-## 🛡️ セキュリティ機能
-
-| 機能 | 説明 |
-|---|---|
-| PIN 暗号化 | PBKDF2-SHA256 + 16 byte salt (100k iterations) |
-| Rate Limiting | 15 req/5min/IP (ブルートフォース防止) |
-| sessionStorage | ブラウザ終了で自動ログアウト (localStorage 使わない) |
-| CORS | Cross-Origin リクエスト許可 (API 開放) |
-| DB 整合性チェック | サーバー起動時に PRAGMA integrity_check 実行 |
-| JSON エラー回複 | 破損デッキをスキップ、ログに記録 |
-
----
-
-## 📊 データベーススキーマ
-
-SQLite (`dm_cache.db`):
-
-```sql
--- カード情報キャッシュ
-CREATE TABLE card_cache (
-  id TEXT PRIMARY KEY,
-  data TEXT NOT NULL,
-  cached_at REAL NOT NULL
-);
-
--- ユーザープロフィール
-CREATE TABLE profiles (
-  username TEXT PRIMARY KEY,
-  pin_hash TEXT NOT NULL,        -- PBKDF2-SHA256
-  pin_salt TEXT NOT NULL,        -- 16 byte hex
-  last_deck TEXT                 -- 最後に使ったデッキ名
-);
-
--- ユーザーのデッキ
-CREATE TABLE decks (
-  username TEXT NOT NULL,
-  deck_name TEXT NOT NULL,
-  deck_data TEXT NOT NULL,       -- JSON
-  PRIMARY KEY (username, deck_name)
-);
+```bash
+railway up        # ローカル作業ツリーをそのままビルド&デプロイ
 ```
 
----
+- ビルドは `nixpacks.toml`（`providers = ["python"]`）で Python を強制。`package.json`（テスト用）による Node 誤検出を防ぎます。
+- `.railwayignore` で `.venv` / テスト / `dm_user.db` 等を除外します。
+- 確認: `curl https://…/ping`（`status: ok`）、`railway logs`。
+
+### 環境変数（Railway）
+
+| 変数 | 値 | 説明 |
+|---|---|---|
+| `OFFICIAL_SEARCH_ENABLED` | `0` | 本番では公式サイトを呼ばない（地理ブロック回避、cache-only） |
+| `CACHE_DB_PATH` | `/app/dm_cache.db` | 出荷した焼き込み済みキャッシュを使用 |
+| `BASE_URL` | 公開URL | `/img` プロキシのURL生成に使用（未設定でも自動推定） |
+| `PORT` | 自動 | 待ち受けポート |
 
 ## API エンドポイント
 
-### 認証
-
-| 方法 | エンドポイント | 説明 |
+| 方法 | パス | 説明 |
 |---|---|---|
-| POST | `/profile/create` | アカウント作成（username, pin） |
-| POST | `/profile/login` | ログイン（入力 PIN → ハッシュ化 → DB で検証） |
-| POST | `/profile/update` | last_deck 更新 |
-
-### デッキ
-
-| 方法 | エンドポイント | 説明 |
-|---|---|---|
-| POST | `/deck/save` | デッキ保存（username, pin, deck_name, deck_data） |
-| GET | `/deck/list` | ユーザーのデッキ一覧 |
-| GET | `/deck/get` | 特定デッキ取得 |
-| POST | `/deck/delete` | デッキ削除 |
-
-### ルーム
-
-| 方法 | エンドポイント | 説明 |
-|---|---|---|
-| POST | `/room/create` | ルーム作成 → 6 文字コード返却 |
-| POST | `/room/join` | ルーム参加 |
-| POST | `/room/action` | ターンアクション送信 |
-| GET | `/events` | イベントストリーム（SSE） |
-
-### 診断
-
-| 方法 | エンドポイント | 説明 |
-|---|---|---|
-| GET | `/ping` | サーバーステータス |
-| GET | `/test/rate-limit-status` | Rate limit 状態確認（開発用） |
-
----
-
-## 🐛 キャッシュ無効化
-
-最新版に更新後、キャッシュが古いままの場合：
-
-**ブラウザ:**
-- `Ctrl+Shift+Delete` または `Cmd+Shift+Delete` でキャッシュ削除
-- 該当ドメインのキャッシュを「すべて削除」
-
-**対象ファイル:**
-- `index.html` および読み込む JS（`ui-desktop.js`, `ui-mobile.js` 等）
-
----
-
-## 💬 チャット機能
-
-マルチプレイ中に相手と会話:
-
-```
-画面下部のチャット入力 → メッセージ送信 → リアルタイム表示
-```
-
-- 最大 100 件履歴保持
-- サーバーに保存されない（その時のルームのみ）
-
----
-
-## 📝 操作ログ
-
-ゲーム中の全操作を記録:
-
-```
-- カード移動
-- ターン情報
-- ドロー
-- マナ供給
-```
-
-ゲーム終了で自動クリア
-
----
-
-## ✅ タイムアウト設定
-
-| 操作 | タイムアウト | 説明 |
-|---|---|---|
-| サーバーデッキ取得 | 10秒 | `/deck/get` |
-| ルーム作成/参加 | 10秒 | `/room/create`, `/room/join` |
-| イベントストリーム | 20秒 | SSE キープアライブ |
-
----
-
-## 環境変数
-
-```bash
-# ポート変更
-PORT=8765
-
-# ベースURL（バックエンドの公開URL。/img プロキシURL生成に使用）
-BASE_URL=https://dm-solitaire-production.up.railway.app
-```
-
-`BASE_URL` 未設定時も、Railway/Render/Heroku 系の公開URL環境変数や
-`X-Forwarded-Proto` / `Host` から可能な範囲で自動推定します。
-
-フロント側の API 接続先を一時的に差し替える場合:
-
-```text
-https://nagumaguma.github.io/dm-solitaire/index.html?api=https://YOUR-BACKEND.example.com
-```
-
-差し替えはブラウザの `localStorage` に保存されます。解除する場合:
-
-```text
-https://nagumaguma.github.io/dm-solitaire/index.html?clearApi=1
-```
-
----
-
-## トラブルシューティング
-
-| 問題 | 原因 | 解決 |
-|---|---|---|
-| デッキが保存されない | sessionStorage 無効/private mode | プライベートモードを解除 |
-| サーバーが起動しない | ポート占有 | netstat -ano \| findstr 8765 で確認、別ポートで起動 |
-| マルチプレイが接続できない | ファイアウォール/プロキシ | 8765 ポートをホワイトリスト化 |
-| 相手に操作が見えない | SSE 接続切断 | 自動再接続 3 回実行、その後ロビーへ |
-| ログインできない | PIN 誤り/rate limit | 15 分待って再度試行 |
-
----
-
-## 🎨 UIガイド
-
-### PC 版（web.html）
-
-- メニュー: 画面上部タブ形式
-- デッキ: テキスト入力（`deck-name` input）
-- ルーム: `prompt()` ダイアログで入力
-
-### スマホ版（sp.html）
-
-- メニュー: モーダルタップで展開
-- デッキ: `<select>` ドロップダウン
-- ルーム: モーダルフォーム
-
----
-
-## 開発リソース
-
-### コード構成
-
-```
-index.html                - エントリーポイント（認証・デバイス判定・DM_API_BASE 設定）
-game-engine.js            - ゲームロジック（UI 非依存）
-auth-service.js           - 認証・セッション
-network-service.js        - API 呼び出し（デッキ・検索・ルーム・SSE）
-ui-desktop.js             - PC 版 UI（3カラム：検索｜デッキ｜ゲーム・オンライン対戦）
-ui-mobile.js              - SP 版 UI（1カラム・オンライン対戦）
-dm-proxy-server.py        - バックエンド（BaseHTTPRequestHandler / API / SQLite）
-dm_cache.db               - SQLite（自動生成）
-_archive/                 - 旧版 HTML（dm-solitaire-*.html）
-```
-
-### エントリーポイント
-
-| 用途 | ファイル | 説明 |
-|------|----------|------|
-| **本番** | **index.html** | 認証後、768px で PC/SP を切り替え。一人回し・オンライン対戦対応 |
-| アーカイブ | _archive/dm-solitaire-*.html | 旧版（参照用） |
-
----
-
-## 機能チェックリスト
-
-### 統合版機能
-
-| 機能 | 実装 | 説明 |
-|------|------|------|
-| **デッキ管理** | ✅ | 作成・編集・保存・削除 |
-| **カード検索** | ✅ | プロキシでリアルタイム検索 |
-| **手札操作** | ✅ | +/-/削除ボタン，ドラッグ予定 |
-| **一人回し** | ✅ | シールド5枚+初期手札5枚 |
-| **VS対戦** | ✅ | 2人対戦（同機） |
-| **アカウント** | ✅ | 登録・ログイン・認証 |
-| **デッキ保存** | 🟡 | API実装完了、UI確認中 |
-| **オンライン** | 🟡 | フレームワーク完了、ロジック中 |
-| **ドラッグ** | 🔲 | 計画中 |
-| **エフェクト** | 🔲 | 計画中 |
-
-### 主要な JavaScript 関数（統合版）
-
-| 領域 | 関数 | 説明 |
-|------|------|------|
-| **Screen** | `switchScreen(id)` | スクリーン切り替え |
-| **Storage** | `loadStorage()`, `writeStorage()` | LocalStorage 操作 |
-| **Deck** | `renderDeckList()`, `saveDeck()`, `deleteDeck()` | デッキ管理 |
-| **Card** | `openCardDetail()`, `bsIncr()`, `bsDecr()` | 手札操作 |
-| **Search** | `srFetch()`, `srRender()`, `srAddCard()` | カード検索 |
-| **Game** | `startGame()`, `renderGame()` | ゲーム開始 |
-| **Account** | `registerAccount()`, `loginAccount()` | アカウント |
-
-### 主要な JavaScript 関数（レガシー版）
-
-| 領域 | 関数 |
-|---|---|
-| **Account** | `registerAccount()`, `loginAccount()`, `saveAccount()`, `loadAccount()` |
-| **Deck** | `loadServerDecks()`, `fetchServerDeck()`, `saveDeckToServer()` |
-| **Room** | `olCreateRoom()`, `olJoinRoom()`, `olWaitForOpponent()` |
-| **Sync** | `olSendAction()`, `olSyncTurnEnd()`, `startOnlineVs()` |
-| **UI** | `showOnlineLobby()`, `updateDeckSelector()`, `toast()` |
-
-### Python 関数
-
-| 領域 | 関数 |
-|---|---|
-| **Crypto** | `hash_pin()`, `verify_pin()` |
-| **Rate Limit** | `check_rate_limit()` |
-| **DB** | `_init_cache()`, `_load_from_db()`, `_verify_db_integrity()` |
-| **Deck** | `_save_deck_to_db()`, `_delete_deck_from_db()` |
-
----
-
-## デプロイメント
-
-### Vercel / Netlify（フロント）
-
-```
-dm-solitaire-web.html + dm-solitaire-sp.html をアップロード
-```
-
-### Railway / Heroku（バック - Python）
-
-```
-Procfile:
-web: python dm-proxy-server.py
-
-PORT は自動割り当て使用
-```
-
-バックエンドの環境変数:
-
-```bash
-BASE_URL=https://dm-solitaire-production.up.railway.app
-```
-
-デプロイ後の簡易チェック:
-
-```bash
-npm run prod:check
-```
-
-任意の URL を確認する場合:
-
-```bash
-DM_PROD_APP_URL=https://nagumaguma.github.io/dm-solitaire/index.html DM_PROD_API_BASE=https://dm-solitaire-production.up.railway.app npm run prod:check
-```
-
-検索APIまで含めて確認する場合:
-
-```bash
-DM_PROD_CHECK_SEARCH=1 npm run prod:check
-```
-
----
-
-## 📜 ライセンス
-
-MIT License
-
----
-
-## 🙏 謝辞
-
-- デュエルマスターズ Wiki API
-- Python community
-- ゲーム好きな皆さん
-
----
-
-**最終更新:** 2026-03-16  
-**バージョン:** 2.0 (Multiplayer + Account + Security)  
-**ステータス:** 本番利用可能
+| GET | `/ping` | ステータス |
+| GET | `/search?q=` | カード検索（画像つき） |
+| GET | `/detail?id=` / `?name=` | カード詳細 |
+| GET | `/illustrations?name=` | イラスト違い一覧（バージョン選択） |
+| GET | `/img?url=` | 画像プロキシ（CORS回避＋キャッシュ） |
+| GET | `/events?room=&p=` | 対戦イベント（SSE） |
+| POST | `/room/create` `/room/join` `/action` `/chat` | オンライン対戦 |
+| POST | `/profile/{create,login,update}` | アカウント |
+| POST | `/deck/{save,delete,list,names,get,fetch}` | デッキ（PINをURLに出さないため POST専用） |
+
+オンライン対戦では相手のカード名は送信せず、枚数・伏せ札のみ同期します。ターン制御はクライアント側、サーバーは状態をリレーします。
+
+## ライセンス
+
+MIT License（コード部分）。カード画像・名称等の権利は各権利者に帰属します。
