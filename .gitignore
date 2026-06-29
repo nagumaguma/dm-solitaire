@@ -1,3 +1,25 @@
+# dependencies
 node_modules/
+.venv/
+
+# python
+__pycache__/
+*.pyc
+
+# test artifacts
 test-results/
 playwright-report/
+
+# local databases — DATA, not code. Deploy ships the local copy via `railway up`,
+# so these don't belong in git (dm_user.db = user PIN hashes/decks; dm_cache.db ~86MB).
+dm_cache.db
+dm_user.db
+*.db-wal
+*.db-shm
+*.db.migrated
+
+# scratch / probes
+_tmp_*.py
+_search_probe.json
+_prodsearch.json
+_all_official_ids.txt

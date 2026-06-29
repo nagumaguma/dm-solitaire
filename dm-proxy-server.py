@@ -11,6 +11,7 @@ dm-solitaire.html と同じフォルダで実行してください。
 データソース: https://duelmasters.fandom.com (MediaWiki API)
 """
 
+import concurrent.futures
 import hashlib
 import html as _html
 import json
@@ -96,6 +97,26 @@ def _proxy_image_url(raw_url: str) -> str:
     if not url:
         return ""
     return f"{_current_base_url()}/img?url={urllib.parse.quote(url, safe='')}"
+
+
+def _search_thumb_url(raw_url: str) -> str:
+    """Normalize any stored/raw card image into a current-host proxy URL.
+
+    Search hits may carry a raw remote URL (wiki pageimage / official thumb) or a
+    previously-proxied URL built for another host (e.g. a localhost URL baked into
+    the seed cache DB). Unwrap the latter so it re-bases onto the current host.
+    """
+    url = str(raw_url or "").strip()
+    if not url:
+        return ""
+    if "/img?url=" in url:
+        try:
+            inner = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("url", [""])[0]
+            if inner:
+                url = urllib.parse.unquote(inner)
+        except Exception:
+            pass
+    return _proxy_image_url(url)
 
 _dmwiki_cache: dict[str, list[dict]] = {}   # normalized_query → all matched cards
 DMWIKI_CACHE_MAX = 500
@@ -1218,6 +1239,10 @@ def search_cards(query: str, page: int = 1) -> tuple[list[dict], int]:
             "id":   pid,
             "name": jpname if jpname else h["title"],
             "thumb": thumb,
+            "civilization": pdata.get("civ", ""),
+            "civ": pdata.get("civ", ""),
+            "cost": pdata.get("cost", 0),
+            "type": pdata.get("type", ""),
         })
 
     if cards:
@@ -1259,7 +1284,16 @@ def _get_page_data(page_ids: str, size: int = 200) -> dict[str, dict]:
                     ct.get("jpsubtitle") or ct.get("jptitle") or ct.get("name2") or "")
         if subtitle:
             jpname = f"{subtitle} {jpname}".strip()
-        result[pid] = {"thumb": thumb, "jpname": jpname, "is_card": bool(ct)}
+        civ_raw = ct.get("civilization") or ct.get("civ") or ""
+        type_raw = ct.get("type") or ct.get("cardtype") or ""
+        result[pid] = {
+            "thumb": thumb,
+            "jpname": jpname,
+            "is_card": bool(ct),
+            "civ": _parse_civ(civ_raw) if civ_raw else "",
+            "cost": _parse_int(ct.get("cost", "")) if ct.get("cost") else 0,
+            "type": _parse_type(type_raw) if type_raw else "",
+        }
     return result
 
 
@@ -1583,6 +1617,27 @@ def search_local(query: str) -> list[dict]:
 
     if matches:
         results = list(matches.values())
+
+        # Collapse same-display-name hits (e.g. a twinpact face colliding with the
+        # standalone card). Prefer the canonical single card (card_id == dmwiki_{name}),
+        # then one that already carries an image, then the higher match score.
+        def _dedup_priority(item: dict) -> tuple:
+            cid = str(item.get("id") or "")
+            nm = str(item.get("name") or "")
+            return (
+                1 if cid == f"dmwiki_{nm}" else 0,
+                1 if (item.get("thumb") or item.get("imageUrl")) else 0,
+                int(item.get("_score") or 0),
+            )
+
+        deduped: dict[str, dict] = {}
+        for item in results:
+            key = _search_compact_text(item.get("name") or "") or str(item.get("id") or "")
+            current = deduped.get(key)
+            if current is None or _dedup_priority(item) > _dedup_priority(current):
+                deduped[key] = item
+        results = list(deduped.values())
+
         for item in results:
             if not item.get("thumb"):
                 cached = _cache_get(str(item.get("id") or ""))
@@ -1699,6 +1754,11 @@ def search_cards_dmwiki(query: str) -> list[dict]:
 
 OFFICIAL_BASE    = "https://dm.takaratomy.co.jp"
 OFFICIAL_SEARCH  = OFFICIAL_BASE + "/card/"
+# The official card DB is geo-restricted: name search returns nothing from
+# non-Japanese hosts (Railway). Set OFFICIAL_SEARCH_ENABLED=0 there so resolution
+# skips the futile call and relies on the pre-warmed cache instead. Warming runs
+# from a Japanese IP with this enabled (default).
+OFFICIAL_SEARCH_ENABLED = os.environ.get("OFFICIAL_SEARCH_ENABLED", "1").strip() != "0"
 OFFICIAL_HEADERS = {
     **WIKI_HEADERS,
     "X-Requested-With": "XMLHttpRequest",
@@ -1874,13 +1934,16 @@ _official_detail_title_cache: dict[str, str] = {}
 
 
 def _official_fetch_detail_title(card_id: str) -> str:
-    cid = str(card_id or "").strip().lower()
-    if not cid:
+    # Official card ids are CASE-SENSITIVE (e.g. dm26sd1-a002F vs ...a002f). Keep the
+    # original case in the URL; only the in-memory cache key is lowercased for dedup.
+    raw = str(card_id or "").strip()
+    if not raw:
         return ""
-    if cid in _official_detail_title_cache:
-        return _official_detail_title_cache[cid]
+    key = raw.lower()
+    if key in _official_detail_title_cache:
+        return _official_detail_title_cache[key]
 
-    safe_id = urllib.parse.quote(cid, safe="")
+    safe_id = urllib.parse.quote(raw, safe="")
 
     detail_url = f"{OFFICIAL_BASE}/card/detail/?id={safe_id}"
     req = urllib.request.Request(detail_url, headers=OFFICIAL_DETAIL_HEADERS)
@@ -1888,12 +1951,12 @@ def _official_fetch_detail_title(card_id: str) -> str:
         with urllib.request.urlopen(req, timeout=8) as r:
             chunk = r.read(4096).decode("utf-8", errors="replace")
     except Exception:
-        _official_detail_title_cache[cid] = ""
+        _official_detail_title_cache[key] = ""
         return ""
 
     m = re.search(r'<title>([^<(|]+)', chunk)
     title = m.group(1).strip() if m else ""
-    _official_detail_title_cache[cid] = title
+    _official_detail_title_cache[key] = title
     return title
 
 
@@ -2547,24 +2610,30 @@ def get_card_detail_dmwiki(name: str) -> dict | None:
     # picking up related-card images from the strategy section below the table.
     table_pos = html.find('class="style_table"')
     pre_table_html = html[:table_pos] if table_pos > 0 else ""
-    img_url = (
-        (pre_table_html and _img_from_dmwiki_html(pre_table_html))
-        or _img_from_dmwiki_html(html)
-        or _img_from_dmwiki_setcode(html)
-        or _img_from_dmwiki_attach(name)
-    )
     candidates = _strict_name_variants(card_name)
     if card_name != name:
         for variant in _strict_name_variants(name):
             if variant not in candidates:
                 candidates.append(variant)
 
-    if not img_url:
+    # Resolution order matters for correctness:
+    # 1) the card's own dmwiki scan (always the right card, when present)
+    img_url = (pre_table_html and _img_from_dmwiki_html(pre_table_html)) or _img_from_dmwiki_html(html)
+
+    # 2) official name search (name-verified). Reachable from JP; on non-JP hosts
+    #    OFFICIAL_SEARCH_ENABLED=0 skips it (it would return nothing anyway).
+    if not img_url and OFFICIAL_SEARCH_ENABLED:
         for candidate in candidates:
             img_url = _img_from_official(candidate)
             if img_url:
                 break
 
+    # 3) set-code construction is a LAST resort: it scans page-wide links and can
+    #    map to the wrong printing/card, so it must rank below verified sources.
+    if not img_url:
+        img_url = _img_from_dmwiki_setcode(html) or _img_from_dmwiki_attach(name)
+
+    # 4) English wiki fallback
     if not img_url:
         for candidate in candidates:
             img_url = _img_from_en_wiki(candidate)
@@ -2735,13 +2804,154 @@ def _image_identity_key(raw_url: str) -> str:
 # ─── HTTP Handler ──────────────────────────────────────────────────────────────
 
 
-def _sanitize_search_result_card(card: dict) -> dict:
-    """Return search-list data with unsafe images suppressed.
+def _ensure_search_thumbs(cards, budget_s: float = 15.0):
+    """Resolve official/dmwiki thumbnails for search hits that lack an image.
 
-    Search hits can come from partial name matches, legacy thumbnails, or cached
-    dmwiki/name fallbacks. Those images are not authoritative enough for deck
-    building, so search results prefer NO IMG over a possibly wrong card image.
-    Detail and illustration endpoints still provide image selection.
+    Friends-only tool: we eagerly fill the search list with the same artwork the
+    detail view resolves, so the list image matches the official card art. Runs
+    concurrently with a wall-clock budget and caches results for future searches.
+    """
+    # On non-JP hosts (Railway) official search is blocked and the remaining
+    # runtime fallbacks (set-code construction) can resolve the WRONG card. There
+    # we serve images only from the pre-warmed cache — a missing image (NO IMG) is
+    # safer than a confidently wrong one. Warming/JP dev keeps this enabled.
+    if not OFFICIAL_SEARCH_ENABLED:
+        return
+    targets = [c for c in (cards or []) if isinstance(c, dict) and not _image_from_card_data(c)]
+    if not targets:
+        return
+    base = _current_base_url()
+
+    def resolve(card):
+        try:
+            _request_context.base_url = base
+            cid = _safe_text(card.get("id") or card.get("sourceId"), maxlen=240)
+            name = _safe_text(card.get("name"), maxlen=200)
+            detail = None
+            if cid.startswith("dmwiki_"):
+                detail = get_card_detail_dmwiki(cid[7:])
+            elif cid.isdigit():
+                detail = get_card_detail(cid)
+            if not detail and name:
+                detail = get_card_detail_dmwiki(name)
+            if not detail:
+                return
+            cache_key = cid or detail.get("id") or (f"dmwiki_{name}" if name else "")
+            if cache_key:
+                _cache_set(cache_key, detail)
+            img = _image_from_card_data(detail)
+            if img:
+                card["thumb"] = img
+                card["img"] = img
+                card["imageUrl"] = img
+        except Exception as e:
+            print(f"[search-thumb] resolve warning: {e}", file=sys.stderr, flush=True)
+
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(targets)))
+    try:
+        futs = [ex.submit(resolve, c) for c in targets]
+        concurrent.futures.wait(futs, timeout=budget_s)
+    finally:
+        ex.shutdown(wait=False)
+
+
+def _card_variants_from_cache(name: str, limit: int = 24) -> list[dict]:
+    """Illustration variants for a card name from the pre-crawled card_prints table.
+
+    Used on non-JP hosts (Railway) where the live official search is blocked: the
+    version picker reads every printing we baked in from the JP-side crawl.
+    """
+    key = _search_compact_text(name)
+    if not key:
+        return []
+    rows = []
+    con = None
+    try:
+        con = sqlite3.connect(CACHE_DB)
+        con.execute("PRAGMA busy_timeout=5000")
+        rows = con.execute(
+            "SELECT print_id, name, image_url FROM card_prints "
+            "WHERE card_id = ? AND image_url != '' ORDER BY updated_at DESC, rowid DESC",
+            (key,),
+        ).fetchall()
+    except Exception as e:
+        print(f"[variants] cache read warning: {e}", file=sys.stderr, flush=True)
+    finally:
+        if con:
+            con.close()
+
+    options: list[dict] = []
+    seen: set[str] = set()
+    for print_id, disp_name, image_url in rows:
+        img = _search_thumb_url(image_url)
+        if not img or img in seen:
+            continue
+        seen.add(img)
+        options.append({
+            "artId": f"official:{print_id}",
+            "sourceId": print_id,
+            "name": disp_name or name,
+            "label": str(print_id),
+            "imageUrl": img,
+            "thumb": img,
+            "source": "official-cache",
+        })
+        if len(options) >= max(1, int(limit or 1)):
+            break
+    return options
+
+
+def _cache_only_detail(lookup_name: str) -> dict | None:
+    """Build a card detail purely from the local index (no network).
+
+    On non-JP hosts we never runtime-resolve images (the fallbacks can pick the
+    wrong card); /detail serves whatever the JP-side crawl baked into card_index.
+    """
+    key = _search_compact_text(lookup_name)
+    if not key:
+        return None
+    row = None
+    con = None
+    try:
+        con = sqlite3.connect(CACHE_DB)
+        con.execute("PRAGMA busy_timeout=5000")
+        row = con.execute(
+            "SELECT name, thumb, civ, card_type, race, rules_text, cost, power "
+            "FROM card_index WHERE name_compact = ? ORDER BY updated_at DESC LIMIT 1",
+            (key,),
+        ).fetchone()
+    except Exception as e:
+        print(f"[detail] cache-only read warning: {e}", file=sys.stderr, flush=True)
+    finally:
+        if con:
+            con.close()
+    if not row:
+        return None
+    name, thumb, civ, ctype, race, text, cost, power = row
+    img = _search_thumb_url(thumb)
+    return {
+        "id": f"dmwiki_{name}",
+        "name": name,
+        "nameEn": name,
+        "civ": civ or "",
+        "cost": cost or 0,
+        "type": ctype or "",
+        "power": power or 0,
+        "img": img,
+        "imageUrl": img,
+        "thumb": img,
+        "race": race or "",
+        "text": text or "",
+    }
+
+
+def _sanitize_search_result_card(card: dict) -> dict:
+    """Return search-list data with a browser-loadable card thumbnail.
+
+    Friends-only tool: usability beats image-accuracy. We surface whatever
+    thumbnail the search hit carries (local index or wiki pageimage), re-based
+    through the image proxy so it loads from the current host. Detail and
+    illustration endpoints still resolve the authoritative official art.
     """
     if not isinstance(card, dict):
         return {}
@@ -2750,10 +2960,18 @@ def _sanitize_search_result_card(card: dict) -> dict:
     if source_id:
         out["sourceId"] = source_id
         out["id"] = source_id
+    thumb = _search_thumb_url(_image_from_card_data(out))
     for key in ("imageUrl", "image_url", "image", "img", "thumb", "selectedImageUrl"):
         out.pop(key, None)
-    out["imageConfidence"] = "none"
-    out["imageStatus"] = "suppressed-unsafe-search-image"
+    if thumb:
+        out["imageUrl"] = thumb
+        out["thumb"] = thumb
+        out["img"] = thumb
+        out["imageConfidence"] = "list-thumb"
+        out["imageStatus"] = "ok"
+    else:
+        out["imageConfidence"] = "none"
+        out["imageStatus"] = "no-thumb"
     return out
 
 
@@ -3166,6 +3384,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "page must be an integer"}, 400)
             page = max(1, page)
             cards, total = search_cards(q, page)
+            _ensure_search_thumbs(cards)
             safe_cards = _sanitize_search_results(cards)
             sources = sorted({str(c.get("source") or "").strip() for c in safe_cards if isinstance(c, dict) and c.get("source")})
             source = sources[0] if len(sources) == 1 else ("mixed" if sources else "")
@@ -3191,6 +3410,18 @@ class Handler(BaseHTTPRequestHandler):
                 if not needs_refresh:
                     return self._json(cached)
                 print(f"[detail] cached entry {reason}, refreshing: {cache_key}", flush=True)
+
+            # Non-JP hosts: serve from the pre-crawled index only — never runtime-resolve
+            # (the fallbacks can return the wrong card) and never write at request time.
+            if not OFFICIAL_SEARCH_ENABLED:
+                lookup_name = (pid[7:] if pid.startswith("dmwiki_") else "") or name \
+                    or _safe_text((cached or {}).get("name"), maxlen=160)
+                detail = _cache_only_detail(lookup_name) if lookup_name else None
+                if detail:
+                    return self._json(detail)
+                if cached:
+                    return self._json(cached)
+                return self._json({"error": "not found"}, 404)
 
             if pid:
                 if pid.startswith("dmwiki_"):
@@ -3259,7 +3490,10 @@ class Handler(BaseHTTPRequestHandler):
                 if time.time() - _illust_at < ILLUSTRATIONS_CACHE_TTL:
                     return self._json(_illust_resp)
 
-            options = _official_art_variants(lookup_name, limit=24)
+            if OFFICIAL_SEARCH_ENABLED:
+                options = _official_art_variants(lookup_name, limit=24)
+            else:
+                options = _card_variants_from_cache(lookup_name, limit=24)
             current_img = _extract_card_image(detail_for_current)
 
             if not current_img and pid:

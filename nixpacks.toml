@@ -1,0 +1,7 @@
+# Force the Python provider. The repo also contains package.json (Playwright
+# tests only), which otherwise makes Nixpacks misdetect this as a Node app and
+# skip installing Python — causing "python: command not found" at runtime.
+providers = ["python"]
+
+[start]
+cmd = "python dm-proxy-server.py"

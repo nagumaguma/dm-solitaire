@@ -346,7 +346,7 @@ const NetworkService = {
 
   isSearchImageTrusted(card) {
     const confidence = String(card?.imageConfidence || '').trim().toLowerCase();
-    return confidence === 'verified-id' || confidence === 'official-id';
+    return confidence === 'verified-id' || confidence === 'official-id' || confidence === 'list-thumb';
   },
 
   normalizeSearchResultCard(card) {

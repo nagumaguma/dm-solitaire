@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+tests/
+test-results/
+playwright-report/
+playwright.config.js
+package.json
+package-lock.json
+scripts/
+_archive/
+.claude/
+.git/
+dm_user.db
+_search_probe.json
+*.spec.js
