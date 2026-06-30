@@ -985,9 +985,11 @@ function buildMobilePublicState(state) {
     deck: state.deck.length,
     shields: state.shields.length,
     deckRevealZone: serializeMobilePublicCards(state.deckRevealZone),
-    revealedZone: serializeMobilePublicCards(state.revealedZone),
+    // Hide in-progress break (opponent must not see the broken card itself) and keep
+    // GR non-public (count only, like the deck) — must match GameController.buildPublicState.
+    revealedZone: serializeMobilePublicCards((state.revealedZone || []).filter((c) => !c || !c._breaking)),
     hyperZone: serializeMobilePublicCards(state.hyperZone),
-    grZone: serializeMobilePublicCards(state.grZone),
+    grZone: (state.grZone || []).length,
     specialZone: serializeMobilePublicCards(state.specialZone),
     battleZone: serializeMobilePublicCards(state.battleZone),
     manaZone: serializeMobilePublicCards(state.manaZone),
@@ -1236,7 +1238,7 @@ function getMobileCardZoneActions(sourceZone, sourceCard) {
     );
   }
 
-  if (!['hyperZone', 'grZone', 'specialZone', 'deck'].includes(sourceZone)) {
+  if (!['hyperZone', 'grZone', 'specialZone'].includes(sourceZone)) {
     sep();
     addExternalTargets();
   }

@@ -1255,9 +1255,11 @@ function buildDesktopPublicState(state) {
     deck: state.deck.length,
     shields: state.shields.length,
     deckRevealZone: serializeDesktopPublicCards(state.deckRevealZone),
-    revealedZone: serializeDesktopPublicCards(state.revealedZone),
+    // Hide in-progress break (opponent must not see the broken card itself) and keep
+    // GR non-public (count only, like the deck) — must match GameController.buildPublicState.
+    revealedZone: serializeDesktopPublicCards((state.revealedZone || []).filter((c) => !c || !c._breaking)),
     hyperZone: serializeDesktopPublicCards(state.hyperZone),
-    grZone: serializeDesktopPublicCards(state.grZone),
+    grZone: (state.grZone || []).length,
     specialZone: serializeDesktopPublicCards(state.specialZone),
     battleZone: serializeDesktopPublicCards(state.battleZone),
     manaZone: serializeDesktopPublicCards(state.manaZone),
