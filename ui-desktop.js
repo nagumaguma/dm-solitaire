@@ -1902,10 +1902,10 @@ function renderDesktopGame() {
                 ? (opp.handCards || []).map((c, i) => renderChip(c, 'hand', i, 'vs-opp')).join('')
                 : renderDesktopBackCards(Number(opp.hand ?? 0))}
             </div>
-            <div class="dg-v2-pile-btn ex" style="pointer-events:none">
+            <button type="button" class="dg-v2-pile-btn ex" onclick="openDesktopOppExView('hyperZone')" title="相手の超次元ゾーン（公開）">
               <span class="dg-v2-pile-name">超次元</span>
               <span class="dg-v2-pile-cnt">${getZoneCount(opp.hyperZone)}</span>
-            </div>
+            </button>
             <div class="dg-v2-pile-btn ex" style="pointer-events:none">
               <span class="dg-v2-pile-name">GR</span>
               <span class="dg-v2-pile-cnt">${getZoneCount(opp.grZone)}</span>
@@ -2094,6 +2094,53 @@ function renderDesktopGame() {
 function closeDesktopHandPicker() {
   const picker = document.getElementById('desktop-hand-picker');
   if (picker) picker.remove();
+}
+
+function openDesktopOppExView(zoneKey) {
+  const opp = window._olOpponent || {};
+  const cards = Array.isArray(opp[zoneKey]) ? opp[zoneKey] : [];
+  const label = zoneKey === 'hyperZone' ? '相手の超次元ゾーン' : getDesktopZoneLabel(zoneKey);
+  if (!cards.length) { showDesktopToast(`${label}は空です`, 'info'); return; }
+  let modal = document.getElementById('desktop-oppex-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'desktop-oppex-modal';
+    modal.className = 'dm-grave-modal';
+    modal.innerHTML = `
+      <div class="dm-grave-backdrop" onclick="closeDesktopOppExView()"></div>
+      <div class="dm-grave-body">
+        <div class="dm-grave-head">
+          <div class="dm-grave-title" id="desktop-oppex-title"></div>
+          <button class="dm-grave-close" onclick="closeDesktopOppExView()">閉じる</button>
+        </div>
+        <div id="desktop-oppex-list" class="dm-grave-list"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+  const t = document.getElementById('desktop-oppex-title');
+  if (t) t.textContent = `${label} (${cards.length})`;
+  const list = document.getElementById('desktop-oppex-list');
+  if (list) {
+    list.innerHTML = cards.map((card, i) => {
+      const cost = Number.isFinite(Number(card?.cost)) ? Number(card.cost) : '-';
+      const power = card?.power ? String(card.power) : '-';
+      return `
+        <div class="dm-grave-item">
+          <div class="dm-grave-item-no">${i + 1}</div>
+          <div class="dm-grave-item-main">
+            <div class="dm-grave-item-name">${escapeHtml(card?.name || 'カード')}</div>
+            <div class="dm-grave-item-meta">コスト ${escapeHtml(String(cost))} / パワー ${escapeHtml(String(power))}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+  modal.classList.add('open');
+}
+function closeDesktopOppExView() {
+  const modal = document.getElementById('desktop-oppex-modal');
+  if (modal) modal.classList.remove('open');
 }
 
 function onDesktopBoardCardContext(event, zone, idx) {
@@ -2620,9 +2667,8 @@ function getDesktopCardZoneActions(sourceZone, sourceCard) {
   };
   const addExternalTargets = () => {
     actions.push(
-      move('\u8d85\u6b21\u5143\u30be\u30fc\u30f3\u3078', 'hyperZone'),
-      move('\u8d85GR\u30be\u30fc\u30f3\u3078', 'grZone'),
-      move('\u7279\u6b8a\u30be\u30fc\u30f3\u3078', 'specialZone')
+      move('超次元ゾーンへ', 'hyperZone'),
+      move('GRゾーンへ', 'grZone')
     );
   };
   const addUnderControls = () => {
@@ -2692,8 +2738,6 @@ function getDesktopCardZoneActions(sourceZone, sourceCard) {
       move('\u516c\u958b\u4e2d \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
       move('\u516c\u958b\u4e2d \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
-    sep();
-    addExternalTargets();
   } else if (sourceZone === 'graveyard') {
     actions.push(
       move('\u5893\u5730 \u2192 \u624b\u672d', 'hand'),
@@ -2703,8 +2747,6 @@ function getDesktopCardZoneActions(sourceZone, sourceCard) {
       move('\u5893\u5730 \u2192 \u5c71\u672d\u4e0a', 'deck', 'top'),
       move('\u5893\u5730 \u2192 \u5c71\u672d\u4e0b', 'deck', 'bottom')
     );
-    sep();
-    addExternalTargets();
   } else if (sourceZone === 'deck') {
     actions.push(
       move('\u5c71\u672d\u4e0a \u2192 \u624b\u672d', 'hand'),
@@ -2727,7 +2769,7 @@ function getDesktopCardZoneActions(sourceZone, sourceCard) {
     );
   }
 
-  if (!['hyperZone', 'grZone', 'specialZone', 'deck'].includes(sourceZone)) {
+  if (!['hyperZone', 'grZone', 'specialZone'].includes(sourceZone)) {
     sep();
     addExternalTargets();
   }
@@ -3375,11 +3417,13 @@ function renderDesktopDeckAllModal() {
     return;
   }
 
+  const _deckLen = (engine?.state?.deck?.length) || cards.length;
   listEl.innerHTML = cards.map((card, index) => {
+    const _realIdx = _deckLen - 1 - index;
     const thumb = renderDesktopCardThumb(card, 'dm-deckall-thumb');
     const name = escapeHtml(getDesktopCardDisplayName(card));
     return `
-      <div class="dm-deckall-card" title="${name}">
+      <div class="dm-deckall-card" onclick="openDesktopCardZoneMenu(event, 'deck', ${_realIdx})" oncontextmenu="openDesktopCardZoneMenu(event, 'deck', ${_realIdx})" title="${name}">
         <div class="dm-deckall-no">${index + 1}</div>
         <div class="dm-deckall-art">${thumb}</div>
         <div class="dm-deckall-name">${name}</div>
