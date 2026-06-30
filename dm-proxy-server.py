@@ -3134,10 +3134,13 @@ class Handler(BaseHTTPRequestHandler):
             if p not in ("p1", "p2"):
                 return self._json({"error": "invalid p"}, 400)
             op = "p2" if p == "p1" else "p1"
-            _TRANSIENT = {"hand_reveal_request", "hand_data", "discard_select", "discard_random"}
+            _TRANSIENT = {"hand_reveal_request", "hand_data", "discard_select", "discard_random",
+                          "peek_request", "peek_data", "opp_op"}
             # Allowlist: only relay known fields to prevent arbitrary data passthrough
             _ALLOWED_STATE_FIELDS = {"room", "p", "type", "seq", "turn", "active", "p1", "p2"}
-            _ALLOWED_TRANSIENT_FIELDS = {"room", "p", "type", "seq", "cardName", "random", "cards"}
+            _ALLOWED_TRANSIENT_FIELDS = {"room", "p", "type", "seq", "cardName", "random", "cards",
+                                         "zone", "op", "fromZone", "fromIndex", "toZone", "position",
+                                         "index", "tapped", "faceUp"}
             allowed = _ALLOWED_TRANSIENT_FIELDS if atype in _TRANSIENT else _ALLOWED_STATE_FIELDS
             clean_data = {k: v for k, v in data.items() if k in allowed}
             with room['lock']:

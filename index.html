@@ -6270,7 +6270,7 @@
     .dg-v2:not(.dg-v2-solo) .dg-v2-row.my-battle,
     .dg-v2:not(.dg-v2-solo) .dg-v2-row.opp-battle {
       flex: 1;
-      min-height: 95px;
+      min-height: 130px;
     }
     .dg-v2:not(.dg-v2-solo) .dg-v2-row.my-hand,
     .dg-v2:not(.dg-v2-solo) .dg-v2-row.opp-hand {
@@ -6332,6 +6332,11 @@
     .dg-v2-solo .dg-card-chip.mana {
       width: 68px;
       height: 95px;
+    }
+    /* 対戦モード: 空き枠を活かしてバトルゾーンのカードを大きく */
+    .dg-v2:not(.dg-v2-solo) .dg-card-chip.battle {
+      width: 82px;
+      height: 115px;
     }
 
     .dg-v2-row.opp-mana .dg-v2-cards,
@@ -6555,6 +6560,34 @@
     .dm-break-btn { border: none; border-radius: 7px; padding: 9px 16px; font-size: 0.85rem; font-weight: 700; cursor: pointer; color: #fff; }
     .dm-break-btn.back { background: #8a7f6e; }
     .dm-break-btn.hand { background: #3e875f; }
+
+    /* 相手カードの確認・操作 */
+    .dm-confirm-modal { position: fixed; inset: 0; z-index: 3600; display: none; align-items: center; justify-content: center; }
+    .dm-confirm-modal.open { display: flex; }
+    .dm-confirm-backdrop { position: absolute; inset: 0; background: rgba(30, 20, 12, 0.5); }
+    .dm-confirm-body {
+      position: relative; background: #fbf6ee; border: 1px solid #d8c4a8; border-radius: 14px;
+      box-shadow: 0 16px 40px rgba(50, 32, 16, 0.32); padding: 20px 22px; max-width: 86vw; width: 360px;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .dm-confirm-msg { font-size: 0.95rem; font-weight: 700; color: #5d4228; text-align: center; line-height: 1.5; }
+    .dm-confirm-foot { display: flex; justify-content: center; gap: 14px; }
+    .dm-confirm-btn { border: none; border-radius: 8px; padding: 10px 24px; font-size: 0.9rem; font-weight: 700; cursor: pointer; }
+    .dm-confirm-btn.no { background: #e7ddcf; color: #6b5740; }
+    .dm-confirm-btn.yes { background: #b37a4c; color: #fff; }
+    .dm-confirm-btn.yes:hover { background: #9c6840; }
+
+    .dm-grave-note { font-size: 0.74rem; color: #8a7256; text-align: center; margin: -2px 0 2px; }
+    .dm-opp-reveal-item { cursor: pointer; padding: 0; background: transparent; border: none; }
+    .dm-opp-reveal-img {
+      width: 84px; aspect-ratio: 5/7; object-fit: cover; border-radius: 7px; display: block;
+      border: 1px solid #c9b79c; box-shadow: 0 2px 6px rgba(60,40,20,0.18); transition: transform .1s;
+    }
+    .dm-opp-reveal-item:hover .dm-opp-reveal-img { transform: translateY(-3px); box-shadow: 0 8px 16px rgba(60,40,20,0.26); }
+
+    /* 相手の非公開ゾーン: クリックで確認できることを示す */
+    .dg-opp-clickable { cursor: pointer; }
+    .dg-opp-clickable:hover { outline: 2px dashed rgba(179, 122, 76, 0.6); outline-offset: -2px; }
 
     .dg-v2-pile-name {
       font-size: 0.58rem;

@@ -19,6 +19,10 @@ const DESKTOP_SEARCH_HYDRATE_ERROR_COOLDOWN_MS = 8 * 1000;
 let _desktopZoneMenuState = null;
 let _desktopZoneMenuGlobalBound = false;
 let _vsOppTarget = false;
+// 相手カードの確認・操作（オンライン）: 次に開くゾーンメニューを「相手への遠隔操作(opp_op)」にする
+let _oppRemoteTarget = false;
+// オンラインで相手から取り寄せた公開ゾーンのカード配列（メニューのソースに使う）
+let _desktopOppPeekCards = null;
 
 // ── ゲームログ（対戦画面の右パネルに流す） ──────────────────────────────
 let _desktopGameLog = [];
@@ -1770,7 +1774,8 @@ function renderDesktopGame() {
 
     const visibleLimit = zoneClass === 'grave' ? 10 : 12;
     const visibleCards = zoneClass === 'grave' ? zone.slice(-visibleLimit) : zone.slice(0, visibleLimit);
-    const chips = visibleCards.map((card, i) => renderChip(card, zoneClass, vs ? i : -1, vs ? 'vs-opp' : 'opponent')).join('');
+    // grave は slice(-n) で index がずれるため操作対象にしない（-1）。battle/mana は slice(0,n) なので実 index。
+    const chips = visibleCards.map((card, i) => renderChip(card, zoneClass, zoneClass === 'grave' ? -1 : i, vs ? 'vs-opp' : 'opponent')).join('');
     const rest = zone.length > visibleCards.length
       ? `<div class="dg-more-chip">+${zone.length - visibleCards.length}</div>`
       : '';
@@ -1817,9 +1822,13 @@ function renderDesktopGame() {
       isUnderSource ? 'under-source' : ''
     ].filter(Boolean).join(' ');
 
+    // オンラインの相手 公開カード(バトル/マナ)は左クリックで相手操作メニュー
+    const isOnlineOppBoard = isOpponentCard && !isVsOpp && idx >= 0
+      && (sourceZone === 'battleZone' || sourceZone === 'manaZone');
     const onClickAttr = isOwnBoardCard
       ? `onclick="onDesktopBoardCardClick(event, '${sourceZone}', ${idx})"`
-      : (isVsOppBoardCard ? `onclick="onDesktopVsOppBoardCardClick('${sourceZone}', ${idx})"` : '');
+      : (isVsOppBoardCard ? `onclick="onDesktopVsOppBoardCardClick('${sourceZone}', ${idx})"`
+        : (isOnlineOppBoard ? `onclick="onDesktopOppPublicCard(event, '${sourceZone}', ${idx})"` : ''));
     const _ctxIsTap = (sourceZone === 'battleZone' || sourceZone === 'manaZone');
     const contextMenuAttr = (!isOpponentCard && idx >= 0 && sourceZone)
       ? (isVsOpp
@@ -1899,7 +1908,7 @@ function renderDesktopGame() {
           ${olEff ? `
           <div class="dg-v2-row opp-hand">
             <span class="dg-v2-label">手札<br><b>${Number(opp.hand ?? 0)}</b></span>
-            <div class="dg-v2-cards">
+            <div class="dg-v2-cards dg-opp-clickable" onclick="onDesktopOppRevealZone(event, 'hand')" title="クリックで相手の手札を表向きにして確認・操作">
               ${vs
                 ? (opp.handCards || []).map((c, i) => renderChip(c, 'hand', i, 'vs-opp')).join('')
                 : renderDesktopBackCards(Number(opp.hand ?? 0))}
@@ -1908,13 +1917,10 @@ function renderDesktopGame() {
               <span class="dg-v2-pile-name">超次元</span>
               <span class="dg-v2-pile-cnt">${getZoneCount(opp.hyperZone)}</span>
             </button>
-            <div class="dg-v2-pile-btn ex" style="pointer-events:none">
+            <button type="button" class="dg-v2-pile-btn ex" onclick="onDesktopOppRevealZone(event, 'grZone')" title="クリックで相手のGRを表向きにして確認・操作">
               <span class="dg-v2-pile-name">GR</span>
               <span class="dg-v2-pile-cnt">${getZoneCount(opp.grZone)}</span>
-            </div>
-            <div class="dg-v2-row-side">
-              <button class="dg-handdiscard-btn" onclick="openDesktopHandDiscardMenu()" title="ハンデス">ハンデス</button>
-            </div>
+            </button>
           </div>
 
           <div class="dg-v2-row opp-mana">
@@ -1930,12 +1936,13 @@ function renderDesktopGame() {
 
           <div class="dg-v2-row opp-shield">
             <span class="dg-v2-label">シールド<br><b>${Number(opp.shields ?? 0)}</b></span>
-            <div class="dg-v2-cards">
+            <div class="dg-v2-cards dg-opp-clickable" onclick="onDesktopOppRevealZone(event, 'shields')" title="クリックで相手のシールドを表向きにして確認・操作">
               ${renderDesktopBackCards(Number(opp.shields ?? 0), 'shield')}
             </div>
-            <div class="dg-v2-pile-btn deck" style="pointer-events:none">
+            <button type="button" class="dg-v2-pile-btn deck" onclick="onDesktopOppRevealZone(event, 'deck')" title="クリックで相手の山札を表向きにして確認・操作">
+              <span class="dg-v2-pile-name">山札</span>
               <span class="dg-v2-pile-cnt">${getZoneCount(opp.deck ?? 0)}</span>
-            </div>
+            </button>
           </div>
 
           <div class="dg-v2-row opp-battle">
@@ -2291,28 +2298,36 @@ function onDesktopShieldCardClick(event, idx) {
 }
 
 function setDesktopCardTapped(zone, idx, tapped) {
+  const _ms = _desktopZoneMenuState;
+  const _oppRemote = !!_ms?.oppRemote;
+  const _eng2 = _ms?.targetEngine || engine;
+  const _isOppEng = _eng2 !== engine;
   closeDesktopCardZoneMenu();
 
-  if (window._ol && !canActDesktopOnline()) {
+  if (_oppRemote && window._ol) {
+    sendDesktopOppOp({ op: 'tap', zone, index: Number(idx), tapped: !!tapped }, zone, null);
+    return;
+  }
+  if (window._ol && !_isOppEng && !canActDesktopOnline()) {
     showDesktopToast('相手のターンです', 'warn');
     return;
   }
 
-  const cards = _eng()?.state?.[zone];
+  const cards = _eng2?.state?.[zone];
   const card = Array.isArray(cards) ? cards[idx] : null;
   if (!card) return;
 
   const nextTapped = !!tapped;
   const ok = window.GameController?.setCardTapped
-    ? window.GameController.setCardTapped(_eng(), zone, idx, nextTapped)
-    : ((!!card.tapped === nextTapped) ? true : _eng().tapCard(zone, idx));
+    ? window.GameController.setCardTapped(_eng2, zone, idx, nextTapped)
+    : ((!!card.tapped === nextTapped) ? true : _eng2.tapCard(zone, idx));
   if (!ok) {
     showDesktopToast('タップ状態を変更できませんでした', 'warn');
     return;
   }
 
-  if (window._ol) olSendActionDesktop('state');
-  if (window._vs) _vsRefreshOpponentView();
+  if (window._ol && !_isOppEng) olSendActionDesktop('state');
+  if (window._vs) { _vsRefreshOpponentView(); if (_isOppEng) closeDesktopOppRevealModal(); }
   renderDesktopGame();
 }
 
@@ -2829,33 +2844,46 @@ function closeDesktopCardZoneMenu() {
 }
 
 function moveDesktopCardBetweenZones(fromZone, fromIndex, toZone, position = 'top') {
+  // メニュー状態は close で消えるので先に捕捉（相手操作の対象判定に使う）
+  const _ms = _desktopZoneMenuState;
+  const _oppRemote = !!_ms?.oppRemote;
+  const _eng2 = _ms?.targetEngine || engine;
+  const _isOppEng = _eng2 !== engine;
   closeDesktopCardZoneMenu();
 
-  if (window._ol && !canActDesktopOnline()) {
+  const options = { position: position === 'bottom' ? 'bottom' : 'top' };
+  const toLabelLog = toZone === 'deck'
+    ? `${getDesktopZoneLabel(toZone)}${options.position === 'bottom' ? '下' : '上'}`
+    : getDesktopZoneLabel(toZone);
+
+  // オンライン: 相手カードの操作は相手端末へ送って適用させる
+  if (_oppRemote && window._ol) {
+    sendDesktopOppOp({ op: 'move', fromZone, fromIndex: Number(fromIndex), toZone, position: options.position }, fromZone, toLabelLog);
+    return;
+  }
+
+  // 自分のカードのみターン制限（疑似対戦の相手エンジン操作は常に可）
+  if (window._ol && !_isOppEng && !canActDesktopOnline()) {
     showDesktopToast('相手のターンです', 'warn');
     return;
   }
 
-  const movedName = _eng()?.state?.[fromZone]?.[fromIndex]?.name || 'カード';
-  const options = { position: position === 'bottom' ? 'bottom' : 'top' };
+  const movedName = _eng2?.state?.[fromZone]?.[fromIndex]?.name || 'カード';
   const ok = window.GameController
-    ? window.GameController.moveCardBetweenZones(_eng(), fromZone, fromIndex, toZone, options)
-    : _eng().moveCardBetweenZones(fromZone, fromIndex, toZone, options);
+    ? window.GameController.moveCardBetweenZones(_eng2, fromZone, fromIndex, toZone, options)
+    : _eng2.moveCardBetweenZones(fromZone, fromIndex, toZone, options);
 
   if (!ok) {
     showDesktopToast('カード移動に失敗しました', 'warn');
     return;
   }
 
-  const toLabelLog = toZone === 'deck'
-    ? `${getDesktopZoneLabel(toZone)}${options.position === 'bottom' ? '下' : '上'}`
-    : getDesktopZoneLabel(toZone);
-  appendDesktopGameLog(`${getDesktopCardShortName(movedName, 10)} : ${getDesktopZoneLabel(fromZone)}→${toLabelLog}`);
-  if (window._ol) {
+  appendDesktopGameLog(`${_isOppEng ? '相手 ' : ''}${getDesktopCardShortName(movedName, 10)} : ${getDesktopZoneLabel(fromZone)}→${toLabelLog}`);
+  if (window._ol && !_isOppEng) {
     sendDesktopOnlineActionLog(`【操作ログ】${getDesktopZoneLabel(fromZone)} → ${toLabelLog}`);
     olSendActionDesktop('state');
   }
-  if (window._vs) _vsRefreshOpponentView();
+  if (window._vs) { _vsRefreshOpponentView(); if (_isOppEng) closeDesktopOppRevealModal(); }
   renderDesktopGame();
 }
 
@@ -2868,9 +2896,17 @@ function useDesktopRevealedAsTrigger(index) {
 }
 
 function setDesktopShieldFaceUp(index, faceUp) {
+  const _ms = _desktopZoneMenuState;
+  const _oppRemote = !!_ms?.oppRemote;
+  const _eng2 = _ms?.targetEngine || engine;
+  const _isOppEng = _eng2 !== engine;
   closeDesktopCardZoneMenu();
 
-  if (window._ol && !canActDesktopOnline()) {
+  if (_oppRemote && window._ol) {
+    sendDesktopOppOp({ op: 'flip', index: Number(index), faceUp: !!faceUp }, 'shields', null);
+    return;
+  }
+  if (window._ol && !_isOppEng && !canActDesktopOnline()) {
     showDesktopToast('相手のターンです', 'warn');
     return;
   }
@@ -2879,15 +2915,15 @@ function setDesktopShieldFaceUp(index, faceUp) {
   if (!Number.isInteger(idx)) return;
 
   const ok = window.GameController?.setShieldFaceUp
-    ? window.GameController.setShieldFaceUp(_eng(), idx, !!faceUp)
-    : (typeof _eng().setShieldFaceUp === 'function' ? _eng().setShieldFaceUp(idx, !!faceUp) : false);
+    ? window.GameController.setShieldFaceUp(_eng2, idx, !!faceUp)
+    : (typeof _eng2.setShieldFaceUp === 'function' ? _eng2.setShieldFaceUp(idx, !!faceUp) : false);
   if (!ok) {
     showDesktopToast('シールドの向きを変更できませんでした', 'warn');
     return;
   }
 
-  if (window._ol) olSendActionDesktop('state');
-  if (window._vs) _vsRefreshOpponentView();
+  if (window._ol && !_isOppEng) olSendActionDesktop('state');
+  if (window._vs) { _vsRefreshOpponentView(); if (_isOppEng) closeDesktopOppRevealModal(); }
   renderDesktopGame();
 }
 
@@ -2977,16 +3013,20 @@ function openDesktopCardZoneMenu(event, sourceZone, sourceIndex) {
 
   if (!engine || !engine.state) return;
 
-  if (window._ol && !canActDesktopOnline()) {
+  const oppRemote = _oppRemoteTarget;
+  _oppRemoteTarget = false;
+  const targetEngine = _vsOppTarget ? getVsOppEngine() : null;
+  _vsOppTarget = false;
+  const isOpp = !!targetEngine || oppRemote;
+
+  // 相手カードの操作は相手のターン中でも許可（身内用）。自分のカードは従来どおりターン制限。
+  if (window._ol && !isOpp && !canActDesktopOnline()) {
     showDesktopToast('相手のターンです', 'warn');
     return;
   }
 
-  const targetEngine = _vsOppTarget ? getVsOppEngine() : null;
-  _vsOppTarget = false;
   const activeEng = targetEngine || engine;
-
-  const source = activeEng.state[sourceZone];
+  const source = oppRemote ? (_desktopOppPeekCards || []) : activeEng.state[sourceZone];
   const idx = Number(sourceIndex);
   if (!Array.isArray(source) || !source.length || !Number.isInteger(idx) || !source[idx]) {
     showDesktopToast('移動できるカードがありません', 'warn');
@@ -2994,11 +3034,11 @@ function openDesktopCardZoneMenu(event, sourceZone, sourceIndex) {
   }
 
   const sourceCard = source[idx];
-  const actions = getDesktopCardZoneActions(sourceZone, sourceCard);
+  const actions = isOpp ? getDesktopOppCardActions(sourceZone, sourceCard) : getDesktopCardZoneActions(sourceZone, sourceCard);
   if (!actions.length) return;
 
   const menu = ensureDesktopCardZoneMenu();
-  _desktopZoneMenuState = { sourceZone, sourceIndex: idx, targetEngine };
+  _desktopZoneMenuState = { sourceZone, sourceIndex: idx, targetEngine, oppRemote, oppCards: oppRemote ? source : null };
 
   const actionHtml = actions.map((action) => {
     if (action.kind === 'sep') {
@@ -3099,7 +3139,7 @@ function openDesktopCardZoneMenu(event, sourceZone, sourceIndex) {
   }).join('');
 
   menu.innerHTML = `
-    <div class="dg-zone-menu-head">${escapeHtml(getDesktopZoneLabel(sourceZone))} の操作</div>
+    <div class="dg-zone-menu-head">${isOpp ? '相手の' : ''}${escapeHtml(getDesktopZoneLabel(sourceZone))} の操作</div>
     <div class="dg-zone-menu-list">
       ${actionHtml}
     </div>
@@ -3138,6 +3178,226 @@ function onDesktopVsOppBoardCardClick(zone, idx) {
   _desktopZoneMenuState = { sourceZone: zone, sourceIndex: idx, targetEngine: getVsOppEngine() };
   tapDesktopCard(zone, idx);
   if (_desktopZoneMenuState) _desktopZoneMenuState = saved;
+}
+
+/* ───────────────────────────────────────────────────────────────────────
+   相手カードの確認・操作（身内用 / 不正対策なし・操作はログに流れる）
+   - 疑似対戦(_vs): 相手エンジンが手元にあるので直接操作（targetEngine 機構を流用）
+   - オンライン(_ol): 非公開ゾーンは peek_request で相手から取り寄せ、操作は opp_op を相手へ送って適用させる
+   非公開ゾーン(手札/シールド/山札/GR)＝確認ダイアログ→公開一覧→操作。公開ゾーン(バトル/マナ)＝直接操作。
+   ─────────────────────────────────────────────────────────────────────── */
+let _desktopOppRevealState = null; // { zone, mode:'vs'|'online', cards }
+
+// はい/いいえ 確認ダイアログ
+function _confirmDesktop(message, onYes) {
+  let modal = document.getElementById('desktop-confirm-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'desktop-confirm-modal';
+    modal.className = 'dm-confirm-modal';
+    modal.innerHTML = `
+      <div class="dm-confirm-backdrop"></div>
+      <div class="dm-confirm-body">
+        <div class="dm-confirm-msg" id="desktop-confirm-msg"></div>
+        <div class="dm-confirm-foot">
+          <button class="dm-confirm-btn no" id="desktop-confirm-no">いいえ</button>
+          <button class="dm-confirm-btn yes" id="desktop-confirm-yes">はい</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+  }
+  document.getElementById('desktop-confirm-msg').textContent = message;
+  const close = () => modal.classList.remove('open');
+  modal.querySelector('.dm-confirm-backdrop').onclick = close;
+  document.getElementById('desktop-confirm-no').onclick = close;
+  document.getElementById('desktop-confirm-yes').onclick = () => { close(); onYes(); };
+  modal.classList.add('open');
+}
+
+// 非公開ゾーン（手札/シールド/山札/GR）を触ったとき → 確認 → 公開
+function onDesktopOppRevealZone(event, zone) {
+  if (event) { event.preventDefault(); event.stopPropagation(); }
+  const reveal = () => {
+    if (window._vs) {
+      const cards = (getVsOppEngine()?.state?.[zone]) || [];
+      if (!cards.length) { showDesktopToast('相手のカードがありません', 'warn'); return; }
+      openDesktopOppRevealModal(zone);
+    } else if (window._ol) {
+      _desktopOppRevealState = { zone, mode: 'online', cards: [] };
+      sendHandActionDesktop('peek_request', { zone });
+      sendDesktopOnlineActionLog(`【システム】相手があなたの${getDesktopZoneLabel(zone)}を表向きで確認中`);
+      appendDesktopGameLog(`相手の${getDesktopZoneLabel(zone)}を確認`);
+      showDesktopToast('相手のカードを取得中...', 'info', 1500);
+    }
+  };
+  _confirmDesktop(`相手の${getDesktopZoneLabel(zone)}を表向きにして確認しますか？`, reveal);
+}
+
+// 公開ゾーン（相手のバトル/マナ）のカードを触ったとき → 直接 操作メニュー
+function onDesktopOppPublicCard(event, zone, idx) {
+  if (window._vs) { openDesktopVsOppZoneMenu(event, zone, idx); return; }
+  if (window._ol) {
+    const cards = window._olOpponent?.[zone];
+    if (!Array.isArray(cards) || !cards[Number(idx)]) { showDesktopToast('カードが見つかりません', 'warn'); return; }
+    openDesktopOppRemoteZoneMenu(event, zone, Number(idx), cards);
+  }
+}
+
+function closeDesktopOppRevealModal() {
+  _desktopOppRevealState = null;
+  const modal = document.getElementById('desktop-opp-reveal-modal');
+  if (modal) modal.classList.remove('open');
+}
+
+function openDesktopOppRevealModal(zone, cardsOverride) {
+  const mode = window._vs ? 'vs' : 'online';
+  let cards;
+  if (mode === 'vs') {
+    cards = (getVsOppEngine()?.state?.[zone]) || [];
+  } else {
+    cards = Array.isArray(cardsOverride) ? cardsOverride : [];
+    _desktopOppPeekCards = cards;
+  }
+  _desktopOppRevealState = { zone, mode, cards };
+  if (!cards.length) { showDesktopToast('相手のカードがありません', 'warn'); closeDesktopOppRevealModal(); return; }
+
+  let modal = document.getElementById('desktop-opp-reveal-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'desktop-opp-reveal-modal';
+    modal.className = 'dm-grave-modal';
+    modal.innerHTML = `
+      <div class="dm-grave-backdrop" onclick="closeDesktopOppRevealModal()"></div>
+      <div class="dm-grave-body">
+        <div class="dm-grave-head">
+          <div class="dm-grave-title" id="desktop-opp-reveal-title"></div>
+          <button class="dm-grave-close" onclick="closeDesktopOppRevealModal()">閉じる</button>
+        </div>
+        <div class="dm-grave-note">カードをクリックで操作（相手領域・操作はログに残ります）</div>
+        <div id="desktop-opp-reveal-list" class="dm-grave-list"></div>
+      </div>`;
+    document.body.appendChild(modal);
+  }
+  const titleEl = document.getElementById('desktop-opp-reveal-title');
+  if (titleEl) titleEl.textContent = `相手の${getDesktopZoneLabel(zone)} (${cards.length})`;
+  const list = document.getElementById('desktop-opp-reveal-list');
+  if (list) {
+    list.innerHTML = cards.map((card, i) => {
+      const imageUrl = getDesktopCardImageUrl(card);
+      const name = escapeHtml(card?.name || 'カード');
+      return `
+        <div class="dm-grave-item dm-opp-reveal-item" onclick="onDesktopOppRevealCardClick(event, ${i})" title="${name}">
+          ${imageUrl
+            ? `<img src="${escapeHtml(imageUrl)}" alt="${name}" class="dm-opp-reveal-img" loading="lazy" decoding="async" onerror="handleDesktopCardImageError(this)">`
+            : `<div class="dm-grave-item-main"><div class="dm-grave-item-name">${name}</div></div>`}
+        </div>`;
+    }).join('');
+  }
+  modal.classList.add('open');
+}
+
+function onDesktopOppRevealCardClick(event, idx) {
+  const st = _desktopOppRevealState;
+  if (!st) return;
+  if (st.mode === 'vs') {
+    closeDesktopOppRevealModal();
+    openDesktopVsOppZoneMenu(event, st.zone, Number(idx));
+  } else {
+    openDesktopOppRemoteZoneMenu(event, st.zone, Number(idx), st.cards);
+  }
+}
+
+// オンライン: 相手カード用の操作メニューを開く（dispatch は opp_op 送信になる）
+function openDesktopOppRemoteZoneMenu(event, zone, idx, cards) {
+  _oppRemoteTarget = true;
+  _desktopOppPeekCards = Array.isArray(cards) ? cards : [];
+  openDesktopCardZoneMenu(event, zone, Number(idx));
+}
+
+// 相手カード用の操作リスト（移動＋タップ＋シールド表裏のみ。break/deckAll/重ねは対象外）
+function getDesktopOppCardActions(sourceZone, sourceCard) {
+  const actions = [];
+  const move = (label, toZone, position = 'top', red = false) => ({ kind: 'move', label, toZone, position, red });
+  const zones = [
+    ['battleZone', 'バトルゾーン'], ['manaZone', 'マナゾーン'], ['hand', '手札'],
+    ['graveyard', '墓地'], ['shields', 'シールド'], ['hyperZone', '超次元'], ['grZone', 'GR']
+  ];
+  if (sourceZone === 'shields') {
+    actions.push({ kind: 'flip', label: sourceCard?.faceUp ? '裏向きに戻す' : '表向きにする', faceUp: !sourceCard?.faceUp });
+  }
+  if (sourceZone === 'battleZone' || sourceZone === 'manaZone') {
+    actions.push({ kind: 'tap', label: sourceCard?.tapped ? 'アンタップする' : 'タップする', tapped: !sourceCard?.tapped });
+  }
+  const label = getDesktopZoneLabel(sourceZone);
+  zones.forEach(([z, zl]) => {
+    if (z === sourceZone) return;
+    actions.push(move(`${label} → ${zl}`, z, 'top', z === 'graveyard'));
+  });
+  actions.push(move(`${label} → 山札上`, 'deck', 'top'));
+  actions.push(move(`${label} → 山札下`, 'deck', 'bottom'));
+  return actions;
+}
+
+// オンライン: 相手への遠隔操作を送る
+function sendDesktopOppOp(payload, fromZone, toLabelLog) {
+  if (!window._ol) return;
+  sendHandActionDesktop('opp_op', payload);
+  const label = toLabelLog
+    ? `${getDesktopZoneLabel(fromZone)}→${toLabelLog}`
+    : (payload.op === 'tap' ? 'タップ切替' : payload.op === 'flip' ? '表裏切替' : '操作');
+  appendDesktopGameLog(`相手の${getDesktopZoneLabel(fromZone)}を操作: ${label}`);
+  closeDesktopOppRevealModal();
+  showDesktopToast('相手に操作を送信しました', 'info', 1200);
+}
+
+// 送信用にカードを最小シリアライズ
+function _desktopPeekCardData(c) {
+  return {
+    name: c?.name || '',
+    civ: String(c?.civilization || c?.civ || ''),
+    cost: c?.cost,
+    power: c?.power || '',
+    tapped: !!c?.tapped,
+    faceUp: c?.faceUp !== false,
+    imageUrl: (typeof getDesktopCardImageUrl === 'function' ? getDesktopCardImageUrl(c) : '') || ''
+  };
+}
+
+// オンライン: 相手から届いた opp_op を自分のエンジンへ適用（ターン制限は無視＝身内用）し、結果を再ブロードキャスト
+function applyDesktopIncomingOppOp(data) {
+  if (!engine || !engine.state) return;
+  const op = String(data?.op || '');
+  let changed = false;
+  if (op === 'move') {
+    const fromZone = String(data.fromZone || '');
+    const toZone = String(data.toZone || '');
+    const fromIndex = Number(data.fromIndex);
+    const position = data.position === 'bottom' ? 'bottom' : 'top';
+    const ok = window.GameController
+      ? window.GameController.moveCardBetweenZones(engine, fromZone, fromIndex, toZone, { position })
+      : engine.moveCardBetweenZones(fromZone, fromIndex, toZone, { position });
+    changed = !!ok;
+    if (ok) appendDesktopGameLog(`相手があなたの${getDesktopZoneLabel(fromZone)}→${getDesktopZoneLabel(toZone)}を操作`);
+  } else if (op === 'tap') {
+    const zone = String(data.zone || '');
+    const index = Number(data.index);
+    const ok = window.GameController?.setCardTapped
+      ? window.GameController.setCardTapped(engine, zone, index, !!data.tapped)
+      : (engine.tapCard ? engine.tapCard(zone, index) : false);
+    changed = !!ok;
+    if (ok) appendDesktopGameLog(`相手があなたの${getDesktopZoneLabel(zone)}を${data.tapped ? 'タップ' : 'アンタップ'}`);
+  } else if (op === 'flip') {
+    const index = Number(data.index);
+    const ok = window.GameController?.setShieldFaceUp
+      ? window.GameController.setShieldFaceUp(engine, index, !!data.faceUp)
+      : (engine.setShieldFaceUp ? engine.setShieldFaceUp(index, !!data.faceUp) : false);
+    changed = !!ok;
+    if (ok) appendDesktopGameLog(`相手があなたのシールドを${data.faceUp ? '表向き' : '裏向き'}に`);
+  }
+  if (changed) {
+    olSendActionDesktop('state');
+    renderDesktopGame();
+  }
 }
 
 function playDesktopCard(idx, zone) {
@@ -5298,6 +5558,35 @@ function olStartEventListenerDesktop() {
   es.addEventListener('discard_random', (e) => {
     if (!window._ol || window._ol.room !== room) return;
     openDesktopDiscardConfirmModal('', true);
+  });
+
+  // 相手が自分の非公開ゾーンを覗きにきた → そのゾーンのカードを返す
+  es.addEventListener('peek_request', (e) => {
+    if (!window._ol || window._ol.room !== room) return;
+    let data; try { data = JSON.parse(e.data); } catch { return; }
+    const zone = String(data.zone || '');
+    if (!['hand', 'shields', 'deck', 'grZone', 'battleZone', 'manaZone'].includes(zone)) return;
+    const cards = (engine?.state?.[zone] || []).map((c) => _desktopPeekCardData(c));
+    sendHandActionDesktop('peek_data', { zone, cards });
+    appendDesktopGameLog(`相手があなたの${getDesktopZoneLabel(zone)}を確認中`);
+    showDesktopToast(`相手があなたの${getDesktopZoneLabel(zone)}を確認しています`, 'info', 1800);
+  });
+
+  // 覗いた相手のカードが届いた → 公開モーダルを開く
+  es.addEventListener('peek_data', (e) => {
+    if (!window._ol || window._ol.room !== room) return;
+    let data; try { data = JSON.parse(e.data); } catch { return; }
+    const zone = String(data.zone || '');
+    const cards = Array.isArray(data.cards) ? data.cards : [];
+    if (_desktopOppRevealState && _desktopOppRevealState.zone && _desktopOppRevealState.zone !== zone) return;
+    openDesktopOppRevealModal(zone, cards);
+  });
+
+  // 相手が自分のカードを操作してきた → 自分のエンジンへ適用して再ブロードキャスト
+  es.addEventListener('opp_op', (e) => {
+    if (!window._ol || window._ol.room !== room) return;
+    let data; try { data = JSON.parse(e.data); } catch { return; }
+    applyDesktopIncomingOppOp(data);
   });
 
   es.onerror = () => {
