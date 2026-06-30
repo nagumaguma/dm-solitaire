@@ -10,9 +10,14 @@ __pycache__/
 test-results/
 playwright-report/
 
-# local databases — DATA, not code. Deploy ships the local copy via `railway up`,
-# so these don't belong in git (dm_user.db = user PIN hashes/decks; dm_cache.db ~86MB).
-dm_cache.db
+# local databases — DATA, not code.
+#
+# dm_cache.db (~82MB baked card cache) is deliberately NOT ignored here.
+# `railway up` enumerates files via git (it honors .gitignore AND .git/info/exclude),
+# so ANY git-ignore on dm_cache.db excludes it from the deploy — and prod then boots
+# an EMPTY cache (0 cards, /detail 404, no card text/images). It therefore stays an
+# untracked file so `railway up` ships it. NEVER `git add` it (82MB) — use explicit
+# paths when committing, not `git add -A`/`git add .`.
 dm_user.db
 *.db-wal
 *.db-shm

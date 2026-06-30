@@ -3403,9 +3403,18 @@ class Handler(BaseHTTPRequestHandler):
         def p(key, default=""):
             return qs.get(key, [default])[0]
 
-        # /ping
+        # /ping — health + cache sanity. `cards` surfaces an empty/misshipped cache
+        # immediately (a gitignored dm_cache.db once shipped 0 cards to production).
         if parsed.path == "/ping":
-            self._json({"status": "ok", "port": PORT, "source": "dmwiki", "build": APP_BUILD, "baseUrl": _current_base_url()})
+            _cards = -1
+            try:
+                _c = sqlite3.connect(CACHE_DB)
+                _cards = _c.execute("SELECT COUNT(*) FROM card_index").fetchone()[0]
+                _c.close()
+            except Exception:
+                _cards = -1
+            self._json({"status": "ok", "port": PORT, "source": "dmwiki", "build": APP_BUILD,
+                        "baseUrl": _current_base_url(), "cards": _cards})
 
         # /test/rate-limit-status (for debugging)
         elif parsed.path == "/test/rate-limit-status":
