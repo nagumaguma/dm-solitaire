@@ -1960,6 +1960,65 @@ def _official_fetch_detail_title(card_id: str) -> str:
     return title
 
 
+# Effect-text cells in the official detail body contain at least one of these
+# game tokens; race / illustrator / pack cells do not. Used to pick the rules-text
+# <td>s out of the card data table (and to skip flavor text, which has none).
+_OFFICIAL_TEXT_KW = re.compile(
+    "ブレイカー|トリガー|ブロッカー|アタッカー|ファイター|メクレイド|クリーチャー|シールド|"
+    "マナ|山札|手札|墓地|バトル|タップ|アンタップ|破壊|召喚|進化|パワー|コスト|ターン|攻撃|"
+    "ブロック|呪文|唱え|ドロー|引く|選ぶ|選び|選ん|戻す|置く|出た時|出たとき|できる|してもよい|"
+    "してよい|加える|革命|侵略|GR|S・|W・|T・|Q・"
+)
+_OFFICIAL_RACE_ONLY = re.compile(r"[ァ-ヴー・/／\s]+")
+
+
+def _extract_official_card_text(html_text: str) -> str:
+    """Pull the full rules text out of an official card detail page body.
+
+    Reads the data-table <td> cells, keeping the ones that look like effect text.
+    Twinpacts (上面/下面) expose one <td> per face, so both faces are captured and
+    joined with a separator. Race / illustrator / flavor cells are skipped.
+    """
+    if not html_text:
+        return ""
+    idx = html_text.find("class='cardDetail'")
+    body = html_text[idx:] if idx != -1 else html_text
+    parts: list[str] = []
+    for td in re.findall(r"<td[^>]*>(.*?)</td>", body, re.DOTALL):
+        t = re.sub(r"<br\s*/?>", "\n", td, flags=re.I)
+        t = re.sub(r"<[^>]+>", "", t)
+        t = re.sub(r"\{[A-Za-z]\}", "", t)        # icon markers e.g. {B}
+        t = _html.unescape(t)
+        t = re.sub(r"[ \t　]+", " ", t)
+        t = re.sub(r"\n[ \t]+", "\n", t)
+        t = re.sub(r"\n{2,}", "\n", t).strip()
+        if len(t) < 4:
+            continue
+        if _OFFICIAL_RACE_ONLY.fullmatch(t):       # race cell
+            continue
+        if not _OFFICIAL_TEXT_KW.search(t):        # illustrator / pack / flavor
+            continue
+        if t not in parts:
+            parts.append(t)
+    return "\n――\n".join(parts)
+
+
+def _official_fetch_detail_text(card_id: str) -> str:
+    """Fetch an official detail page (full body) and return its extracted rules text."""
+    raw = str(card_id or "").strip()
+    if not raw:
+        return ""
+    safe_id = urllib.parse.quote(raw, safe="")
+    url = f"{OFFICIAL_BASE}/card/detail/?id={safe_id}"
+    req = urllib.request.Request(url, headers=OFFICIAL_DETAIL_HEADERS)
+    try:
+        with urllib.request.urlopen(req, timeout=12) as r:
+            html_text = r.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+    return _extract_official_card_text(html_text)
+
+
 _official_img_url_cache: dict[str, str] = {}
 
 

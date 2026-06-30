@@ -40,6 +40,7 @@ ui-desktop.js       PC版UI（デッキ編集・対局・オンライン）
 ui-mobile.js        SP版UI（同上のモバイル版）
 dm-proxy-server.py  バックエンド（BaseHTTPRequestHandler / SQLite）
 crawl_official.py   公式カードDBクロール（カード名・画像・イラスト違いを取得）
+enrich_text.py      公式詳細ページからカード効果テキストを補完（ツインパクトの上下面対応）
 recover_missing.py  取りこぼし印刷の回収
 _archive/           旧版HTML（参照用）
 ```
@@ -63,10 +64,13 @@ _archive/           旧版HTML（参照用）
 $env:SSL_CERT_FILE = (python -c "import certifi; print(certifi.where())")
 
 python crawl_official.py     # 増分（初回のみ全件、約1.5時間）。--force で全再構築
+python enrich_text.py        # 効果テキストを未取得分だけ補完（増分は数分）
 railway up                   # 焼き込んだ dm_cache.db ごとデプロイ
 ```
 
 `crawl_official.py` は公式の全印刷を列挙し、未取得分だけ取得します。公式側が中身を持たない空枠は `crawl_skip` テーブルで自動スキップします。取りこぼしが出た場合は `recover_missing.py` で回収できます。
+
+`enrich_text.py` はクロールが拾わない**カード効果テキスト**を公式詳細ページから補完します（`card_index.rules_text`）。ツインパクトは上面（クリーチャー側）と下面（呪文側）が詳細ページ本文に分かれているため、両面のテキストを取得して結合します。処理済みカードは `text_enriched` テーブルで記録し、再実行時は新規分のみ取得します（バニラ＝効果なしのカードは空のまま）。
 
 ## ローカル開発
 
