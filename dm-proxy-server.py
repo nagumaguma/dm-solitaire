@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
 PORT     = int(os.environ.get("PORT", 8765))
-APP_BUILD = os.environ.get("APP_BUILD", "2026-03-19-imgfix")
+APP_BUILD = os.environ.get("APP_BUILD", "2026-06-30-cardtext")
 WIKI_API = "https://duelmasters.fandom.com/api.php"
 WIKI_HEADERS = {"User-Agent": "DMSolitaireTool/1.0 (local proxy)"}
 
