@@ -26,11 +26,17 @@ let _desktopOppPeekCards = null;
 
 // ── ゲームログ（対戦画面の右パネルに流す） ──────────────────────────────
 let _desktopGameLog = [];
+// ログ先頭に付ける操作プレイヤー（P1/P2）。一人回しは付けない。
+function _desktopLogPlayer() {
+  if (window._vs?.activePlayer) return window._vs.activePlayer === 'p1' ? 'P1' : 'P2';
+  if (window._ol?.p) return window._ol.p === 'p1' ? 'P1' : 'P2';
+  return '';
+}
 function appendDesktopGameLog(msg) {
-  const turn = (typeof engine !== 'undefined' && engine?.state?.turn) ?? '?';
   const text = String(msg || '').trim();
   if (!text) return;
-  _desktopGameLog.push(`T${turn} ${text}`);
+  const who = _desktopLogPlayer();
+  _desktopGameLog.push(`${who ? who + ' ' : ''}${text}`);
   if (_desktopGameLog.length > 60) _desktopGameLog.shift();
 }
 function clearDesktopGameLog() {
@@ -2183,7 +2189,7 @@ function breakDesktopShieldToModal(shieldIndex) {
   if (!res || !res.ok) { showDesktopToast('シールドをブレイクできません', 'warn'); return; }
   const rz = engine.state.revealedZone || [];
   const card = res.card || rz[rz.length - 1];
-  if (card) card._breaking = true;
+  if (card) { card._breaking = true; card._originZone = 'shields'; }
   _desktopBreakOpen = true;
   _desktopSelectedShieldIdx = null;
   appendDesktopGameLog('シールドをブレイク');
@@ -2868,7 +2874,14 @@ function moveDesktopCardBetweenZones(fromZone, fromIndex, toZone, position = 'to
     return;
   }
 
-  const movedName = _eng2?.state?.[fromZone]?.[fromIndex]?.name || 'カード';
+  const movedCard = _eng2?.state?.[fromZone]?.[Number(fromIndex)];
+  const movedName = movedCard?.name || 'カード';
+  // 公開ゾーンに入るカードには「元いたゾーン」を覚えさせ、出る時のログ表示に使う
+  // （例: ブレイクで シールド→公開ゾーン になったカードは、戻す/手札に入れる時に「シールド」と出す）
+  if (toZone === 'revealedZone' && movedCard) movedCard._originZone = fromZone;
+  const fromLabel = (fromZone === 'revealedZone' && movedCard?._originZone)
+    ? getDesktopZoneLabel(movedCard._originZone)
+    : getDesktopZoneLabel(fromZone);
   const ok = window.GameController
     ? window.GameController.moveCardBetweenZones(_eng2, fromZone, fromIndex, toZone, options)
     : _eng2.moveCardBetweenZones(fromZone, fromIndex, toZone, options);
@@ -2878,9 +2891,12 @@ function moveDesktopCardBetweenZones(fromZone, fromIndex, toZone, position = 'to
     return;
   }
 
-  appendDesktopGameLog(`${_isOppEng ? '相手 ' : ''}${getDesktopCardShortName(movedName, 10)} : ${getDesktopZoneLabel(fromZone)}→${toLabelLog}`);
+  // 公開ゾーンから出たら元ゾーン情報は用済み
+  if (fromZone === 'revealedZone' && movedCard) delete movedCard._originZone;
+
+  appendDesktopGameLog(`${_isOppEng ? '相手 ' : ''}${movedName} : ${fromLabel}→${toLabelLog}`);
   if (window._ol && !_isOppEng) {
-    sendDesktopOnlineActionLog(`【操作ログ】${getDesktopZoneLabel(fromZone)} → ${toLabelLog}`);
+    sendDesktopOnlineActionLog(`【操作ログ】${fromLabel} → ${toLabelLog}`);
     olSendActionDesktop('state');
   }
   if (window._vs) { _vsRefreshOpponentView(); if (_isOppEng) closeDesktopOppRevealModal(); }
@@ -3413,7 +3429,7 @@ function playDesktopCard(idx, zone) {
     ? window.GameController.playCardByHandIndex(engine, idx, zone)
     : engine.playCard(engine.state.hand[idx], zone);
   if (!ok) return;
-  appendDesktopGameLog(`${getDesktopCardShortName(playedName, 10)} を${getDesktopZoneLabel(zone)}へ`);
+  appendDesktopGameLog(`${playedName} を${getDesktopZoneLabel(zone)}へ`);
   if (window._ol) {
     sendDesktopOnlineActionLog(`【操作ログ】${getDesktopZoneLabel('hand')} → ${getDesktopZoneLabel(zone)}`);
     olSendActionDesktop('state');
