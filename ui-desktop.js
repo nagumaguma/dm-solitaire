@@ -2876,6 +2876,12 @@ function moveDesktopCardBetweenZones(fromZone, fromIndex, toZone, position = 'to
 
   const movedCard = _eng2?.state?.[fromZone]?.[Number(fromIndex)];
   const movedName = movedCard?.name || 'カード';
+  // オンライン限定: 非公開ゾーン→非公開ゾーン の移動は素性を伏せる（例: 山札→手札、手札→シールド）。
+  // 判定は表示ラベル(元ゾーン参照)ではなく実際の from/to ゾーンで行う（公開ゾーンからの戻しは名前を出す）。
+  const NON_PUBLIC_ZONES = ['hand', 'deck', 'shields', 'grZone'];
+  const hideMovedName = !!window._ol && !_isOppEng
+    && NON_PUBLIC_ZONES.includes(fromZone) && NON_PUBLIC_ZONES.includes(toZone);
+  const logName = hideMovedName ? '非公開のカード' : movedName;
   // 公開ゾーンに入るカードには「元いたゾーン」を覚えさせ、出る時のログ表示に使う
   // （例: ブレイクで シールド→公開ゾーン になったカードは、戻す/手札に入れる時に「シールド」と出す）
   if (toZone === 'revealedZone' && movedCard) movedCard._originZone = fromZone;
@@ -2894,7 +2900,7 @@ function moveDesktopCardBetweenZones(fromZone, fromIndex, toZone, position = 'to
   // 公開ゾーンから出たら元ゾーン情報は用済み
   if (fromZone === 'revealedZone' && movedCard) delete movedCard._originZone;
 
-  appendDesktopGameLog(`${_isOppEng ? '相手 ' : ''}${movedName} : ${fromLabel}→${toLabelLog}`);
+  appendDesktopGameLog(`${_isOppEng ? '相手 ' : ''}${logName} : ${fromLabel}→${toLabelLog}`);
   if (window._ol && !_isOppEng) {
     sendDesktopOnlineActionLog(`【操作ログ】${fromLabel} → ${toLabelLog}`);
     olSendActionDesktop('state');
