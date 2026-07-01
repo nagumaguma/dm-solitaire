@@ -32,12 +32,18 @@ function _desktopLogPlayer() {
   if (window._ol?.p) return window._ol.p === 'p1' ? 'P1' : 'P2';
   return '';
 }
-function appendDesktopGameLog(msg) {
+// msg は述語（「〜しました」等）。actor(P1/P2)を主語として「P1が 〜」の形にする。
+// opts.noActor=true で主語なし（システム表示・相手主語を含む文など）。
+function appendDesktopGameLog(msg, opts) {
   const text = String(msg || '').trim();
   if (!text) return;
-  const who = _desktopLogPlayer();
-  _desktopGameLog.push(`${who ? who + ' ' : ''}${text}`);
+  const who = (opts && opts.noActor) ? '' : _desktopLogPlayer();
+  _desktopGameLog.push(`${who ? who + 'が ' : ''}${text}`);
   if (_desktopGameLog.length > 60) _desktopGameLog.shift();
+}
+// 非公開ゾーンを見た時のログ「P1が 〇〇の非公開のカードを確認しています」（〇〇=元ゾーン名）
+function logDesktopPeek(zoneLabel) {
+  appendDesktopGameLog(`${zoneLabel}の非公開のカードを確認しています`);
 }
 function clearDesktopGameLog() {
   _desktopGameLog = [];
@@ -48,6 +54,8 @@ let _desktopExModalZone = null;
 function openDesktopExPileModal(zoneKey) {
   if (!['hyperZone', 'grZone', 'specialZone'].includes(zoneKey)) return;
   _desktopExModalZone = zoneKey;
+  // GRは非公開。中身を見たらログに残す（超次元は公開なので不要）
+  if (zoneKey === 'grZone') logDesktopPeek('GR');
   renderDesktopExPileModal();
 }
 function closeDesktopExPileModal() {
@@ -2286,7 +2294,8 @@ function breakDesktopShieldToModal(shieldIndex) {
   if (card) { card._breaking = true; card._originZone = 'shields'; }
   _desktopBreakOpen = true;
   _desktopSelectedShieldIdx = null;
-  appendDesktopGameLog('シールドをブレイク');
+  appendDesktopGameLog('シールドをブレイクしました');
+  logDesktopPeek('シールド');
   if (window._ol) {
     sendDesktopOnlineActionLog('【システム】相手がシールドをブレイク中');
     olSendActionDesktop('state');
@@ -2735,7 +2744,7 @@ function breakDesktopShield() {
   }
 
   _desktopSelectedShieldIdx = null;
-  appendDesktopGameLog('シールドをブレイク');
+  appendDesktopGameLog('シールドをブレイクしました');
   showDesktopToast('公開中に移動しました。手札に加えるか、トリガー使用を選んでください', 'info', 2800);
   if (window._ol) olSendActionDesktop('state');
   renderDesktopGame();
@@ -2994,7 +3003,7 @@ function moveDesktopCardBetweenZones(fromZone, fromIndex, toZone, position = 'to
   // 公開ゾーンから出たら元ゾーン情報は用済み
   if (fromZone === 'revealedZone' && movedCard) delete movedCard._originZone;
 
-  appendDesktopGameLog(`${_isOppEng ? '相手 ' : ''}${logName} : ${fromLabel}→${toLabelLog}`);
+  appendDesktopGameLog(`${_isOppEng ? '相手の' : ''}${logName}を${fromLabel}→${toLabelLog}に移動させました`);
   if (window._ol && !_isOppEng) {
     sendDesktopOnlineActionLog(`【操作ログ】${fromLabel} → ${toLabelLog}`);
     olSendActionDesktop('state');
@@ -3057,7 +3066,7 @@ function untapAllDesktopMana() {
     return;
   }
 
-  appendDesktopGameLog('マナを全アンタップ');
+  appendDesktopGameLog('マナを全てアンタップしました');
   if (window._ol) olSendActionDesktop('state');
   renderDesktopGame();
 }
@@ -3342,7 +3351,7 @@ function onDesktopOppRevealZone(event, zone) {
       _desktopOppRevealState = { zone, mode: 'online', cards: [] };
       sendHandActionDesktop('peek_request', { zone });
       sendDesktopOnlineActionLog(`【システム】相手があなたの${getDesktopZoneLabel(zone)}を表向きで確認中`);
-      appendDesktopGameLog(`相手の${getDesktopZoneLabel(zone)}を確認`);
+      logDesktopPeek(`相手の${getDesktopZoneLabel(zone)}`);
       showDesktopToast('相手のカードを取得中...', 'info', 1500);
     }
   };
@@ -3461,7 +3470,7 @@ function sendDesktopOppOp(payload, fromZone, toLabelLog) {
   const label = toLabelLog
     ? `${getDesktopZoneLabel(fromZone)}→${toLabelLog}`
     : (payload.op === 'tap' ? 'タップ切替' : payload.op === 'flip' ? '表裏切替' : '操作');
-  appendDesktopGameLog(`相手の${getDesktopZoneLabel(fromZone)}を操作: ${label}`);
+  appendDesktopGameLog(`相手の${getDesktopZoneLabel(fromZone)}を操作しました（${label}）`);
   closeDesktopOppRevealModal();
   showDesktopToast('相手に操作を送信しました', 'info', 1200);
 }
@@ -3493,7 +3502,7 @@ function applyDesktopIncomingOppOp(data) {
       ? window.GameController.moveCardBetweenZones(engine, fromZone, fromIndex, toZone, { position })
       : engine.moveCardBetweenZones(fromZone, fromIndex, toZone, { position });
     changed = !!ok;
-    if (ok) appendDesktopGameLog(`相手があなたの${getDesktopZoneLabel(fromZone)}→${getDesktopZoneLabel(toZone)}を操作`);
+    if (ok) appendDesktopGameLog(`相手があなたの${getDesktopZoneLabel(fromZone)}→${getDesktopZoneLabel(toZone)}を操作しました`, { noActor: true });
   } else if (op === 'tap') {
     const zone = String(data.zone || '');
     const index = Number(data.index);
@@ -3501,14 +3510,14 @@ function applyDesktopIncomingOppOp(data) {
       ? window.GameController.setCardTapped(engine, zone, index, !!data.tapped)
       : (engine.tapCard ? engine.tapCard(zone, index) : false);
     changed = !!ok;
-    if (ok) appendDesktopGameLog(`相手があなたの${getDesktopZoneLabel(zone)}を${data.tapped ? 'タップ' : 'アンタップ'}`);
+    if (ok) appendDesktopGameLog(`相手があなたの${getDesktopZoneLabel(zone)}を${data.tapped ? 'タップ' : 'アンタップ'}しました`, { noActor: true });
   } else if (op === 'flip') {
     const index = Number(data.index);
     const ok = window.GameController?.setShieldFaceUp
       ? window.GameController.setShieldFaceUp(engine, index, !!data.faceUp)
       : (engine.setShieldFaceUp ? engine.setShieldFaceUp(index, !!data.faceUp) : false);
     changed = !!ok;
-    if (ok) appendDesktopGameLog(`相手があなたのシールドを${data.faceUp ? '表向き' : '裏向き'}に`);
+    if (ok) appendDesktopGameLog(`相手があなたのシールドを${data.faceUp ? '表向き' : '裏向き'}にしました`, { noActor: true });
   }
   if (changed) {
     olSendActionDesktop('state');
@@ -3529,7 +3538,7 @@ function playDesktopCard(idx, zone) {
     ? window.GameController.playCardByHandIndex(engine, idx, zone)
     : engine.playCard(engine.state.hand[idx], zone);
   if (!ok) return;
-  appendDesktopGameLog(`『${playedName}』 を${getDesktopZoneLabel(zone)}へ`);
+  appendDesktopGameLog(`『${playedName}』を${getDesktopZoneLabel(zone)}に出しました`);
   if (window._ol) {
     sendDesktopOnlineActionLog(`【操作ログ】${getDesktopZoneLabel('hand')} → ${getDesktopZoneLabel(zone)}`);
     olSendActionDesktop('state');
@@ -3591,7 +3600,7 @@ function drawDesktopCard() {
     : engine.drawCard();
   if (!ok) return;
   _desktopNeedDrawGuide = false;
-  appendDesktopGameLog('ドロー');
+  appendDesktopGameLog('カードを引きました');
   if (window._ol) {
     sendDesktopOnlineActionLog('【操作ログ】ドローしました');
     olSendActionDesktop('state');
@@ -3615,7 +3624,7 @@ function turnDesktopEnd() {
   if (!ok) return;
   _desktopNeedDrawGuide = !window._ol;
   _desktopSelectedShieldIdx = null;
-  appendDesktopGameLog('— ターン終了 —');
+  appendDesktopGameLog('— ターン終了 —', { noActor: true });
   if (window._ol) {
     sendDesktopOnlineActionLog('【システム】ターンを終了しました');
     olSendActionDesktop('turn_end');
@@ -3769,6 +3778,7 @@ function openDesktopDeckAllModal() {
   modal.classList.add('open');
   renderDesktopDeckAllModal();
 
+  logDesktopPeek('山札');
   if (window._ol) {
     sendDesktopOnlineActionLog(`【操作ログ】山札を全部確認しました（${deck.length}枚）`);
   }
@@ -5688,7 +5698,7 @@ function olStartEventListenerDesktop() {
     if (!['hand', 'shields', 'deck', 'grZone', 'battleZone', 'manaZone'].includes(zone)) return;
     const cards = (engine?.state?.[zone] || []).map((c) => _desktopPeekCardData(c));
     sendHandActionDesktop('peek_data', { zone, cards });
-    appendDesktopGameLog(`相手があなたの${getDesktopZoneLabel(zone)}を確認中`);
+    appendDesktopGameLog(`相手があなたの${getDesktopZoneLabel(zone)}の非公開のカードを確認しています`, { noActor: true });
     showDesktopToast(`相手があなたの${getDesktopZoneLabel(zone)}を確認しています`, 'info', 1800);
   });
 

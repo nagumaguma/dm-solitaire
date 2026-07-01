@@ -332,8 +332,10 @@
     .dg-back-cards {
       display: flex;
       flex-wrap: nowrap;
-      align-items: stretch;
+      align-items: center;
       gap: 4px;
+      height: 100%;
+      align-self: stretch;
     }
 
     .dg-hand-zone {
@@ -6354,20 +6356,21 @@
       width: 68px;
       height: 95px;
     }
-    /* 対戦モード: 盤面いっぱいにカードを大きく */
+    /* 対戦モード: カードを行の高さいっぱいに（行の大きさに追従して視認性UP） */
     .dg-v2:not(.dg-v2-solo) .dg-card-chip.hand,
-    .dg-v2:not(.dg-v2-solo) .dg-card-chip.battle {
-      width: 82px;
-      height: 112px;
-    }
+    .dg-v2:not(.dg-v2-solo) .dg-card-chip.battle,
     .dg-v2:not(.dg-v2-solo) .dg-card-chip.mana,
     .dg-v2:not(.dg-v2-solo) .dg-card-chip.shield {
-      width: 70px;
-      height: 98px;
+      height: calc(100% - 4px);
+      width: auto;
+      aspect-ratio: 0.72;
+      flex-shrink: 0;
     }
     .dg-v2:not(.dg-v2-solo) .dg-back-card {
-      height: 98px;
+      height: calc(100% - 4px);
+      width: auto;
       aspect-ratio: 0.72;
+      flex-shrink: 0;
     }
 
     .dg-v2-row.opp-mana .dg-v2-cards,
@@ -6530,6 +6533,8 @@
       padding-right: 2px;
       scrollbar-width: thin;
     }
+    /* ログは下端に寄せ、新しいものが一番下・古いものが上へ流れる（あふれたらスクロール可） */
+    .dg-side-log-list > :first-child { margin-top: auto; }
     .dg-side-log-entry {
       font-size: 0.72rem;
       line-height: 1.35;
