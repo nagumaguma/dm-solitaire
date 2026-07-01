@@ -1493,18 +1493,30 @@
       flex-direction: column;
       flex: 1;
       min-height: 0;
+      overflow-y: auto;
     }
 
     .dl-card-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+      grid-template-columns: repeat(8, 1fr);
       align-content: start;
-      gap: 10px;
-      min-height: 320px;
-      flex: 1;
-      overflow-y: auto;
+      gap: 8px;
+      flex: none;
       padding-right: 4px;
     }
+    /* 超次元(最大8=1行) / GR(最大12) 用の小さめグリッド */
+    .dl-card-grid-ex {
+      grid-template-columns: repeat(8, 1fr);
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    .dl-grid-section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .dl-zone-head { margin-top: 12px; }
 
     .dl-grid-card {
       position: relative;
@@ -1521,6 +1533,16 @@
       transform: translateY(-1px);
       box-shadow: 0 4px 10px rgba(60,40,20,0.16);
     }
+    .dl-grid-draggable { cursor: grab; }
+    .dl-grid-draggable:active { cursor: grabbing; }
+    .dl-grid-clickarea { display: block; }
+    .dl-grid-remove {
+      position: absolute; top: 2px; right: 2px; width: 20px; height: 20px;
+      border: none; border-radius: 50%; background: rgba(150, 60, 40, 0.85); color: #fff;
+      font-size: 0.8rem; font-weight: 700; line-height: 1; cursor: pointer; padding: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .dl-grid-remove:hover { background: rgba(170, 55, 35, 0.95); }
 
     .dl-grid-thumb {
       width: 100%;
@@ -5240,6 +5262,12 @@
       font-weight: 700;
       cursor: pointer;
     }
+    .dm-card-detail-add.ex {
+      padding: 9px 12px;
+      background: #7a5cb0;
+      font-size: 0.82rem;
+    }
+    .dm-card-detail-add.ex:hover { background: #684e9a; }
 
     .dm-art-picker-modal {
       position: fixed;

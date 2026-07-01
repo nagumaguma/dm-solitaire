@@ -55,11 +55,18 @@ class GameEngine {
 
     this._instanceCounter = 0;
 
-    const expanded = this._expandFrom(deckData).map(card => ({
+    // デッキデータは zone(main/hyper/gr) で振り分ける（zone未指定は main = 通常デッキ）。
+    const mainData = deckData.filter(c => !c || !c.zone || c.zone === 'main');
+    const hyperData = deckData.filter(c => c && c.zone === 'hyper');
+    const grData = deckData.filter(c => c && c.zone === 'gr');
+
+    const expanded = this._expandFrom(mainData).map(card => ({
       ...card,
       tapped: false
     }));
     const shuffled = this._shuffle(expanded);
+    const hyperCards = this._expandFrom(hyperData).map(card => ({ ...card, tapped: false }));
+    const grCards = this._shuffle(this._expandFrom(grData).map(card => ({ ...card, tapped: false })));
 
     this.state = {
       hand: [],
@@ -69,8 +76,8 @@ class GameEngine {
       shields: [],
       deckRevealZone: [],
       revealedZone: [],
-      hyperZone: [],
-      grZone: [],
+      hyperZone: hyperCards,
+      grZone: grCards,
       specialZone: [],
       graveyard: [],
       turn: 1

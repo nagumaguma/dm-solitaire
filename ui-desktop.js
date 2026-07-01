@@ -384,6 +384,60 @@ function getDeckCardTotal(cards) {
     : 0;
 }
 
+// ── デッキの zone(main=通常/hyper=超次元/gr=GR) 管理 ─────────────────────
+const DESKTOP_DECK_ZONE_LIMIT = { hyper: 8, gr: 12 };
+const DESKTOP_DECK_ZONE_LABEL = { main: '通常デッキ', hyper: '超次元', gr: 'GR' };
+function getDesktopCardZone(card) {
+  return (card?.zone === 'hyper' || card?.zone === 'gr') ? card.zone : 'main';
+}
+function getDesktopDeckZoneTotal(cards, zone) {
+  return (Array.isArray(cards) ? cards : [])
+    .filter((c) => getDesktopCardZone(c) === zone)
+    .reduce((s, c) => s + (Number(c.count) || 1), 0);
+}
+
+// ── デッキのドラッグ並び替え（main ゾーン内） ─────────────────────────────
+let _desktopDeckDragIdx = null;
+function onDesktopDeckDragStart(event, idx) {
+  _desktopDeckDragIdx = Number(idx);
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move';
+    try { event.dataTransfer.setData('text/plain', String(idx)); } catch (e) {}
+  }
+}
+function onDesktopDeckDragOver(event) {
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+}
+function onDesktopDeckDrop(event, targetIdx) {
+  event.preventDefault();
+  const from = _desktopDeckDragIdx;
+  _desktopDeckDragIdx = null;
+  if (from === null || from === undefined) return;
+  reorderDesktopDeckCard(from, Number(targetIdx));
+}
+function onDesktopDeckDragEnd() { _desktopDeckDragIdx = null; }
+function reorderDesktopDeckCard(fromIdx, toIdx) {
+  const arr = Array.isArray(window._deckCards) ? window._deckCards.slice() : [];
+  if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0 || fromIdx >= arr.length || toIdx >= arr.length) return;
+  const [moved] = arr.splice(fromIdx, 1);
+  const insertAt = fromIdx < toIdx ? toIdx - 1 : toIdx;
+  arr.splice(insertAt, 0, moved);
+  window._deckCards = arr;
+  if (window.GameController) window.GameController.setDeckEditingState(window._deckEditing, arr);
+  renderDesktopDeckList();
+}
+// 通常デッキ(main)だけコスト順に整列（超次元/GRの順序は保持）
+function sortDesktopMainDeck() {
+  const arr = Array.isArray(window._deckCards) ? window._deckCards : [];
+  const mains = sortDesktopDeckCards(arr.filter((c) => getDesktopCardZone(c) === 'main'));
+  const others = arr.filter((c) => getDesktopCardZone(c) !== 'main');
+  const next = [...mains, ...others];
+  window._deckCards = next;
+  if (window.GameController) window.GameController.setDeckEditingState(window._deckEditing, next);
+  renderDesktopDeckList();
+}
+
 function getDesktopCardDisplayName(card) {
   const name = String(card?.name || card?.nameEn || card?.cardName || '').trim();
   if (name) return name;
@@ -716,7 +770,9 @@ function renderDesktopCardDetailContent(card, opts = {}) {
       ? `<div class="dm-card-detail-actions">
           <input id="desktop-card-detail-count" type="number" min="1" max="4" value="1" class="dm-card-detail-count" />
           <span class="dm-card-detail-count-label">枚</span>
-          <button type="button" class="dm-card-detail-add" onclick="addDesktopCardFromDetail()">＋ デッキに追加</button>
+          <button type="button" class="dm-card-detail-add" onclick="addDesktopCardFromDetail('main')">＋ デッキ</button>
+          <button type="button" class="dm-card-detail-add ex" onclick="addDesktopCardFromDetail('hyper')">＋ 超次元</button>
+          <button type="button" class="dm-card-detail-add ex" onclick="addDesktopCardFromDetail('gr')">＋ GR</button>
         </div>`
       : ''}
   `;
@@ -857,15 +913,14 @@ function openDesktopDeckCardDetail(cardJson) {
       const merged = mergeDesktopCardIllustration(current, nextCard);
       merged.count = Number(current?.count) || 1;
       cards[idx] = merged;
-      window._deckCards = cards;
+      window._deckCards = cards.slice();
 
-      sortCurrentDesktopDeckCards();
       renderDesktopDeckList();
     }
   });
 }
 
-async function addDesktopCardFromDetail() {
+async function addDesktopCardFromDetail(zone = 'main') {
   if (!_desktopDetailCardState) return;
 
   const input = document.getElementById('desktop-card-detail-count');
@@ -873,7 +928,7 @@ async function addDesktopCardFromDetail() {
   const count = Math.max(1, Math.min(4, Number.isFinite(requested) ? Math.floor(requested) : 1));
   if (input) input.value = String(count);
 
-  const ok = await addToDesktopDeck(JSON.stringify(_desktopDetailCardState), count);
+  const ok = await addToDesktopDeck(JSON.stringify(_desktopDetailCardState), count, zone);
   if (ok) {
     closeDesktopCardDetailModal();
   }
@@ -1436,7 +1491,8 @@ function renderDesktopDeckList() {
     }
   }
 
-  const orderedCards = sortDesktopDeckCards(cards);
+  // 手動並び替え（ドラッグ）を保持するため自動整列はしない
+  const orderedCards = Array.isArray(cards) ? cards : [];
   if (deckName) {
     window._deckCards = orderedCards;
   }
@@ -1446,10 +1502,20 @@ function renderDesktopDeckList() {
   const canSaveSelectedDeck = hasDeckSelected && canCloudSave;
   const canBulkCloudRestore = canCloudSave && hasLocalMigrationDecks;
 
-  const cardCount = getDeckCardTotal(orderedCards);
+  // zone(main/hyper/gr)ごとにエントリを分ける（元の _deckCards index を保持）
+  const zoneEntries = (z) => orderedCards
+    .map((c, i) => ({ card: c, idx: i }))
+    .filter((e) => getDesktopCardZone(e.card) === z);
+  const mainEntries = zoneEntries('main');
+  const hyperEntries = zoneEntries('hyper');
+  const grEntries = zoneEntries('gr');
+  const zoneTotal = (entries) => entries.reduce((s, e) => s + (Number(e.card.count) || 1), 0);
+  const cardCount = zoneTotal(mainEntries);
+  const hyperCount = zoneTotal(hyperEntries);
+  const grCount = zoneTotal(grEntries);
 
-  const nameListHtml = orderedCards.length
-    ? orderedCards.map((c, i) => {
+  const nameListHtml = mainEntries.length
+    ? mainEntries.map(({ card: c, idx: i }) => {
       const payload = escapeAttrJs(encodeURIComponent(JSON.stringify(c)));
       return `
       <div class="dl-edit-card dl-name-row">
@@ -1468,30 +1534,42 @@ function renderDesktopDeckList() {
     }).join('')
     : '<div class="dl-empty-editor">カードがありません。左から検索して追加できます。</div>';
 
-  const expandedCards = [];
-  orderedCards.forEach((card) => {
-    const copies = Math.max(1, Number(card?.count) || 1);
-    for (let i = 0; i < copies; i++) {
-      expandedCards.push({ card, copyIndex: i + 1, copies });
+  // ゾーンのカード画像グリッド。main はドラッグで並び替え可、超次元/GRは×で1枚減らす。
+  const renderZoneGrid = (entries, zone) => {
+    if (!entries.length) {
+      return `<div class="dl-empty-editor">${zone === 'main' ? '選択中デッキのカード画像がここに並びます。' : '未設定（右の検索から追加）'}</div>`;
     }
-  });
-
-  const gridHtml = expandedCards.length
-    ? expandedCards.map(({ card, copyIndex, copies }) => {
+    const tiles = [];
+    entries.forEach(({ card, idx }) => {
+      const copies = Math.max(1, Number(card?.count) || 1);
       const cost = getDesktopCardCostLabel(card);
       const thumb = renderDesktopCardThumb(card, 'dl-grid-thumb');
       const payload = escapeAttrJs(encodeURIComponent(JSON.stringify(card)));
-      return `
-        <div class="dl-grid-card" title="${escapeHtml(getDesktopCardDisplayName(card))}" onclick="openDesktopDeckCardDetail('${payload}')">
-          ${thumb}
-          <div class="dl-grid-meta">
-            <span class="dl-grid-cost">${escapeHtml(String(cost))}</span>
-            ${copies > 1 ? `<span class="dl-grid-copy">${copyIndex}/${copies}</span>` : ''}
+      for (let ci = 0; ci < copies; ci++) {
+        const dragAttr = zone === 'main'
+          ? `draggable="true" ondragstart="onDesktopDeckDragStart(event, ${idx})" ondragover="onDesktopDeckDragOver(event)" ondrop="onDesktopDeckDrop(event, ${idx})" ondragend="onDesktopDeckDragEnd(event)"`
+          : '';
+        const removeBtn = zone === 'main'
+          ? ''
+          : `<button type="button" class="dl-grid-remove" title="1枚減らす" data-dg-action="dec-card" data-idx="${idx}">×</button>`;
+        tiles.push(`
+        <div class="dl-grid-card${zone === 'main' ? ' dl-grid-draggable' : ''}" title="${escapeHtml(getDesktopCardDisplayName(card))}" ${dragAttr}>
+          <div class="dl-grid-clickarea" onclick="openDesktopDeckCardDetail('${payload}')">
+            ${thumb}
+            <div class="dl-grid-meta">
+              <span class="dl-grid-cost">${escapeHtml(String(cost))}</span>
+              ${copies > 1 ? `<span class="dl-grid-copy">${ci + 1}/${copies}</span>` : ''}
+            </div>
           </div>
-        </div>
-      `;
-    }).join('')
-    : '<div class="dl-empty-editor">選択中デッキのカード画像がここに並びます。</div>';
+          ${removeBtn}
+        </div>`);
+      }
+    });
+    return tiles.join('');
+  };
+  const gridHtml = renderZoneGrid(mainEntries, 'main');
+  const hyperGridHtml = renderZoneGrid(hyperEntries, 'hyper');
+  const grGridHtml = renderZoneGrid(grEntries, 'gr');
 
   const deckOptionsHtml = visibleDeckNames.length
     ? visibleDeckNames.map((name) => `
@@ -1552,14 +1630,27 @@ function renderDesktopDeckList() {
           <div class="dl-edit-summary">
             <div class="dl-edit-title">${escapeHtml(deckName)}</div>
             <div class="dl-edit-stats">
-              <div>カード枚数: <strong>${cardCount}</strong> / 40</div>
+              <div>デッキ: <strong>${cardCount}</strong> / 40　超次元: <strong>${hyperCount}</strong> / 8　GR: <strong>${grCount}</strong> / 12</div>
             </div>
           </div>
 
           <div class="dl-card-grid-wrap">
-            <h3 class="dl-heading">カード画像プレビュー</h3>
+            <div class="dl-grid-section-head">
+              <h3 class="dl-heading">デッキ（ドラッグで並び替え）</h3>
+              <button type="button" class="dl-mini-btn dl-mini-btn-ghost" onclick="sortDesktopMainDeck()">コスト順に整列</button>
+            </div>
             <div id="desktop-card-grid" class="dl-card-grid">
               ${gridHtml}
+            </div>
+
+            <h3 class="dl-heading dl-zone-head">超次元ゾーン（最大8）</h3>
+            <div class="dl-card-grid dl-card-grid-ex">
+              ${hyperGridHtml}
+            </div>
+
+            <h3 class="dl-heading dl-zone-head">GRゾーン（最大12）</h3>
+            <div class="dl-card-grid dl-card-grid-ex">
+              ${grGridHtml}
             </div>
           </div>
         ` : `
@@ -4416,7 +4507,8 @@ async function openDesktopDeck(name) {
       return;
     }
 
-    const sortedCards = sortDesktopDeckCards(remoteDeck.map(card => NetworkService.normalizeCardData(card)));
+    // 保存された並び順を保持（自動整列しない＝ドラッグ並び替えを尊重）
+    const sortedCards = remoteDeck.map(card => NetworkService.normalizeCardData(card));
     if (window.GameController) {
       window.GameController.setDeckEditingState(deckName, sortedCards);
     } else {
@@ -4431,7 +4523,7 @@ async function openDesktopDeck(name) {
     if (hydrateToken !== _desktopDeckHydrateToken) return;
     if (window._deckEditing !== deckName) return;
 
-    const hydratedSorted = sortDesktopDeckCards(hydratedCards);
+    const hydratedSorted = hydratedCards;
     if (window.GameController) {
       window.GameController.setDeckEditingState(deckName, hydratedSorted);
     } else {
@@ -4460,7 +4552,6 @@ function incrementDesktopCardCount(idx) {
     card.count = (card.count || 1) + 1;
     if (card.count > 4) card.count = 4;
   }
-  sortCurrentDesktopDeckCards();
   renderDesktopDeckList();
 }
 
@@ -4484,7 +4575,6 @@ function decrementDesktopCardCount(idx) {
       window._deckCards.splice(idx, 1);
     }
   }
-  sortCurrentDesktopDeckCards();
   renderDesktopDeckList();
 }
 
@@ -4502,19 +4592,19 @@ function removeDesktopCard(idx) {
   } else {
     window._deckCards.splice(idx, 1);
   }
-  sortCurrentDesktopDeckCards();
   renderDesktopDeckList();
 }
 
 /**
  * デッキに カード追加
  */
-async function addToDesktopDeck(cardJson, addCount = 1) {
+async function addToDesktopDeck(cardJson, addCount = 1, zone = 'main') {
   try {
     if (!window._deckEditing) {
       showDesktopToast('先に編集するデッキを選択してください', 'warn');
       return false;
     }
+    const targetZone = (zone === 'hyper' || zone === 'gr') ? zone : 'main';
 
     const rawCard = typeof cardJson === 'string' ? JSON.parse(cardJson) : cardJson;
     const hasUserSelectedImage = !!String(rawCard?.selectedImageUrl || rawCard?.selectedArtId || '').trim();
@@ -4527,39 +4617,45 @@ async function addToDesktopDeck(cardJson, addCount = 1) {
       suppressImage: suppressUnsafeSearchImage
     });
     const normalized = NetworkService.normalizeCardData(card);
+    if (targetZone !== 'main') normalized.zone = targetZone; else delete normalized.zone;
     const normalizedKey = String(normalized.cardId || normalized.id || '');
-    const count = Math.max(1, Math.min(4, Number.isFinite(Number(addCount)) ? Math.floor(Number(addCount)) : 1));
+    let count = Math.max(1, Math.min(4, Number.isFinite(Number(addCount)) ? Math.floor(Number(addCount)) : 1));
+
+    // 超次元/GR の総数上限（超次元8 / GR12）。専用カードの区別はしない＝どんなカードも入れられる。
+    if (targetZone !== 'main') {
+      const limit = DESKTOP_DECK_ZONE_LIMIT[targetZone];
+      const room = limit - getDesktopDeckZoneTotal(window._deckCards, targetZone);
+      if (room <= 0) {
+        showDesktopToast(`${DESKTOP_DECK_ZONE_LABEL[targetZone]}は最大${limit}枚です`, 'warn');
+        return false;
+      }
+      if (count > room) count = room;
+    }
 
     if (!normalizedKey) {
       // cardId が解決できない場合は重複判定をスキップして末尾追加
       window._deckCards.push({ ...normalized, count });
-      sortCurrentDesktopDeckCards();
-      renderDesktopDeckList();
-      return true;
-    }
-
-    const existing = window._deckCards.find(c => String(c.cardId || c.id || '') === normalizedKey);
-    if (existing) {
-      existing.count = (existing.count || 1) + count;
-      if (existing.count > 4) existing.count = 4;
-
-      if (!existing.cardId && normalized.cardId) {
-        existing.cardId = normalized.cardId;
-      }
-      if (!existing.sourceId && normalized.sourceId) {
-        existing.sourceId = normalized.sourceId;
-      }
-
-      if (!existing.imageUrl && normalized.imageUrl) {
-        existing.imageUrl = normalized.imageUrl;
-        existing.thumb = normalized.imageUrl;
-        existing.img = normalized.imageUrl;
-      }
     } else {
-      window._deckCards.push({ ...normalized, count });
+      const existing = window._deckCards.find(c =>
+        String(c.cardId || c.id || '') === normalizedKey && getDesktopCardZone(c) === targetZone);
+      if (existing) {
+        existing.count = (existing.count || 1) + count;
+        if (existing.count > 4) existing.count = 4;
+        if (!existing.cardId && normalized.cardId) existing.cardId = normalized.cardId;
+        if (!existing.sourceId && normalized.sourceId) existing.sourceId = normalized.sourceId;
+        if (!existing.imageUrl && normalized.imageUrl) {
+          existing.imageUrl = normalized.imageUrl;
+          existing.thumb = normalized.imageUrl;
+          existing.img = normalized.imageUrl;
+        }
+      } else {
+        window._deckCards.push({ ...normalized, count });
+      }
     }
 
-    sortCurrentDesktopDeckCards();
+    // 配列を再代入して AppState の setter を発火＋永続化（並び順は保持、整列しない）
+    window._deckCards = window._deckCards.slice();
+    if (window.GameController) window.GameController.setDeckEditingState(window._deckEditing, window._deckCards);
     renderDesktopDeckList();
     return true;
   } catch (e) {
@@ -4658,15 +4754,14 @@ async function saveDesktopDeckToCloud() {
     return;
   }
 
-  const total = window.GameController
-    ? window.GameController.countDeckCards(window._deckCards)
-    : getDeckCardTotal(window._deckCards);
-  if (total === 0) {
+  const mainTotal = getDesktopDeckZoneTotal(window._deckCards, 'main');
+  const allTotal = getDeckCardTotal(window._deckCards);
+  if (allTotal === 0) {
     showDesktopToast('カードが入っていません', 'warn');
     return;
   }
-  if (total > 40) {
-    const ok = await askDesktopConfirm(`デッキが${total}枚です（推奨40枚）。このまま保存しますか？`, '保存する', '戻る');
+  if (mainTotal > 40) {
+    const ok = await askDesktopConfirm(`通常デッキが${mainTotal}枚です（推奨40枚）。このまま保存しますか？`, '保存する', '戻る');
     if (!ok) return;
   }
 
