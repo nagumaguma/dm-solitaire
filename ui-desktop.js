@@ -2176,7 +2176,7 @@ function renderDesktopGame() {
           <div class="dg-side-log">
             <div class="dg-chat-title">ログ</div>
             <div class="dg-side-log-list" id="desktop-game-log">
-              ${_desktopGameLog.length ? _desktopGameLog.slice().reverse().map(e => `<div class="dg-side-log-entry">${escapeHtml(e)}</div>`).join('') : '<div class="dg-side-log-empty">—</div>'}
+              ${_desktopGameLog.length ? _desktopGameLog.map(e => `<div class="dg-side-log-entry">${escapeHtml(e)}</div>`).join('') : '<div class="dg-side-log-empty">—</div>'}
             </div>
           </div>
           ${ol && !vs ? `
@@ -2195,6 +2195,9 @@ function renderDesktopGame() {
   renderDesktopDeckRevealModal();
   renderDesktopDeckAllModal();
   if (_desktopBreakOpen) renderDesktopBreakModal();
+  // ログは新しいものが下。常に最下部（最新）を表示
+  const _logEl = document.getElementById('desktop-game-log');
+  if (_logEl) _logEl.scrollTop = _logEl.scrollHeight;
 }
 
 function closeDesktopHandPicker() {
@@ -2978,7 +2981,7 @@ function moveDesktopCardBetweenZones(fromZone, fromIndex, toZone, position = 'to
   // オンライン限定: 非公開→非公開 の移動は素性を伏せる（例: 山札→手札、手札→シールド、ブレイクしたシールドを戻す）
   const hideMovedName = !!window._ol && !_isOppEng
     && NON_PUBLIC_ZONES.includes(effFromZone) && NON_PUBLIC_ZONES.includes(toZone);
-  const logName = hideMovedName ? '非公開のカード' : movedName;
+  const logName = hideMovedName ? '非公開のカード' : `『${movedName}』`;
   const ok = window.GameController
     ? window.GameController.moveCardBetweenZones(_eng2, fromZone, fromIndex, toZone, options)
     : _eng2.moveCardBetweenZones(fromZone, fromIndex, toZone, options);
@@ -3526,7 +3529,7 @@ function playDesktopCard(idx, zone) {
     ? window.GameController.playCardByHandIndex(engine, idx, zone)
     : engine.playCard(engine.state.hand[idx], zone);
   if (!ok) return;
-  appendDesktopGameLog(`${playedName} を${getDesktopZoneLabel(zone)}へ`);
+  appendDesktopGameLog(`『${playedName}』 を${getDesktopZoneLabel(zone)}へ`);
   if (window._ol) {
     sendDesktopOnlineActionLog(`【操作ログ】${getDesktopZoneLabel('hand')} → ${getDesktopZoneLabel(zone)}`);
     olSendActionDesktop('state');

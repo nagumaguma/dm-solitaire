@@ -6270,9 +6270,10 @@
     .dg-v2-cards {
       flex: 1;
       min-width: 0;
+      align-self: stretch;
       display: flex;
       flex-wrap: nowrap;
-      align-items: stretch;
+      align-items: center;
       gap: 4px;
       overflow-x: auto;
       overflow-y: hidden;
@@ -6291,29 +6292,21 @@
     .dg-v2-row.my-shield { flex: 0.8; }
 
     /* ─── オンライン/VS モード: 行固定高さ ─── */
+    /* 対戦モード: 全ゾーン行を均等に伸ばして盤面を埋める（空の欄もカード高で表示） */
     .dg-v2:not(.dg-v2-solo) .dg-v2-row {
-      flex: 0 0 auto;
+      flex: 1 1 0;
+      min-height: 104px;
       border-radius: 6px;
     }
     .dg-v2:not(.dg-v2-solo) .dg-v2-row.my-battle,
     .dg-v2:not(.dg-v2-solo) .dg-v2-row.opp-battle {
-      flex: 1;
-      min-height: 130px;
-    }
-    .dg-v2:not(.dg-v2-solo) .dg-v2-row.my-hand,
-    .dg-v2:not(.dg-v2-solo) .dg-v2-row.opp-hand {
-      height: 102px;
-    }
-    .dg-v2:not(.dg-v2-solo) .dg-v2-row.my-shield,
-    .dg-v2:not(.dg-v2-solo) .dg-v2-row.opp-shield,
-    .dg-v2:not(.dg-v2-solo) .dg-v2-row.my-mana,
-    .dg-v2:not(.dg-v2-solo) .dg-v2-row.opp-mana {
-      height: 92px;
+      flex: 1.2 1 0;
+      min-height: 116px;
     }
 
     /* 相手ゾーンの back-card に明示的な高さ（aspect-ratio だけでは collapse する） */
     .dg-v2 .dg-back-card {
-      height: 81px;
+      height: 96px;
       flex-shrink: 0;
     }
 
@@ -6361,10 +6354,20 @@
       width: 68px;
       height: 95px;
     }
-    /* 対戦モード: 空き枠を活かしてバトルゾーンのカードを大きく */
+    /* 対戦モード: 盤面いっぱいにカードを大きく */
+    .dg-v2:not(.dg-v2-solo) .dg-card-chip.hand,
     .dg-v2:not(.dg-v2-solo) .dg-card-chip.battle {
       width: 82px;
-      height: 115px;
+      height: 112px;
+    }
+    .dg-v2:not(.dg-v2-solo) .dg-card-chip.mana,
+    .dg-v2:not(.dg-v2-solo) .dg-card-chip.shield {
+      width: 70px;
+      height: 98px;
+    }
+    .dg-v2:not(.dg-v2-solo) .dg-back-card {
+      height: 98px;
+      aspect-ratio: 0.72;
     }
 
     .dg-v2-row.opp-mana .dg-v2-cards,
