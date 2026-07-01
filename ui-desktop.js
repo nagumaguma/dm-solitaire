@@ -2876,18 +2876,18 @@ function moveDesktopCardBetweenZones(fromZone, fromIndex, toZone, position = 'to
 
   const movedCard = _eng2?.state?.[fromZone]?.[Number(fromIndex)];
   const movedName = movedCard?.name || 'カード';
-  // オンライン限定: 非公開ゾーン→非公開ゾーン の移動は素性を伏せる（例: 山札→手札、手札→シールド）。
-  // 判定は表示ラベル(元ゾーン参照)ではなく実際の from/to ゾーンで行う（公開ゾーンからの戻しは名前を出す）。
   const NON_PUBLIC_ZONES = ['hand', 'deck', 'shields', 'grZone'];
-  const hideMovedName = !!window._ol && !_isOppEng
-    && NON_PUBLIC_ZONES.includes(fromZone) && NON_PUBLIC_ZONES.includes(toZone);
-  const logName = hideMovedName ? '非公開のカード' : movedName;
-  // 公開ゾーンに入るカードには「元いたゾーン」を覚えさせ、出る時のログ表示に使う
-  // （例: ブレイクで シールド→公開ゾーン になったカードは、戻す/手札に入れる時に「シールド」と出す）
+  // 公開ゾーンに入るカードには「元いたゾーン」を覚えさせ、出る時のログ表示・素性判定に使う
+  // （ブレイクで シールド→公開ゾーン になったカードは、戻す/手札に入れる時も「シールド＝非公開」扱い）
   if (toZone === 'revealedZone' && movedCard) movedCard._originZone = fromZone;
-  const fromLabel = (fromZone === 'revealedZone' && movedCard?._originZone)
-    ? getDesktopZoneLabel(movedCard._originZone)
-    : getDesktopZoneLabel(fromZone);
+  // 表示・判定上の実質の元ゾーン: 公開ゾーンにいるカードは元いたゾーンで扱う
+  const effFromZone = (fromZone === 'revealedZone' && movedCard?._originZone)
+    ? movedCard._originZone : fromZone;
+  const fromLabel = getDesktopZoneLabel(effFromZone);
+  // オンライン限定: 非公開→非公開 の移動は素性を伏せる（例: 山札→手札、手札→シールド、ブレイクしたシールドを戻す）
+  const hideMovedName = !!window._ol && !_isOppEng
+    && NON_PUBLIC_ZONES.includes(effFromZone) && NON_PUBLIC_ZONES.includes(toZone);
+  const logName = hideMovedName ? '非公開のカード' : movedName;
   const ok = window.GameController
     ? window.GameController.moveCardBetweenZones(_eng2, fromZone, fromIndex, toZone, options)
     : _eng2.moveCardBetweenZones(fromZone, fromIndex, toZone, options);
