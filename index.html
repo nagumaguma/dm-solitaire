@@ -3722,7 +3722,7 @@
       border: 1px solid var(--builder-border);
       background: var(--builder-surface);
       border-radius: 10px;
-      overflow: hidden;
+      overflow-y: auto;
       display: flex;
       flex-direction: column;
       min-height: 0;
@@ -3732,9 +3732,21 @@
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
-      flex: 1;
-      overflow-y: auto;
+      flex: none;
       padding: 10px;
+    }
+    /* 超次元/GR セクション（通常デッキより控えめに） */
+    .ml-deck-grid-ex {
+      flex: none;
+      overflow-y: visible;
+      padding: 4px 10px 10px;
+    }
+    .ml-zone-head {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #6f5439;
+      padding: 8px 10px 2px;
+      border-top: 1px solid rgba(160, 126, 92, 0.22);
     }
 
     .ml-deck-tile {
@@ -7169,7 +7181,9 @@
       padding: 6px 8px;
       z-index: 2500;
     }
-    .mg-log-overlay.open { display: block; }
+    .mg-log-overlay.open { display: flex; flex-direction: column; }
+    /* 新しいものが一番下・古いものが上へ流れる（下端固定） */
+    .mg-log-overlay > :first-child { margin-top: auto; }
     .mg-log-overlay .mg-log-entry {
       font-size: 0.62rem;
       color: #c0b0a0;

@@ -432,7 +432,9 @@ function renderMobileCardDetailContent(card, opts = {}) {
       ? `<div class="dm-card-detail-actions">
           <input id="mobile-card-detail-count" type="number" min="1" max="4" value="1" class="dm-card-detail-count" />
           <span class="dm-card-detail-count-label">枚</span>
-          <button type="button" class="dm-card-detail-add" onclick="addMobileCardFromDetail()">＋ デッキに追加</button>
+          <button type="button" class="dm-card-detail-add" onclick="addMobileCardFromDetail('main')">＋ デッキ</button>
+          <button type="button" class="dm-card-detail-add ex" onclick="addMobileCardFromDetail('hyper')">＋ 超次元</button>
+          <button type="button" class="dm-card-detail-add ex" onclick="addMobileCardFromDetail('gr')">＋ GR</button>
         </div>`
       : ''}
   `;
@@ -581,7 +583,7 @@ function openMobileDeckCardDetail(cardJson) {
   });
 }
 
-async function addMobileCardFromDetail() {
+async function addMobileCardFromDetail(zone = 'main') {
   if (!_mobileDetailCardState) return;
 
   const input = document.getElementById('mobile-card-detail-count');
@@ -589,7 +591,7 @@ async function addMobileCardFromDetail() {
   const count = Math.max(1, Math.min(4, Number.isFinite(requested) ? Math.floor(requested) : 1));
   if (input) input.value = String(count);
 
-  const ok = await addToMobileDeck(JSON.stringify(_mobileDetailCardState), count);
+  const ok = await addToMobileDeck(JSON.stringify(_mobileDetailCardState), count, zone);
   if (ok) {
     closeMobileCardDetailModal();
   }
@@ -793,10 +795,24 @@ function askMobileInput(placeholder = 'デッキ名を入力') {
   });
 }
 
-function appendMobileGameLog(msg) {
-  const turn = engineMobile?.state?.turn ?? '?';
-  _mobileGameLog.push(`T${turn}: ${String(msg || '')}`);
-  if (_mobileGameLog.length > 15) _mobileGameLog.shift();
+// ログ先頭に付ける操作プレイヤー（P1/P2）。一人回しは付けない。
+function _mobileLogPlayer() {
+  if (window._vs?.activePlayer) return window._vs.activePlayer === 'p1' ? 'P1' : 'P2';
+  if (window._ol?.p) return window._ol.p === 'p1' ? 'P1' : 'P2';
+  return '';
+}
+// msg は述語（「〜しました」等）。actor(P1/P2)を主語として「P1が 〜」の形に。
+// opts.noActor=true で主語なし（システム表示・相手主語の文など）。
+function appendMobileGameLog(msg, opts) {
+  const text = String(msg || '').trim();
+  if (!text) return;
+  const who = (opts && opts.noActor) ? '' : _mobileLogPlayer();
+  _mobileGameLog.push(`${who ? who + 'が ' : ''}${text}`);
+  if (_mobileGameLog.length > 60) _mobileGameLog.shift();
+}
+// 非公開ゾーンを見た時「P1が 〇〇の非公開のカードを確認しています」（〇〇=元ゾーン名）
+function logMobilePeek(zoneLabel) {
+  appendMobileGameLog(`${zoneLabel}の非公開のカードを確認しています`);
 }
 
 function askMobileNumber(label = 'N枚', defaultValue = 3, min = 1, max = 40) {
@@ -865,7 +881,10 @@ function askMobileNumber(label = 'N枚', defaultValue = 3, min = 1, max = 40) {
 function toggleMobileGameLog() {
   _mobileLogOpen = !_mobileLogOpen;
   const el = document.getElementById('mgLogOverlay');
-  if (el) el.classList.toggle('open', _mobileLogOpen);
+  if (el) {
+    el.classList.toggle('open', _mobileLogOpen);
+    if (_mobileLogOpen) el.scrollTop = el.scrollHeight; // 最新（下端）を表示
+  }
 }
 
 function showMobileToast(message, type = 'info', timeout = 2200) {
@@ -1300,28 +1319,46 @@ function closeMobileCardZoneMenu() {
 }
 
 function moveMobileCardBetweenZones(fromZone, fromIndex, toZone, position = 'top') {
+  // メニュー状態は close で消えるので先に捕捉（VS相手エンジン操作の対象判定に使う）
+  const _ms = _mobileZoneMenuState;
+  const _eng2 = _ms?.targetEngine || engineMobile;
+  const _isOppEng = _eng2 !== engineMobile;
   closeMobileCardZoneMenu();
 
-  if (window._ol && !canActMobileOnline()) {
+  const options = { position: position === 'bottom' ? 'bottom' : 'top' };
+  const toLabel = toZone === 'deck'
+    ? `${getMobileZoneLabel(toZone)}${options.position === 'bottom' ? '下' : '上'}`
+    : getMobileZoneLabel(toZone);
+
+  // 自分のカードのみターン制限（疑似対戦の相手エンジン操作は常に可）
+  if (window._ol && !_isOppEng && !canActMobileOnline()) {
     showMobileToast('相手のターンです', 'warn');
     return;
   }
 
-  const options = { position: position === 'bottom' ? 'bottom' : 'top' };
+  const movedCard = _eng2?.state?.[fromZone]?.[Number(fromIndex)];
+  const movedName = movedCard?.name || 'カード';
+  const NON_PUBLIC_ZONES = ['hand', 'deck', 'shields', 'grZone'];
+  // 公開ゾーンに入るカードには元ゾーンを記録（ブレイクしたシールド=非公開扱い）
+  if (toZone === 'revealedZone' && movedCard) movedCard._originZone = fromZone;
+  const effFromZone = (fromZone === 'revealedZone' && movedCard?._originZone) ? movedCard._originZone : fromZone;
+  const fromLabel = getMobileZoneLabel(effFromZone);
+  // オンライン限定: 非公開→非公開 の移動は素性を伏せる
+  const hideMovedName = !!window._ol && !_isOppEng
+    && NON_PUBLIC_ZONES.includes(effFromZone) && NON_PUBLIC_ZONES.includes(toZone);
+  const logName = hideMovedName ? '非公開のカード' : `『${movedName}』`;
+
   const ok = window.GameController
-    ? window.GameController.moveCardBetweenZones(_engM(), fromZone, fromIndex, toZone, options)
-    : _engM().moveCardBetweenZones(fromZone, fromIndex, toZone, options);
+    ? window.GameController.moveCardBetweenZones(_eng2, fromZone, fromIndex, toZone, options)
+    : _eng2.moveCardBetweenZones(fromZone, fromIndex, toZone, options);
   if (!ok) {
     showMobileToast('カード移動に失敗しました', 'warn');
     return;
   }
+  if (fromZone === 'revealedZone' && movedCard) delete movedCard._originZone;
 
-  const fromLabel = getMobileZoneLabel(fromZone);
-  const toLabel = toZone === 'deck'
-    ? `${getMobileZoneLabel(toZone)}${options.position === 'bottom' ? '下' : '上'}`
-    : getMobileZoneLabel(toZone);
-  appendMobileGameLog(`${fromLabel} → ${toLabel}`);
-  if (window._ol) {
+  appendMobileGameLog(`${_isOppEng ? '相手の' : ''}${logName}を${fromLabel}→${toLabel}に移動させました`);
+  if (window._ol && !_isOppEng) {
     sendMobileOnlineActionLog(`【操作ログ】${fromLabel} → ${toLabel}`);
     olSendActionMobile('state');
   }
@@ -2030,12 +2067,21 @@ function renderMobileDeckList() {
     window._deckCards = orderedCards;
   }
 
+  // zone(main/超次元/GR)ごとに分割（元 index 保持）
+  const _zoneEntries = (z) => orderedCards.map((c, i) => ({ card: c, idx: i })).filter((e) => getMobileCardZone(e.card) === z);
+  const mainEntries = _zoneEntries('main');
+  const hyperEntries = _zoneEntries('hyper');
+  const grEntries = _zoneEntries('gr');
+  const _zoneTotal = (es) => es.reduce((s, e) => s + (Number(e.card.count) || 1), 0);
+
   const hasDeckSelected = !!deckName;
   const canSaveSelectedDeck = !!(hasDeckSelected && account && !account.isGuest && account.pin);
   const canBulkCloudRestore = !!(account && !account.isGuest && account.pin && hasLocalMigrationDecks);
-  const canPlaySelectedDeck = !!(hasDeckSelected && countMobileDeckCards(orderedCards) > 0);
-  const cardCount = countMobileDeckCards(orderedCards);
-  const uniqueCount = orderedCards.length;
+  const cardCount = _zoneTotal(mainEntries);
+  const hyperCount = _zoneTotal(hyperEntries);
+  const grCount = _zoneTotal(grEntries);
+  const canPlaySelectedDeck = !!(hasDeckSelected && cardCount > 0);
+  const uniqueCount = mainEntries.length;
 
   const deckOptionsHtml = visibleDeckNames.length
     ? visibleDeckNames.map((name) => `
@@ -2043,9 +2089,8 @@ function renderMobileDeckList() {
     `).join('')
     : '<option value="">デッキがありません</option>';
 
-  const deckGridHtml = orderedCards.length
-    ? orderedCards.map((card, i) => {
-
+  const renderMobileDeckTiles = (entries, emptyMsg) => entries.length
+    ? entries.map(({ card, idx: i }) => {
       const thumb = renderMobileCardThumb(card, 'ml-deck-thumb');
       const payload = escapeAttrJsMobile(encodeURIComponent(JSON.stringify(card)));
       return `
@@ -2068,7 +2113,10 @@ function renderMobileDeckList() {
         </div>
       `;
     }).join('')
-    : '<div class="ml-empty-decks">カードがありません。下の検索から追加してください。</div>';
+    : `<div class="ml-empty-decks">${emptyMsg}</div>`;
+  const deckGridHtml = renderMobileDeckTiles(mainEntries, 'カードがありません。下の検索から追加してください。');
+  const hyperGridHtml = renderMobileDeckTiles(hyperEntries, '超次元ゾーンは空です（カード詳細から「＋超次元」で追加）');
+  const grGridHtml = renderMobileDeckTiles(grEntries, 'GRゾーンは空です（カード詳細から「＋GR」で追加）');
 
   container.innerHTML = `
     <div class="ml-root ml-builder-root">
@@ -2099,7 +2147,7 @@ function renderMobileDeckList() {
         <div class="ml-builder-summary">
           <div class="ml-summary-row">
             <div class="ml-summary-name">${hasDeckSelected ? escapeHtmlMobile(deckName) : 'デッキ未選択'}</div>
-            <div class="ml-summary-stats"><strong>${cardCount}</strong> 枚 / ${uniqueCount} 種</div>
+            <div class="ml-summary-stats"><strong>${cardCount}</strong>/40　超次元 <strong>${hyperCount}</strong>/8　GR <strong>${grCount}</strong>/12</div>
           </div>
           ${hasDeckSelected ? `<div class="ml-summary-progress"><div class="ml-summary-progress-fill" style="width:${Math.min(100, Math.round((cardCount / 40) * 100))}%"></div></div>` : ''}
         </div>
@@ -2107,6 +2155,12 @@ function renderMobileDeckList() {
           <div class="ml-deck-grid">
             ${hasDeckSelected ? deckGridHtml : '<div class="ml-empty-decks">上でデッキを選択してください。</div>'}
           </div>
+          ${hasDeckSelected ? `
+          <div class="ml-zone-head">超次元ゾーン（最大8）</div>
+          <div class="ml-deck-grid ml-deck-grid-ex">${hyperGridHtml}</div>
+          <div class="ml-zone-head">GRゾーン（最大12）</div>
+          <div class="ml-deck-grid ml-deck-grid-ex">${grGridHtml}</div>
+          ` : ''}
         </div>
       </div>
 
@@ -2855,8 +2909,8 @@ function renderMobileGame() {
         ${ribbonExtra}
       </div>
 
-      <div class="mg-log-overlay" id="mgLogOverlay">
-        ${_mobileGameLog.slice().reverse().map(e => `<div class="mg-log-entry">${escapeHtmlMobile(e)}</div>`).join('')}
+      <div class="mg-log-overlay ${_mobileLogOpen ? 'open' : ''}" id="mgLogOverlay">
+        ${_mobileGameLog.length ? _mobileGameLog.map(e => `<div class="mg-log-entry">${escapeHtmlMobile(e)}</div>`).join('') : '<div class="mg-log-entry">—</div>'}
       </div>
 
       <div class="mg-zone-menu-modal ${zoneMenuOpen ? 'open' : ''}" id="mgZoneMenuModal">
@@ -2892,6 +2946,11 @@ function renderMobileGame() {
   }
   renderMobileDeckRevealModal();
   renderMobileDeckAllModal();
+  // ログは新しいものが下。開いていれば最下部（最新）を表示
+  if (_mobileLogOpen) {
+    const _lg = document.getElementById('mgLogOverlay');
+    if (_lg) _lg.scrollTop = _lg.scrollHeight;
+  }
 }
 
 function playMobileCard(idx) {
@@ -3332,7 +3391,8 @@ async function drawMobileDeckCardsToPublic() {
     selected: {}
   };
 
-  appendMobileGameLog(`山札から${moved.length}枚表向き公開`);
+  appendMobileGameLog(`山札から${moved.length}枚を表向きで公開しました`);
+  logMobilePeek('山札');
   if (window._ol) olSendActionMobile('state');
   renderMobileGame();
   openMobileDeckRevealModal('public');
@@ -3544,6 +3604,7 @@ function openMobileDeckAllModal() {
   modal.classList.add('open');
   renderMobileDeckAllModal();
 
+  logMobilePeek('山札');
   if (window._ol) {
     sendMobileOnlineActionLog(`【操作ログ】山札を全部確認しました（${deck.length}枚）`);
   }
@@ -3698,7 +3759,8 @@ function breakMobileShield() {
   }
 
   _mobileSelectedShieldIdx = null;
-  appendMobileGameLog('シールドブレイク');
+  appendMobileGameLog('シールドをブレイクしました');
+  logMobilePeek('シールド');
   showMobileToast('公開中に移動しました。手札に加えるか、トリガー使用を選んでください', 'info', 2800);
   if (window._ol) olSendActionMobile('state');
   renderMobileGame();
@@ -3715,7 +3777,7 @@ function drawMobileCard() {
     : engineMobile.drawCard();
   if (!ok) return;
   _mobileNeedDrawGuide = false;
-  appendMobileGameLog('ドロー');
+  appendMobileGameLog('カードを引きました');
   if (window._ol) {
     sendMobileOnlineActionLog('【操作ログ】ドローしました');
     olSendActionMobile('state');
@@ -3740,7 +3802,7 @@ function turnMobileEnd() {
   _mobileNeedDrawGuide = !window._ol;
   _mobileSelectedShieldIdx = null;
   _mobileSelectedHandIdx = null;
-  appendMobileGameLog('ターン終了');
+  appendMobileGameLog('— ターン終了 —', { noActor: true });
   if (window._ol) {
     sendMobileOnlineActionLog('【システム】ターンを終了しました');
     olSendActionMobile('turn_end');
@@ -3996,12 +4058,25 @@ function removeMobileCard(idx) {
 /**
  * デッキに カード追加（SP版）
  */
-async function addToMobileDeck(cardJson, addCount = 1) {
+// ── デッキの zone(main=通常/hyper=超次元/gr=GR) 管理（PC版と共通仕様） ──
+const MOBILE_DECK_ZONE_LIMIT = { hyper: 8, gr: 12 };
+const MOBILE_DECK_ZONE_LABEL = { main: '通常デッキ', hyper: '超次元', gr: 'GR' };
+function getMobileCardZone(card) {
+  return (card?.zone === 'hyper' || card?.zone === 'gr') ? card.zone : 'main';
+}
+function getMobileDeckZoneTotal(cards, zone) {
+  return (Array.isArray(cards) ? cards : [])
+    .filter((c) => getMobileCardZone(c) === zone)
+    .reduce((s, c) => s + (Number(c.count) || 1), 0);
+}
+
+async function addToMobileDeck(cardJson, addCount = 1, zone = 'main') {
   try {
     if (!window._deckEditing) {
       showMobileToast('先に編集するデッキを選択してください', 'warn');
       return false;
     }
+    const targetZone = (zone === 'hyper' || zone === 'gr') ? zone : 'main';
 
     const rawCard = typeof cardJson === 'string' ? JSON.parse(cardJson) : cardJson;
     const hasUserSelectedImage = !!String(rawCard?.selectedImageUrl || rawCard?.selectedArtId || '').trim();
@@ -4014,10 +4089,23 @@ async function addToMobileDeck(cardJson, addCount = 1) {
       suppressImage: suppressUnsafeSearchImage
     });
     const normalized = NetworkService.normalizeCardData(card);
+    if (targetZone !== 'main') normalized.zone = targetZone; else delete normalized.zone;
     const normalizedKey = String(normalized.cardId || normalized.id || '');
-    const count = Math.max(1, Math.min(4, Number.isFinite(Number(addCount)) ? Math.floor(Number(addCount)) : 1));
+    let count = Math.max(1, Math.min(4, Number.isFinite(Number(addCount)) ? Math.floor(Number(addCount)) : 1));
 
-    const existing = window._deckCards.find(c => String(c.cardId || c.id || '') === normalizedKey);
+    // 超次元/GR の総数上限（超次元8 / GR12）。専用カードの区別はしない。
+    if (targetZone !== 'main') {
+      const limit = MOBILE_DECK_ZONE_LIMIT[targetZone];
+      const room = limit - getMobileDeckZoneTotal(window._deckCards, targetZone);
+      if (room <= 0) {
+        showMobileToast(`${MOBILE_DECK_ZONE_LABEL[targetZone]}は最大${limit}枚です`, 'warn');
+        return false;
+      }
+      if (count > room) count = room;
+    }
+
+    const existing = window._deckCards.find(c =>
+      String(c.cardId || c.id || '') === normalizedKey && getMobileCardZone(c) === targetZone);
     if (existing) {
       existing.count = (existing.count || 1) + count;
       if (existing.count > 4) existing.count = 4;
@@ -4137,15 +4225,14 @@ async function saveMobileDeckToCloud() {
     return;
   }
 
-  const total = window.GameController
-    ? window.GameController.countDeckCards(window._deckCards)
-    : countMobileDeckCards(window._deckCards);
+  const total = countMobileDeckCards(window._deckCards);
+  const mainTotal = getMobileDeckZoneTotal(window._deckCards, 'main');
   if (total <= 0) {
     showMobileToast('デッキが空です', 'warn');
     return;
   }
-  if (total > 40) {
-    const ok = await askMobileConfirm(`40枚を超えています（現在 ${total} 枚）。保存しますか？`, '保存する', '戻る');
+  if (mainTotal > 40) {
+    const ok = await askMobileConfirm(`通常デッキが40枚を超えています（現在 ${mainTotal} 枚）。保存しますか？`, '保存する', '戻る');
     if (!ok) return;
   }
 
